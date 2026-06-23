@@ -57,12 +57,12 @@ python transcriber.py
 
 **EchoScript** is a terminal tool that turns a YouTube video into **written text**, neatly organized and ready to read or to feed into other tools.
 
-The idea comes from a real need: educational videos (about **RAG**, **fine-tuning**, lectures, talks) are often **1–2 hours** long, and you don't always have the time or focus to watch them all. EchoScript **transcribes** them — using the video's **chapters** as sections — so you can *read* the content in minutes, search it, highlight it, or use it as a knowledge base.
+The idea comes from a real need: educational videos (about **RAG**, **fine-tuning**, lectures, talks) are often **1-2 hours** long, and you don't always have the time or focus to watch them all. EchoScript **transcribes** them using the video's **chapters** as sections, so you can *read* the content in minutes, search it, highlight it, or use it as a knowledge base.
 
 You choose **how** to transcribe:
 
-- ⚡ **Groq (cloud)** — extremely fast even **without a GPU** (transcribes 2 hours in seconds), practically free.
-- 🔒 **Local (faster-whisper on CPU)** — **100% offline and private**: the audio never leaves your PC.
+- ⚡ **Groq (cloud)**: extremely fast even **without a GPU** (transcribes 2 hours in seconds), practically free.
+- 🔒 **Local (faster-whisper on CPU)**: **100% offline and private**, the audio never leaves your PC.
 
 When the transcription is done you can **translate it into Italian** (handy for English videos) and **export to PDF and LaTeX** to read comfortably, split by chapter.
 
@@ -89,7 +89,7 @@ EchoScript was built to **remove all these traps**:
 |---|---|---|
 | **Real cost** | free → then paywall / subscription | **truly free** locally · nearly free with Groq's free tier (your own key) |
 | **Daily limit** | often a few minutes/day | **none** locally |
-| **Max video length** | often 10–30 min | **2h+ videos** with no problem |
+| **Max video length** | often 10-30 min | **2h+ videos** with no problem |
 | **Account required** | yes | **no** (local); for Groq just a free key |
 | **Watermark / reduced quality** | common | **never** |
 | **Privacy** | upload to third-party servers | **local = nothing leaves your PC** |
@@ -147,7 +147,7 @@ If you choose **Local**, a second panel lets you pick the model each time:
 
 - **Python 3.9+**
 - **[ffmpeg](https://ffmpeg.org)** installed on your system (needed by yt-dlp and audio preparation)
-- *(Groq only)* a free **Groq API key** — see below
+- *(Groq only)* a free **Groq API key** (see below)
 - *(local backend only)* `faster-whisper`
 - *(PDF export only)* `fpdf2`
 
@@ -189,7 +189,7 @@ The key is needed **only** if you use the **Groq** (cloud) backend or the Italia
    ```
    Alternatively, set it as an environment variable:
    ```powershell
-   # Windows (PowerShell) — then reopen the terminal
+   # Windows (PowerShell), then reopen the terminal
    setx GROQ_API_KEY "gsk_your-key-here"
    ```
    ```bash
@@ -217,7 +217,7 @@ The key is needed **only** if you use the **Groq** (cloud) backend or the Italia
 
 ### Standard library (no installation)
 
-`os`, `re`, `json`, `sys`, `signal`, `shutil`, `tempfile`, `subprocess`, `datetime` — paths/files, regex, JSON, Ctrl+C handling, ffmpeg/ffprobe calls, dates.
+`os`, `re`, `json`, `sys`, `signal`, `shutil`, `tempfile`, `subprocess`, `datetime`: paths/files, regex, JSON, Ctrl+C handling, ffmpeg/ffprobe calls, dates.
 
 > **LaTeX** (`.tex`) is generated directly, with no dependencies. **Translation** uses Groq's LLM (already included in the `groq` package).
 
@@ -234,14 +234,14 @@ python transcriber.py
 Typical flow:
 
 1. **Pick the backend** (1 = Local · 2 = Groq).
-2. *(if local)* **Pick the model** (1–5).
+2. *(if local)* **Pick the model** (1-5).
 3. **Paste the YouTube URL**.
 4. Check the **video card** and **confirm**.
 5. Wait: you'll see the **Download → Preparation → Transcription** phases with progress bars.
 6. Answer whether you want to **translate into Italian** and whether to **export to PDF/LaTeX**.
 7. Find everything under `results/<video name>/`.
 
-### Example — Groq backend
+### Example: Groq backend
 
 ```
 ─────────────── Come vuoi trascrivere? ───────────────
@@ -255,11 +255,11 @@ Typical flow:
 › Incolla l'URL del video YouTube (q per uscire): https://www.youtube.com/watch?v=...
 ```
 
-### Use case — build a RAG from videos
+### Use case: build a RAG from videos
 
 Transcribe your study videos, then use the **`.json`** files (segments with timestamps) as the source for your RAG pipeline: they're ready for *chunking* and indexing.
 
-### Use case — read an English talk in Italian
+### Use case: read an English talk in Italian
 
 Transcribe an English talk, choose **Italian translation** and **PDF export**: you get a clean PDF in Italian, split by chapter, to read on a tablet or print.
 
@@ -267,12 +267,12 @@ Transcribe an English talk, choose **Italian translation** and **PDF export**: y
 
 ## ⚙️ How it works (the phases)
 
-1. **Info** — a lightweight call (`yt-dlp`) reads ONLY the metadata (title, channel, duration, **chapters**), downloading nothing.
-2. **Audio download** — only the audio track (lightweight) is downloaded, with a progress bar.
-3. **Preparation** *(Groq only)* — the audio is re-encoded to 16 kHz mono and **split into ~10 min chunks** (to stay within the API size limit and give a meaningful bar).
-4. **Transcription** — each chunk (Groq) or the whole file (local) is transcribed into **segments with timestamps**; each chunk's timings are corrected relative to the whole video.
-5. **Assembly** — segments are grouped by **chapter** (if present) and saved in the various formats.
-6. **Translation / Export** — optional, on request.
+1. **Info**: a lightweight call (`yt-dlp`) reads ONLY the metadata (title, channel, duration, **chapters**), downloading nothing.
+2. **Audio download**: only the audio track (lightweight) is downloaded, with a progress bar.
+3. **Preparation** *(Groq only)*: the audio is re-encoded to 16 kHz mono and **split into ~10 min chunks** (to stay within the API size limit and give a meaningful bar).
+4. **Transcription**: each chunk (Groq) or the whole file (local) is transcribed into **segments with timestamps**; each chunk's timings are corrected relative to the whole video.
+5. **Assembly**: segments are grouped by **chapter** (if present) and saved in the various formats.
+6. **Translation / Export**: optional, on request.
 
 ---
 
@@ -287,16 +287,16 @@ results/
     │   ├── <Video Name>.json   (segments with timestamps, for RAG)
     │   ├── <Video Name>.tex    (only if you export)
     │   └── <Video Name>.pdf    (only if you export)
-    └── traduzioni/             (translations — only if you translate)
+    └── traduzioni/             (translations, only if you translate)
         ├── <Video Name>.md     (Italian, no timings)
         ├── <Video Name>.txt
         ├── <Video Name>.tex
         └── <Video Name>.pdf
 ```
 
-- **`.md`** — human-readable: timings appear **only in section headings**, the body is flowing prose.
-- **`.txt`** — clean text with no timestamps: ideal to **paste into another LLM** (ChatGPT/Claude).
-- **`.json`** — metadata + chapters + **all segments with timestamps**: perfect for a **RAG** pipeline.
+- **`.md`**: human-readable: timings appear **only in section headings**, the body is flowing prose.
+- **`.txt`**: clean text with no timestamps: ideal to **paste into another LLM** (ChatGPT/Claude).
+- **`.json`**: metadata + chapters + **all segments with timestamps**: perfect for a **RAG** pipeline.
 
 > Folder names are in Italian (`trascrizioni` = transcriptions, `traduzioni` = translations) to match the app's interface.
 
@@ -318,8 +318,8 @@ When the transcription is done, if you confirm, EchoScript translates the text i
 
 When the transcription is done, if you confirm, EchoScript generates:
 
-- **`.pdf`** — via `fpdf2` (pure-python, **no LaTeX to install**, Arial font for accents), **split by chapter**.
-- **`.tex`** — a **LaTeX** document with one `\section` per chapter, to compile wherever you like (Overleaf, MiKTeX, TeX Live).
+- **`.pdf`**: via `fpdf2` (pure-python, **no LaTeX to install**, Arial font for accents), **split by chapter**.
+- **`.tex`**: a **LaTeX** document with one `\section` per chapter, to compile wherever you like (Overleaf, MiKTeX, TeX Live).
 
 If you also created the translated version, the files in `traduzioni/` are exported too.
 
