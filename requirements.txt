@@ -1,0 +1,19 @@
+# Dipendenze Python di YouTube Transcriber
+# Installa con:  pip install -r requirements.txt
+yt-dlp>=2024.1.0
+groq>=0.11.0
+rich>=13.0.0
+
+# Backend LOCALE (privacy): necessario solo se usi la trascrizione locale.
+# Se usi solo Groq puoi ometterlo.
+faster-whisper>=1.0
+
+# Export PDF (leggero, pure-python, niente LaTeX di sistema). Serve solo se
+# vuoi generare i PDF. La traduzione in italiano usa l'LLM di Groq (gia' incluso
+# col pacchetto 'groq'); il LaTeX (.tex) viene generato senza dipendenze.
+fpdf2>=2.7
+
+# NB: serve anche ffmpeg installato nel sistema (non e' un pacchetto pip).
+#   Windows:  winget install Gyan.FFmpeg
+#   macOS:    brew install ffmpeg
+#   Linux:    sudo apt install ffmpeg

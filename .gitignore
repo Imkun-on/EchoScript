@@ -1,0 +1,18 @@
+# --- Segreti: NON committare mai la API key ---
+.env
+*.key
+
+# --- Output generato ---
+results/
+
+# --- Python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# --- Sistema / IDE ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
