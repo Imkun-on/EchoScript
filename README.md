@@ -55,12 +55,12 @@ python transcriber.py
 
 **EchoScript** è uno strumento da terminale che trasforma un video YouTube in **testo scritto**, ordinato e pronto da leggere o da dare in pasto ad altri strumenti.
 
-L'idea nasce da un bisogno concreto: i video formativi (su **RAG**, **fine-tuning**, lezioni, talk) spesso durano **1–2 ore**, e non sempre si ha il tempo o la concentrazione di seguirli tutti. EchoScript li **trascrive** — con i **capitoli** del video come sezioni — così puoi *leggere* il contenuto in pochi minuti, cercarlo, evidenziarlo, o usarlo come base di conoscenza.
+L'idea nasce da un bisogno concreto: i video formativi (su **RAG**, **fine-tuning**, lezioni, talk) spesso durano **1-2 ore**, e non sempre si ha il tempo o la concentrazione di seguirli tutti. EchoScript li **trascrive** usando i **capitoli** del video come sezioni, così puoi *leggere* il contenuto in pochi minuti, cercarlo, evidenziarlo, o usarlo come base di conoscenza.
 
 Puoi scegliere **come** trascrivere:
 
-- ⚡ **Groq (cloud)** — velocissimo anche **senza GPU** (trascrive 2 ore in pochi secondi), praticamente gratis.
-- 🔒 **Locale (faster-whisper su CPU)** — **100% offline e privato**: l'audio non lascia mai il tuo PC.
+- ⚡ **Groq (cloud)**: velocissimo anche **senza GPU** (trascrive 2 ore in pochi secondi), praticamente gratis.
+- 🔒 **Locale (faster-whisper su CPU)**: **100% offline e privato**, l'audio non lascia mai il tuo PC.
 
 A fine trascrizione puoi **tradurre in italiano** (utile per i video in inglese) ed **esportare in PDF e LaTeX** per leggerli comodamente, divisi per capitoli.
 
@@ -87,7 +87,7 @@ EchoScript nasce per **eliminare tutte queste trappole**:
 |---|---|---|
 | **Costo reale** | gratis → poi paywall / abbonamento | **gratis davvero** in locale · quasi gratis con il free tier Groq (chiave tua) |
 | **Limite giornaliero** | spesso pochi minuti/giorno | **nessuno** in locale |
-| **Durata massima video** | spesso 10–30 min | **video da 2h+** senza problemi |
+| **Durata massima video** | spesso 10-30 min | **video da 2h+** senza problemi |
 | **Account obbligatorio** | sì | **no** (locale); per Groq solo una chiave gratuita |
 | **Watermark / qualità ridotta** | frequenti | **mai** |
 | **Privacy** | upload su server terzi | **locale = niente lascia il tuo PC** |
@@ -145,7 +145,7 @@ Se scegli **Locale**, un secondo pannello ti fa scegliere il modello ogni volta:
 
 - **Python 3.9+**
 - **[ffmpeg](https://ffmpeg.org)** installato nel sistema (serve a yt-dlp e alla preparazione audio)
-- *(solo per Groq)* una **API key Groq** gratuita — vedi sotto
+- *(solo per Groq)* una **API key Groq** gratuita (vedi sotto)
 - *(solo per il backend locale)* `faster-whisper`
 - *(solo per l'export PDF)* `fpdf2`
 
@@ -187,7 +187,7 @@ La chiave serve **solo** se usi il backend **Groq** (cloud) o la **traduzione** 
    ```
    In alternativa, impostala come variabile d'ambiente:
    ```powershell
-   # Windows (PowerShell) — poi riapri il terminale
+   # Windows (PowerShell), poi riapri il terminale
    setx GROQ_API_KEY "gsk_la-tua-chiave-qui"
    ```
    ```bash
@@ -216,7 +216,7 @@ La chiave serve **solo** se usi il backend **Groq** (cloud) o la **traduzione** 
 
 ### Libreria standard (nessuna installazione)
 
-`os`, `re`, `json`, `sys`, `signal`, `shutil`, `tempfile`, `subprocess`, `datetime` — percorsi/file, regex, JSON, gestione Ctrl+C, chiamate a ffmpeg/ffprobe, date.
+`os`, `re`, `json`, `sys`, `signal`, `shutil`, `tempfile`, `subprocess`, `datetime`: percorsi/file, regex, JSON, gestione Ctrl+C, chiamate a ffmpeg/ffprobe, date.
 
 > Il **LaTeX** (`.tex`) viene generato direttamente, senza dipendenze. La **traduzione** usa l'LLM di Groq (già incluso nel pacchetto `groq`).
 
@@ -233,14 +233,14 @@ python transcriber.py
 Flusso tipico:
 
 1. **Scegli il backend** (1 = Locale · 2 = Groq).
-2. *(se locale)* **Scegli il modello** (1–5).
+2. *(se locale)* **Scegli il modello** (1-5).
 3. **Incolla l'URL** del video YouTube.
 4. Controlla la **scheda del video** e **conferma**.
 5. Attendi: vedrai le fasi **Download → Preparazione → Trascrizione** con barre di avanzamento.
 6. Rispondi se vuoi **tradurre in italiano** e se vuoi **esportare in PDF/LaTeX**.
 7. Trovi tutto in `results/<nome video>/`.
 
-### Esempio — backend Groq
+### Esempio: backend Groq
 
 ```
 ─────────────── Come vuoi trascrivere? ───────────────
@@ -269,11 +269,11 @@ Flusso tipico:
 ──── ✎ Fase 3/3 — Trascrizione (Groq) ────
 ```
 
-### Caso d'uso — costruire un RAG dai video
+### Caso d'uso: costruire un RAG dai video
 
 Trascrivi i video di studio, poi usa i file **`.json`** (segmenti con timestamp) come fonte per la tua pipeline RAG: sono già pronti per il *chunking* e l'indicizzazione.
 
-### Caso d'uso — leggere un talk inglese in italiano
+### Caso d'uso: leggere un talk inglese in italiano
 
 Trascrivi un talk in inglese, scegli **traduzione in italiano** ed **export PDF**: ottieni un PDF pulito in italiano, diviso per capitoli, da leggere sul tablet o stampare.
 
@@ -281,12 +281,12 @@ Trascrivi un talk in inglese, scegli **traduzione in italiano** ed **export PDF*
 
 ## ⚙️ Come funziona (le fasi)
 
-1. **Info** — con una chiamata leggera (`yt-dlp`) si leggono SOLO i metadati (titolo, canale, durata, **capitoli**), senza scaricare nulla.
-2. **Download audio** — si scarica la sola traccia audio (leggera) con barra di avanzamento.
-3. **Preparazione** *(solo Groq)* — l'audio viene riconvertito a 16 kHz mono e **spezzato in blocchi da ~10 min** (per stare nei limiti di dimensione dell'API e avere una barra sensata).
-4. **Trascrizione** — ogni blocco (Groq) o l'intero file (locale) viene trascritto in **segmenti con timestamp**; i minutaggi di ogni blocco vengono corretti rispetto all'intero video.
-5. **Assemblaggio** — i segmenti vengono raggruppati per **capitolo** (se presenti) e salvati nei vari formati.
-6. **Traduzione / Export** — opzionali, su richiesta.
+1. **Info**: con una chiamata leggera (`yt-dlp`) si leggono SOLO i metadati (titolo, canale, durata, **capitoli**), senza scaricare nulla.
+2. **Download audio**: si scarica la sola traccia audio (leggera) con barra di avanzamento.
+3. **Preparazione** *(solo Groq)*: l'audio viene riconvertito a 16 kHz mono e **spezzato in blocchi da ~10 min** (per stare nei limiti di dimensione dell'API e avere una barra sensata).
+4. **Trascrizione**: ogni blocco (Groq) o l'intero file (locale) viene trascritto in **segmenti con timestamp**; i minutaggi di ogni blocco vengono corretti rispetto all'intero video.
+5. **Assemblaggio**: i segmenti vengono raggruppati per **capitolo** (se presenti) e salvati nei vari formati.
+6. **Traduzione / Export**: opzionali, su richiesta.
 
 ---
 
@@ -308,9 +308,9 @@ results/
         └── <Nome Video>.pdf
 ```
 
-- **`.md`** — leggibile dall'uomo: i minutaggi compaiono **solo nei titoli di sezione**, il corpo è prosa scorrevole.
-- **`.txt`** — testo pulito senza timestamp: ideale da **incollare in un altro LLM** (ChatGPT/Claude).
-- **`.json`** — metadati + capitoli + **tutti i segmenti con timestamp**: perfetto per una pipeline **RAG**.
+- **`.md`**: leggibile dall'uomo: i minutaggi compaiono **solo nei titoli di sezione**, il corpo è prosa scorrevole.
+- **`.txt`**: testo pulito senza timestamp: ideale da **incollare in un altro LLM** (ChatGPT/Claude).
+- **`.json`**: metadati + capitoli + **tutti i segmenti con timestamp**: perfetto per una pipeline **RAG**.
 
 ---
 
@@ -330,8 +330,8 @@ A fine trascrizione, se confermi, EchoScript traduce il testo in italiano usando
 
 A fine trascrizione, se confermi, EchoScript genera:
 
-- **`.pdf`** — tramite `fpdf2` (pure-python, **niente LaTeX da installare**, font Arial per gli accenti), **diviso per capitoli**.
-- **`.tex`** — documento **LaTeX** con `\section` per capitolo, da compilare dove vuoi (Overleaf, MiKTeX, TeX Live).
+- **`.pdf`**: tramite `fpdf2` (pure-python, **niente LaTeX da installare**, font Arial per gli accenti), **diviso per capitoli**.
+- **`.tex`**: documento **LaTeX** con `\section` per capitolo, da compilare dove vuoi (Overleaf, MiKTeX, TeX Live).
 
 Se hai creato anche la versione tradotta, vengono esportati anche **`.it`** … cioè i file nella cartella `traduzioni/`.
 
