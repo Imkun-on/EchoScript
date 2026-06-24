@@ -136,7 +136,7 @@ Questa sezione è pensata per chi **non è tecnico**: spieghiamo ogni schermata,
 > ▶️ **Come si avvia:** doppio clic sull'eseguibile (se hai la versione pacchettizzata), oppure dalla cartella del progetto esegui `python gui/main.py`.
 
 <p align="center">
-  <img src="Screenshot%202026-06-24%20173759.png" alt="EchoScript - app desktop" width="840">
+  <img src="docs/screenshot.png" alt="EchoScript - app desktop" width="840">
 </p>
 
 ### In alto: lingua e pulsanti finestra

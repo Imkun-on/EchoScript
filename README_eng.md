@@ -138,7 +138,7 @@ This section is written for **non-technical users**: we explain every screen, ev
 > ▶️ **How to start it:** double-click the executable (if you have the packaged version), or from the project folder run `python gui/main.py`.
 
 <p align="center">
-  <img src="Screenshot%202026-06-24%20173759.png" alt="EchoScript - desktop app" width="840">
+  <img src="docs/screenshot.png" alt="EchoScript - desktop app" width="840">
 </p>
 
 ### Top bar: language and window buttons
