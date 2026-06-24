@@ -13,6 +13,10 @@ faster-whisper>=1.0
 # col pacchetto 'groq'); il LaTeX (.tex) viene generato senza dipendenze.
 fpdf2>=2.7
 
+# GUI desktop (Flet): interfaccia grafica nativa moderna. Serve solo per la
+# GUI (gui/main.py); la CLI funziona senza. Avvio: python gui/main.py
+flet>=0.27,<0.29
+
 # NB: serve anche ffmpeg installato nel sistema (non e' un pacchetto pip).
 #   Windows:  winget install Gyan.FFmpeg
 #   macOS:    brew install ffmpeg

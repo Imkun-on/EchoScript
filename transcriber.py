@@ -104,6 +104,15 @@ SYM_OK, SYM_FAIL, SYM_ARROW, SYM_DOT = "✓", "✗", "→", "•"
 GROQ_MODEL = "whisper-large-v3-turbo"   # Whisper model on Groq: "turbo" is very fast and cheap.
                                         # Alternatives: "whisper-large-v3" (more accurate/slower),
                                         # "distil-whisper-large-v3-en" (English only, ultra-fast).
+# Audio/video extensions accepted as LOCAL sources (phone recordings, PC files,
+# video files from which ffmpeg extracts the audio track). ffmpeg reads all of
+# these; anything not listed is still attempted but with a gentle warning.
+AUDIO_EXTENSIONS = {
+    ".mp3", ".m4a", ".m4b", ".wav", ".ogg", ".oga", ".opus", ".aac", ".flac",
+    ".wma", ".aiff", ".aif", ".amr", ".3gp", ".caf",          # audio
+    ".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v",          # video (audio extracted)
+}
+
 CHUNK_SECONDS = 600                     # duration of each audio chunk in seconds (10 minutes)
 AUDIO_SAMPLE_RATE = 16000              # 16 kHz: the sample rate recommended for Whisper
 AUDIO_BITRATE = "64k"                  # audio bitrate of the chunks (low = small files, quality fine for speech)
@@ -111,8 +120,12 @@ MAX_RETRIES = 3                        # attempts per chunk before giving up
 LANGUAGE = None                        # None = automatic language detection. Force with "it" or "en" if you want.
 
 # --- Translation into Italian (via LLM on Groq) ---
-# Chat model used to translate the transcription. "llama-3.3-70b-versatile"
-# offers excellent quality on technical terms (RAG, fine-tuning, embedding...).
+# Chat model used to translate the transcription. "llama-3.3-70b-versatile" gives
+# clearly BETTER quality (technical nuance, fluency) than the small models: it is
+# the default because translation quality matters more than speed here. Trade-off:
+# a lower free-tier daily token limit (~100k/day), so on very long videos you may
+# hit it (the run warns and keeps the transcription). For maximum throughput on
+# long videos you can switch back to "llama-3.1-8b-instant" (~500k/day, lower quality).
 GROQ_TRANSLATE_MODEL = "llama-3.3-70b-versatile"
 # Long texts are translated in pieces of ~at most this number of characters, so
 # as not to exceed the model's output limit (splitting at sentence boundaries).
@@ -247,6 +260,118 @@ def _safe_filename(name: str) -> str:
     return name.strip()[:120] or "trascrizione"
 
 
+# === RATE LIMIT + CHECKPOINT (ripresa dei video lunghi su Groq) =============
+
+class GroqRateLimit(Exception):
+    """Sollevata quando Groq rifiuta per limite (429 / token-al-giorno).
+
+    Permette a chi trascrive a blocchi di FERMARSI e salvare un checkpoint,
+    invece di restituire un risultato incompleto silenziosamente."""
+
+
+class TranscriptionInterrupted(Exception):
+    """Trascrizione fermata a metà (rate limit): trasporta il parziale per il
+    checkpoint. 'done' = numero di blocchi completati su 'total'."""
+
+    def __init__(self, segments: list, done: int, total: int, lang):
+        self.segments = segments
+        self.done = done
+        self.total = total
+        self.lang = lang
+        super().__init__(f"Trascrizione interrotta al blocco {done}/{total}")
+
+
+def _is_rate_limit(msg: str) -> bool:
+    m = (msg or "").lower()
+    return ("429" in m or "rate_limit" in m or "rate limit" in m
+            or "tokens per" in m or "requests per" in m or "too many requests" in m)
+
+
+def _checkpoints_dir() -> str:
+    """Cartella dedicata ai checkpoint dei video parziali."""
+    root = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(root, "results", ".checkpoints")
+
+
+def _checkpoint_key(meta: dict) -> str:
+    """Chiave stabile per identificare il video/file fra una sessione e l'altra."""
+    if meta.get("source") == "local":
+        base = os.path.basename(meta.get("source_path") or meta.get("webpage_url") or meta.get("title") or "local")
+        return "local_" + _safe_filename(base)
+    return "yt_" + _safe_filename(meta.get("id") or meta.get("title") or "video")
+
+
+def checkpoint_path(meta: dict) -> str:
+    return os.path.join(_checkpoints_dir(), _checkpoint_key(meta) + ".json")
+
+
+def load_checkpoint(meta: dict) -> dict | None:
+    """Legge il checkpoint del video, o None se non esiste / è corrotto."""
+    p = checkpoint_path(meta)
+    if not os.path.isfile(p):
+        return None
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if data.get("done_chunks") and data.get("total_chunks"):
+            return data
+    except Exception:
+        return None
+    return None
+
+
+def save_checkpoint(meta: dict, data: dict) -> None:
+    """Salva (atomicamente) il parziale del video, così si può riprendere dopo."""
+    os.makedirs(_checkpoints_dir(), exist_ok=True)
+    p = checkpoint_path(meta)
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    os.replace(tmp, p)
+
+
+def delete_checkpoint(meta: dict) -> None:
+    try:
+        os.remove(checkpoint_path(meta))
+    except OSError:
+        pass
+
+
+def transcription_exists(out_root: str, title: str) -> bool:
+    """True se in out_root/<titolo>/trascrizioni/ ci sono già file trascritti."""
+    d = os.path.join(out_root, _safe_filename(title), "trascrizioni")
+    if not os.path.isdir(d):
+        return False
+    return any(n.lower().endswith((".md", ".txt", ".json", ".pdf")) for n in os.listdir(d))
+
+
+def load_existing_transcript(out_root: str, title: str):
+    """Rilegge una trascrizione salvata (dal .json) e ricostruisce
+    (meta, segments, engine_label), sufficienti a rigenerare SOLO la traduzione
+    senza ri-trascrivere (e senza rispendere crediti). None se assente/vuota."""
+    p = os.path.join(out_root, _safe_filename(title), "trascrizioni",
+                     _safe_filename(title) + ".json")
+    if not os.path.isfile(p):
+        return None
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:
+        return None
+    segments = d.get("segments") or []
+    if not segments:
+        return None
+    meta = {
+        "id": "", "title": d.get("title", title),
+        "channel": d.get("channel"), "views": d.get("views"),
+        "upload_date": d.get("upload_date"), "duration": d.get("duration_seconds"),
+        "chapters": [{"start_time": c.get("start"), "end_time": c.get("end"),
+                      "title": c.get("title")} for c in (d.get("chapters") or [])],
+        "webpage_url": d.get("url", ""), "source": d.get("source", "youtube"),
+    }
+    return meta, segments, d.get("engine", "?")
+
+
 # === TRANSCRIPTION BACKEND SELECTION ===
 
 def _option_card(number: str, icon: str, title: str, rows: list[tuple[str, str]],
@@ -343,6 +468,109 @@ def choose_local_model() -> str | None:
         console.print("[warning]Scelta non valida, riprova.[/warning]")
 
 
+# === SOURCE SELECTION (YouTube URL vs local file/folder) ===
+
+def choose_source() -> str | None:
+    """Ask whether to transcribe a YouTube URL or a LOCAL file/folder.
+
+    Returns "youtube" or "local", or None if the user cancels with 'q'."""
+    yt_card = _option_card(
+        "1", "📺", "YouTube", [
+            ("✓", "incolli l'URL di un video"),
+            ("✓", "scarica audio, info e capitoli"),
+            ("•", "per video pubblici online"),
+        ], accent="bright_cyan")
+    file_card = _option_card(
+        "2", "🎙", "File locale", [
+            ("✓", "audio da telefono/PC (m4a, mp3, wav...)"),
+            ("✓", "anche una cartella intera (batch)"),
+            ("•", "per note vocali e registrazioni"),
+        ], accent="bright_green")
+
+    console.print()
+    console.print(Rule("[bold bright_magenta]Cosa vuoi trascrivere?[/bold bright_magenta]",
+                       style="bright_magenta"))
+    console.print(Columns([yt_card, file_card], padding=(0, 2), align="center", equal=True))
+
+    while True:
+        choice = console.input(
+            "\n[bold bright_magenta]›[/bold bright_magenta] [bold]Scelta[/bold] "
+            "[dim](1 = YouTube · 2 = File locale · q = annulla)[/dim]: ").strip().lower()
+        if choice == "q":
+            return None
+        if choice == "1":
+            return "youtube"
+        if choice == "2":
+            return "local"
+        console.print("[warning]Scelta non valida, riprova.[/warning]")
+
+
+def resolve_local_sources(path: str) -> list[str]:
+    """Turn a user-typed path into the list of audio files to transcribe.
+
+    - a single file  -> [that file]   (warns if its extension is unusual)
+    - a folder        -> every audio/video file inside it, sorted by name
+    Returns [] (after printing a clear message) if nothing usable is found."""
+    # On Windows users often paste paths wrapped in quotes: strip them.
+    path = os.path.expanduser(path.strip().strip('"').strip("'"))
+    if not os.path.exists(path):
+        console.print(f"[error]Percorso non trovato: {path}[/error]")
+        return []
+
+    if os.path.isfile(path):
+        if os.path.splitext(path)[1].lower() not in AUDIO_EXTENSIONS:
+            console.print("[warning]Estensione non riconosciuta: ci provo lo stesso "
+                          "(ffmpeg supporta molti formati).[/warning]")
+        return [path]
+
+    # Directory: collect the audio/video files directly inside it (non-recursive).
+    files = sorted(
+        os.path.join(path, name)
+        for name in os.listdir(path)
+        if os.path.isfile(os.path.join(path, name))
+        and os.path.splitext(name)[1].lower() in AUDIO_EXTENSIONS
+    )
+    if not files:
+        console.print(f"[warning]Nessun file audio nella cartella: {path}[/warning]")
+        return []
+    return files
+
+
+def display_local_sources(metas: list[dict]) -> None:
+    """Show a card (single file) or a table (folder/batch) of the local sources."""
+    if len(metas) == 1:
+        m = metas[0]
+        table = Table(show_header=False, box=None, expand=False, padding=(0, 1))
+        table.add_column("Icona", justify="center", no_wrap=True)
+        table.add_column("Campo", style="dim", justify="left", no_wrap=True)
+        table.add_column("Valore", style="bold bright_white", min_width=40, overflow="fold")
+        table.add_row("🎙 ", "File", os.path.basename(m["source_path"]))
+        table.add_row("⏱ ", "Durata", f"[bright_cyan]{_format_duration(m['duration'])}[/bright_cyan]")
+        table.add_row("📁", "Percorso", f"[dim]{m['source_path']}[/dim]")
+        console.print()
+        console.print(Panel(
+            table, title=f"[title]🎙 {metas[0]['title']}[/title]", title_align="left",
+            border_style="bright_green", box=ROUNDED, expand=False, padding=(1, 2),
+        ))
+        return
+
+    table = Table(show_header=True, box=None, expand=False, padding=(0, 2), header_style="bold dim")
+    table.add_column("#", style="bold bright_white", justify="center")
+    table.add_column("File", style="bold bright_green", overflow="fold")
+    table.add_column("Durata", style="info", justify="right", no_wrap=True)
+    total = 0.0
+    for i, m in enumerate(metas, 1):
+        total += m["duration"] or 0
+        table.add_row(str(i), os.path.basename(m["source_path"]), _format_duration(m["duration"]))
+    console.print()
+    console.print(Panel(
+        table,
+        title=f"[title]🎙 {len(metas)} file da trascrivere[/title]", title_align="left",
+        subtitle=f"[dim]durata totale ~{_format_duration(total)}[/dim]",
+        border_style="bright_green", box=ROUNDED, expand=False, padding=(1, 2),
+    ))
+
+
 # === PROMPT (user input with a consistent style) ===
 
 def _prompt(label: str, hint: str = "", accent: str = "bright_blue") -> str:
@@ -381,6 +609,7 @@ def get_video_info(url: str) -> dict | None:
     if info.get("_type") == "playlist" and info.get("entries"):
         info = info["entries"][0]
 
+    categories = info.get("categories") or []
     return {
         "id": info.get("id", ""),
         "title": info.get("title", "Senza titolo"),
@@ -392,12 +621,62 @@ def get_video_info(url: str) -> dict | None:
         # chapters; otherwise None. It will be the basis of our "sections".
         "chapters": info.get("chapters") or [],
         "webpage_url": info.get("webpage_url", url),
+        "source": "youtube",
+        # Metadati extra mostrati nella card info (mancanti -> None).
+        "likes": info.get("like_count"),
+        "subscribers": info.get("channel_follower_count"),
+        "category": categories[0] if categories else None,
+        # Lingua dichiarata da YouTube (spesso assente). Quella "vera" dall'audio
+        # viene rilevata da Whisper durante la trascrizione (detected_language).
+        "language": info.get("language"),
     }
 
 
+def _is_local(meta: dict) -> bool:
+    """True if the metadata describes a LOCAL file (not a YouTube video)."""
+    return meta.get("source") == "local"
+
+
+def local_file_meta(path: str) -> dict:
+    """Build a synthetic metadata dict for a LOCAL audio/video file.
+
+    A local file has no channel/views/upload date/chapters: we fill those with
+    None/[] so the rest of the pipeline (sections, MD/TXT/JSON/PDF, translation)
+    works unchanged. The title is the file name (without extension) and the
+    duration is probed with ffprobe. 'webpage_url' carries the absolute path so
+    it shows up as the source in the output files."""
+    path = os.path.abspath(path)
+    return {
+        "id": "",
+        "title": os.path.splitext(os.path.basename(path))[0] or "audio",
+        "channel": None,
+        "views": None,
+        "upload_date": None,
+        "duration": _probe_duration(path),
+        "chapters": [],
+        "webpage_url": path,
+        "source": "local",
+        "source_path": path,
+    }
+
+
+def _lang_name(code: str | None) -> str | None:
+    """Nome italiano di una lingua. Accetta sia i codici ISO (faster-whisper:
+    'en') sia i nomi interi di Whisper (Groq: 'english'). None se assente."""
+    if not code:
+        return None
+    c = str(code).split("-")[0].strip().lower()
+    full = {"italian": "it", "english": "en", "spanish": "es",
+            "french": "fr", "german": "de"}
+    c = full.get(c, c)
+    names = {"it": "Italiano", "en": "Inglese", "es": "Spagnolo",
+             "fr": "Francese", "de": "Tedesco"}
+    return names.get(c, str(code).upper())
+
+
 def display_video_info(meta: dict) -> None:
-    """Show the video card in a colored box (title, channel, views, date,
-    duration, number of chapters)."""
+    """Show the video card in a colored box (title, channel, views, likes,
+    subscribers, category, date, duration, number of chapters)."""
     table = Table(show_header=False, box=None, expand=False, padding=(0, 1))
     table.add_column("Icona", justify="center", no_wrap=True)
     table.add_column("Campo", style="dim", justify="left", no_wrap=True)
@@ -405,6 +684,15 @@ def display_video_info(meta: dict) -> None:
 
     table.add_row("📺", "Canale", meta["channel"])
     table.add_row("👁 ", "Visualizzazioni", _format_views(meta["views"]))
+    if meta.get("likes") is not None:
+        table.add_row("👍", "Mi piace", _format_views(meta["likes"]))
+    if meta.get("subscribers") is not None:
+        table.add_row("👥", "Iscritti", _format_views(meta["subscribers"]))
+    if meta.get("category"):
+        table.add_row("🏷 ", "Categoria", meta["category"])
+    lang = _lang_name(meta.get("language"))
+    if lang:
+        table.add_row("🗣 ", "Lingua", lang)
     table.add_row("📅", "Pubblicato", _format_upload_date(meta["upload_date"]))
     table.add_row("⏱ ", "Durata", f"[bright_cyan]{_format_duration(meta['duration'])}[/bright_cyan]")
     n_chapters = len(meta["chapters"])
@@ -563,14 +851,22 @@ def split_audio(audio_path: str, duration: float, workdir: str) -> list[tuple[fl
 
 # === PHASE 3: TRANSCRIPTION WITH GROQ ===
 
-def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "") -> list[dict]:
+def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
+                      return_language: bool = False):
     """Send ONE audio chunk to Groq and return the list of its segments.
 
     Uses response_format='verbose_json' to receive, in addition to the text, the
     start/end timestamps of each sentence ('segments'). 'prompt' contains the
     tail of the previous transcription: giving Whisper a bit of context improves
     continuity (proper names, terminology) from one chunk to the next.
-    Retries up to MAX_RETRIES times in case of a network/API error."""
+    Retries up to MAX_RETRIES times in case of a network/API error.
+
+    If return_language=True, returns (segments, language) where 'language' is the
+    ISO code Whisper auto-detected (e.g. 'en'/'it'), otherwise just the segments
+    (backward-compatible default for the CLI)."""
+    def _ret(segs, lang):
+        return (segs, lang) if return_language else segs
+
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             with open(chunk_path, "rb") as f:
@@ -584,40 +880,52 @@ def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "") -> list[d
                     prompt=prompt[-400:],         # last ~400 characters as context
                     temperature=0.0,             # 0 = more deterministic/faithful output
                 )
+            lang = getattr(result, "language", None)
             # result.segments is a list of objects with .start, .end, .text
             segments = getattr(result, "segments", None)
             if segments is None:
                 # If for some reason there are no segments, we fall back to the whole text.
-                return [{"start": 0.0, "end": 0.0, "text": getattr(result, "text", "").strip()}]
-            return [
+                return _ret([{"start": 0.0, "end": 0.0, "text": getattr(result, "text", "").strip()}], lang)
+            return _ret([
                 {"start": float(s["start"]), "end": float(s["end"]), "text": s["text"].strip()}
                 for s in segments
-            ]
+            ], lang)
+        except GroqRateLimit:
+            raise
         except Exception as e:
             msg = str(e)
+            # Limite Groq (429 / token-al-giorno): inutile insistere, fermiamoci
+            # subito così chi chiama può salvare un checkpoint e riprendere dopo.
+            if _is_rate_limit(msg):
+                raise GroqRateLimit(msg)
             # Authentication/access errors (401/403): there is NO point retrying,
             # they do not resolve on their own. We stop immediately with a clear message.
             if "401" in msg or "403" in msg or "invalid_api_key" in msg:
                 console.print(f"  [error]Accesso a Groq negato (chiave/rete): {e}[/error]")
-                return []
+                return _ret([], None)
             if attempt == MAX_RETRIES:
                 console.print(f"  [error]Blocco fallito dopo {MAX_RETRIES} tentativi: {e}[/error]")
-                return []
+                return _ret([], None)
             # Increasing wait between one attempt and the next (linear backoff).
             import time
             time.sleep(2 * attempt)
-    return []
+    return _ret([], None)
 
 
-def transcribe(client: Groq, chunks: list[tuple[float, str]]) -> list[dict]:
-    """Transcribe all chunks in order, with a progress bar.
+def transcribe(client: Groq, chunks: list[tuple[float, str]],
+               start_index: int = 0, prior_segments: list | None = None,
+               prior_lang=None):
+    """Transcribe chunks in order (con ripresa), with a progress bar.
 
-    For each chunk: transcribe it, then ADD the chunk's offset (start) to each
-    segment's start/end, so the timings become relative to the whole video and
-    not to the individual chunk. Returns the complete list of ordered segments,
-    each {start, end, text}."""
-    all_segments: list[dict] = []
-    context = ""  # tail of the last text, passed as 'prompt' to the next chunk
+    Parte dal blocco 'start_index' riusando 'prior_segments' già trascritti (per
+    riprendere un video interrotto). Per ogni blocco aggiunge l'offset ai
+    timestamp. Restituisce (segments, detected_language). Se Groq rifiuta per
+    limite, solleva TranscriptionInterrupted col parziale, così si può salvare
+    un checkpoint e riprendere più tardi."""
+    all_segments: list[dict] = list(prior_segments or [])
+    detected = prior_lang
+    # Contesto iniziale: la coda di ciò che è già stato trascritto.
+    context = " ".join(s["text"] for s in all_segments[-6:]) if all_segments else ""
 
     progress = Progress(
         SpinnerColumn("dots", style="bright_green"),
@@ -634,15 +942,26 @@ def transcribe(client: Groq, chunks: list[tuple[float, str]]) -> list[dict]:
 
     n = len(chunks)
     with progress:
-        task_id = progress.add_task(f"Invio blocco 1/{n} a Groq", total=n)
-        for i, (offset, path) in enumerate(chunks, 1):
+        task_id = progress.add_task(f"Invio blocco {start_index + 1}/{n} a Groq",
+                                    total=n, completed=start_index)
+        for i in range(start_index, n):
             if _interrupted:
                 break
+            offset, path = chunks[i]
             # We update the description BEFORE the call: the rich spinner keeps
-            # animating while waiting for Groq, so the user sees that the i-th
-            # chunk is in progress and is not waiting for nothing.
-            progress.update(task_id, description=f"Invio blocco {i}/{n} a Groq (attendi)")
-            segments = _transcribe_chunk(client, path, prompt=context)
+            # animating while waiting for Groq, so the user sees the i-th chunk.
+            progress.update(task_id, description=f"Invio blocco {i + 1}/{n} a Groq (attendi)")
+            try:
+                if i == start_index:
+                    segments, lang = _transcribe_chunk(
+                        client, path, prompt=context, return_language=True)
+                    detected = detected or lang
+                else:
+                    segments = _transcribe_chunk(client, path, prompt=context)
+            except GroqRateLimit:
+                # Limite raggiunto: i blocchi 0..i-1 sono fatti. Trasportiamo il
+                # parziale a chi chiama per il checkpoint.
+                raise TranscriptionInterrupted(all_segments, i, n, detected)
             for seg in segments:
                 # Timing correction: + the chunk's offset.
                 seg["start"] += offset
@@ -651,15 +970,17 @@ def transcribe(client: Groq, chunks: list[tuple[float, str]]) -> list[dict]:
             # We update the context with the text of this chunk.
             if segments:
                 context = " ".join(s["text"] for s in segments)
-            progress.update(task_id, advance=1, description=f"Blocco {i}/{n} completato")
+            progress.update(task_id, advance=1, description=f"Blocco {i + 1}/{n} completato")
 
-    return all_segments
+    return all_segments, detected
 
 
 # === LOCAL BACKEND: TRANSCRIPTION WITH faster-whisper ===
 
-def transcribe_local(model_name: str, audio_path: str, duration: float) -> list[dict]:
+def transcribe_local(model_name: str, audio_path: str, duration: float):
     """Transcribe the entire audio LOCALLY with faster-whisper (no data over the network).
+
+    Returns (segments, detected_language).
 
     Unlike Groq, no splitting is needed: faster-whisper processes the whole file
     and returns the segments incrementally (a generator), so we can update the
@@ -677,7 +998,7 @@ def transcribe_local(model_name: str, audio_path: str, duration: float) -> list[
         from faster_whisper import WhisperModel
     except ImportError:
         console.print("[error]faster-whisper non installato. Esegui:  pip install faster-whisper[/error]")
-        return []
+        return [], None
 
     # Loading the model (on first use it downloads the weights).
     with console.status(
@@ -689,17 +1010,18 @@ def transcribe_local(model_name: str, audio_path: str, duration: float) -> list[
             model = WhisperModel(model_name, device="cpu", compute_type=LOCAL_COMPUTE_TYPE)
         except Exception as e:
             console.print(f"[error]Impossibile caricare il modello: {e}[/error]")
-            return []
+            return [], None
 
     # transcribe() returns (segment_generator, info). The segments are produced
     # as the audio is processed. vad_filter skips the silences.
     try:
-        segments_gen, _info = model.transcribe(
+        segments_gen, info = model.transcribe(
             audio_path, language=LANGUAGE, vad_filter=True, beam_size=5,
         )
     except Exception as e:
         console.print(f"[error]Errore durante la trascrizione locale: {e}[/error]")
-        return []
+        return [], None
+    detected = getattr(info, "language", None)
 
     all_segments: list[dict] = []
     progress = Progress(
@@ -729,7 +1051,7 @@ def transcribe_local(model_name: str, audio_path: str, duration: float) -> list[
         if duration:
             progress.update(task_id, completed=duration)  # brings the bar to 100% at the end of the loop
 
-    return all_segments
+    return all_segments, detected
 
 
 # === BUILDING THE FINAL DOCUMENT ===
@@ -756,7 +1078,18 @@ def _build_sections(meta: dict, segments: list[dict]) -> list[dict]:
 
 
 def _md_header(title: str, meta: dict, engine_label: str) -> list[str]:
-    """Markdown header lines (metadata) shared between original and translated."""
+    """Markdown header lines (metadata) shared between original and translated.
+
+    Local files have no channel/views/date, so we show the source path instead."""
+    if _is_local(meta):
+        return [
+            f"# {title}", "",
+            "- **Sorgente:** File audio locale",
+            f"- **File:** {meta['webpage_url']}",
+            f"- **Durata:** {_format_duration(meta['duration'])}",
+            f"- **Trascritto con:** {engine_label}",
+            "", "---", "",
+        ]
     return [
         f"# {title}", "",
         f"- **Canale:** {meta['channel']}",
@@ -793,12 +1126,19 @@ def build_md(title: str, meta: dict, engine_label: str, sections: list[dict],
 
 def build_txt(title: str, meta: dict, sections: list[dict]) -> str:
     """Clean TXT version (for other LLMs): no timings, sections as [Title]."""
-    lines = [
-        title,
-        f"Canale: {meta['channel']} | Pubblicato: {_format_upload_date(meta['upload_date'])} "
-        f"| Durata: {_format_duration(meta['duration'])}",
-        f"URL: {meta['webpage_url']}", "",
-    ]
+    if _is_local(meta):
+        lines = [
+            title,
+            f"Sorgente: file locale | Durata: {_format_duration(meta['duration'])}",
+            f"File: {meta['webpage_url']}", "",
+        ]
+    else:
+        lines = [
+            title,
+            f"Canale: {meta['channel']} | Pubblicato: {_format_upload_date(meta['upload_date'])} "
+            f"| Durata: {_format_duration(meta['duration'])}",
+            f"URL: {meta['webpage_url']}", "",
+        ]
     for sec in sections:
         if sec["title"]:
             lines.append(f"[{sec['title']}]")
@@ -817,6 +1157,7 @@ def build_transcript_json(meta: dict, segments: list[dict], engine_label: str) -
     it readable to the eye as well."""
     data = {
         "title": meta["title"],
+        "source": meta.get("source", "youtube"),
         "channel": meta["channel"],
         "upload_date": _format_upload_date(meta["upload_date"]),
         "views": meta["views"],
@@ -858,12 +1199,32 @@ def _split_for_translation(text: str, max_chars: int) -> list[str]:
     return chunks
 
 
+def _strip_markdown(s: str) -> str:
+    """Rimuove la formattazione Markdown che gli LLM tendono ad aggiungere.
+
+    Serve perché il modello (spec. il 70b) "abbellisce" il testo con grassetto
+    (`**parola**`), corsivo, titoli ed elenchi: nel `.md` diventa grassetto
+    indesiderato, nel PDF/TXT restano asterischi visibili. Qui togliamo gli
+    enfatici **/__/*/_ , i titoli (#) e i marcatori di elenco/citazione."""
+    # Grassetto e corsivo (coppie di marcatori attorno al testo).
+    s = re.sub(r"\*\*(.+?)\*\*", r"\1", s)
+    s = re.sub(r"__(.+?)__", r"\1", s)
+    s = re.sub(r"\*(.+?)\*", r"\1", s)
+    s = re.sub(r"(?<!\w)_(.+?)_(?!\w)", r"\1", s)
+    # Eventuali marcatori spaiati rimasti.
+    s = s.replace("**", "").replace("__", "")
+    # Marcatori a inizio riga: titoli #, citazioni >, elenchi -, *, +.
+    s = re.sub(r"(?m)^\s{0,3}(#{1,6}\s+|>\s+|[-*+]\s+)", "", s)
+    return s.strip()
+
+
 def translate_text_groq(client, text: str) -> str:
     """Translate a text into Italian using an LLM on Groq.
 
     The system prompt asks to keep the technical terms correct and to return
-    ONLY the translation. Long texts are translated in pieces (see
-    _split_for_translation) and then stitched back together."""
+    ONLY the translation, in PLAIN text (no Markdown). Long texts are translated
+    in pieces (see _split_for_translation) and stitched back together. As a
+    safety net we also strip any Markdown the model adds anyway."""
     text = (text or "").strip()
     if not text:
         return ""
@@ -875,14 +1236,16 @@ def translate_text_groq(client, text: str) -> str:
                 {"role": "system", "content": (
                     "Sei un traduttore professionista. Traduci in italiano il testo dell'utente. "
                     "Mantieni corretti i termini tecnici di informatica/AI (es. RAG, fine-tuning, "
-                    "embedding, prompt, token, dataset). Restituisci SOLO la traduzione, senza "
-                    "introduzioni, note o virgolette aggiunte."
+                    "embedding, prompt, token, dataset). Restituisci SOLO la traduzione, in "
+                    "TESTO SEMPLICE: NON usare formattazione Markdown, niente grassetto, corsivo, "
+                    "asterischi, titoli (#) o elenchi puntati. Niente introduzioni, note o "
+                    "virgolette aggiunte; mantieni la punteggiatura del testo originale."
                 )},
                 {"role": "user", "content": piece},
             ],
             temperature=0.2,
         )
-        out_parts.append(resp.choices[0].message.content.strip())
+        out_parts.append(_strip_markdown(resp.choices[0].message.content.strip()))
     return " ".join(out_parts)
 
 
@@ -917,7 +1280,7 @@ def translate_sections(client, sections: list[dict]) -> list[dict]:
     return translated
 
 
-# === EXPORT FOR READING (PDF and LaTeX) ===
+# === EXPORT FOR READING (PDF) ===
 
 def _section_heading(sec: dict, with_timestamps: bool) -> str:
     """Build the visible title of a section (with or without timing)."""
@@ -926,48 +1289,6 @@ def _section_heading(sec: dict, with_timestamps: bool) -> str:
     if with_timestamps and sec["start"] is not None:
         return f"[{_format_timestamp(sec['start'])}] {sec['title']}"
     return sec["title"]
-
-
-def _latex_escape(s: str) -> str:
-    """Escape the LaTeX special characters (#, $, %, &, _, {, }, \\, ~, ^)."""
-    repl = {
-        "\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#",
-        "_": r"\_", "{": r"\{", "}": r"\}", "~": r"\textasciitilde{}", "^": r"\textasciicircum{}",
-    }
-    return "".join(repl.get(ch, ch) for ch in s)
-
-
-def build_latex(title: str, meta: dict, sections: list[dict], with_timestamps: bool = True) -> str:
-    """Generate a LaTeX document (.tex) divided into \\section per chapter.
-
-    It requires no installation to be CREATED; to obtain the PDF you compile it
-    wherever you want (Overleaf, MiKTeX, TeX Live)."""
-    L = [
-        r"\documentclass[11pt,a4paper]{article}",
-        r"\usepackage[utf8]{inputenc}",
-        r"\usepackage[T1]{fontenc}",
-        r"\usepackage[italian]{babel}",
-        r"\usepackage{parskip}",
-        r"\usepackage{hyperref}",
-        rf"\title{{{_latex_escape(title)}}}",
-        r"\date{}",
-        r"\begin{document}",
-        r"\maketitle",
-        r"\begin{itemize}",
-        rf"  \item Canale: {_latex_escape(meta['channel'])}",
-        rf"  \item Pubblicato: {_latex_escape(_format_upload_date(meta['upload_date']))}",
-        rf"  \item Durata: {_latex_escape(_format_duration(meta['duration']))}",
-        rf"  \item URL: \url{{{meta['webpage_url']}}}",
-        r"\end{itemize}",
-        r"",
-    ]
-    for sec in sections:
-        L.append(rf"\section{{{_latex_escape(_section_heading(sec, with_timestamps))}}}")
-        if sec["text"]:
-            L.append(_latex_escape(sec["text"]))
-        L.append("")
-    L.append(r"\end{document}")
-    return "\n".join(L)
 
 
 def build_pdf(title: str, meta: dict, sections: list[dict], out_path: str,
@@ -1001,9 +1322,13 @@ def build_pdf(title: str, meta: dict, sections: list[dict], out_path: str,
     pdf.ln(1)
     # Metadata
     pdf.set_font("Doc", "I", 10)
-    cell(5, f"Canale: {meta['channel']}  |  Pubblicato: {_format_upload_date(meta['upload_date'])}"
-            f"  |  Durata: {_format_duration(meta['duration'])}")
-    cell(5, meta["webpage_url"])
+    if _is_local(meta):
+        cell(5, f"Sorgente: file locale  |  Durata: {_format_duration(meta['duration'])}")
+        cell(5, meta["webpage_url"])
+    else:
+        cell(5, f"Canale: {meta['channel']}  |  Pubblicato: {_format_upload_date(meta['upload_date'])}"
+                f"  |  Durata: {_format_duration(meta['duration'])}")
+        cell(5, meta["webpage_url"])
     pdf.ln(4)
 
     for sec in sections:
@@ -1112,121 +1437,119 @@ def get_groq_client() -> Groq | None:
 
 # === MAIN FLOW ===
 
-def run() -> None:
-    """Orchestration: ask for the URL, show the info, confirm, and then run the
-    download -> splitting -> transcription -> saving phases."""
-    # Prerequisite check: ffmpeg must be in the PATH.
-    if not shutil.which("ffmpeg"):
-        console.print("[error]ffmpeg non trovato nel PATH. Installalo prima di continuare.[/error]")
-        return
+def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
+                  client, local_model: str | None,
+                  resume_cp: dict | None = None) -> list[dict] | None:
+    """Acquire the audio for ONE source and transcribe it.
 
-    # --- Transcription backend selection (local vs Groq) ---
-    backend = choose_backend()
-    if not backend:
-        return
+    'source' is ('youtube', url) or ('local', filepath). For a local file there
+    is no download phase. Con backend Groq supporta la RIPRESA da 'resume_cp'; se
+    il limite Groq viene raggiunto, salva un checkpoint e restituisce None (così
+    il chiamante non salva una trascrizione incompleta). Returns the segments, or
+    None on interruption / failure."""
+    kind, ref = source
 
-    # If local, we choose the model RIGHT AWAY (so that any cancellation happens
-    # before downloading anything).
-    local_model = None
-    if backend == "local":
-        local_model = choose_local_model()
-        if not local_model:
-            return
-
-    # --- We ask for the URL ---
-    url = _prompt("Incolla l'URL del video YouTube", "(q per uscire)", accent="bright_magenta")
-    if not url or url.lower() == "q":
-        return
-
-    # --- PHASE 0: metadata ---
-    with console.status("[info]Leggo le informazioni del video...[/info]", spinner="dots"):
-        meta = get_video_info(url)
-    if not meta:
-        return
-    display_video_info(meta)
-
-    # --- Confirmation ---
-    if not _confirm("Procedo con la trascrizione di questo video?", accent="bright_cyan"):
-        console.print("[warning]Operazione annullata.[/warning]")
-        return
-
-    # We initialize the Groq client only if it is really needed (cloud backend)
-    # and only after the user's confirmation.
-    client = None
+    # Build the phase labels dynamically so "Fase x/y" is always correct.
+    phase_names = []
+    if kind == "youtube":
+        phase_names.append("download")
     if backend == "groq":
-        client = get_groq_client()
-        if not client:
-            return
+        phase_names.append("prepare")
+    phase_names.append("transcribe")
+    n = len(phase_names)
+    step = {name: i + 1 for i, name in enumerate(phase_names)}
 
-    # Engine label, shown in the file header and in the summary.
-    if backend == "local":
-        engine_label = f"Locale / faster-whisper {local_model}"
-    else:
-        engine_label = f"Groq / {GROQ_MODEL}"
-
-    # Number of phases: Groq has 3 (download + split + transcription), local 2
-    # (download + transcription, without splitting).
-    n_phases = 3 if backend == "groq" else 2
-
-    # We use a temporary folder that is automatically deleted at the end (even in
-    # case of an error), so as not to leave audio files lying around.
-    with tempfile.TemporaryDirectory(prefix="yt_transcribe_") as workdir:
-        # --- PHASE 1: audio download ---
-        console.print()
-        console.rule(f"[phase]⬇ Fase 1/{n_phases} — Download audio[/phase]", style="bright_blue")
-        audio_path = download_audio(url, workdir)
-        if not audio_path or _interrupted:
-            console.print("[warning]Download non completato.[/warning]")
-            return
-
-        # Video duration (needed both for the Groq split and for the local bar).
-        duration = meta["duration"] or 0
-        if not duration:
-            # If for some reason the duration was missing from the metadata, we ask ffprobe.
-            duration = _probe_duration(audio_path)
-
-        if backend == "groq":
-            # --- PHASE 2: splitting (Groq only) ---
+    # ignore_cleanup_errors: evita il PermissionError (WinError 32) su Windows se
+    # l'audio temporaneo resta bloccato un istante da ffmpeg/whisper alla chiusura.
+    with tempfile.TemporaryDirectory(prefix="echoscript_", ignore_cleanup_errors=True) as workdir:
+        # --- Acquire the audio ---
+        if kind == "youtube":
             console.print()
-            console.rule("[phase]✂ Fase 2/3 — Preparazione audio[/phase]", style="bright_blue")
+            console.rule(f"[phase]⬇ Fase {step['download']}/{n} — Download audio[/phase]", style="bright_blue")
+            audio_path = download_audio(ref, workdir)
+            if not audio_path or _interrupted:
+                console.print("[warning]Download non completato.[/warning]")
+                return None
+        else:
+            # Local file: feed it directly (ffmpeg/whisper read it in place).
+            audio_path = ref
+
+        # Duration: from metadata if present, otherwise probe the file with ffprobe.
+        duration = meta["duration"] or _probe_duration(audio_path)
+        meta["duration"] = duration  # keep it consistent for the output builders
+
+        # --- Transcription ---
+        if backend == "groq":
+            console.print()
+            console.rule(f"[phase]✂ Fase {step['prepare']}/{n} — Preparazione audio[/phase]", style="bright_blue")
             chunks = split_audio(audio_path, duration, workdir)
             console.print(f"  {SYM_OK} Audio diviso in [info]{len(chunks)}[/info] blocchi da ~{CHUNK_SECONDS // 60} min")
 
-            # --- PHASE 3: transcription (Groq) ---
             console.print()
-            console.rule("[phase]✎ Fase 3/3 — Trascrizione (Groq)[/phase]", style="bright_green")
-            segments = transcribe(client, chunks)
+            console.rule(f"[phase]✎ Fase {step['transcribe']}/{n} — Trascrizione · Groq (cloud)[/phase]", style="bright_green")
+            # Ripresa: se il checkpoint combacia (stessi blocchi), riparti.
+            start_index, prior, prior_lang = 0, None, None
+            if resume_cp and resume_cp.get("total_chunks") == len(chunks):
+                start_index = int(resume_cp.get("done_chunks", 0))
+                prior = resume_cp.get("segments")
+                prior_lang = resume_cp.get("detected_language")
+            try:
+                segments, detected = transcribe(client, chunks, start_index, prior, prior_lang)
+            except TranscriptionInterrupted as ti:
+                save_checkpoint(meta, {
+                    "title": meta["title"], "id": meta.get("id"),
+                    "source": meta.get("source", kind),
+                    "source_path": meta.get("source_path"),
+                    "webpage_url": meta.get("webpage_url"),
+                    "model": GROQ_MODEL, "chunk_seconds": CHUNK_SECONDS,
+                    "total_chunks": ti.total, "done_chunks": ti.done,
+                    "detected_language": ti.lang, "segments": ti.segments,
+                    "duration": duration,
+                })
+                console.print(f"\n[warning]Limite Groq raggiunto: trascritti "
+                              f"{ti.done}/{ti.total} blocchi. Progresso salvato: "
+                              f"riavvia con lo stesso video per riprendere.[/warning]")
+                return None
+            delete_checkpoint(meta)
         else:
-            # --- PHASE 2: local transcription (no splitting) ---
             console.print()
-            console.rule(f"[phase]✎ Fase 2/2 — Trascrizione locale ({local_model})[/phase]", style="bright_green")
-            segments = transcribe_local(local_model, audio_path, duration)
+            console.rule(f"[phase]✎ Fase {step['transcribe']}/{n} — Trascrizione · Locale CPU ({local_model})[/phase]",
+                         style="bright_green")
+            console.print("  [warning]La trascrizione locale gira sulla CPU: può richiedere diversi minuti.[/warning]")
+            segments, detected = transcribe_local(local_model, audio_path, duration)
+
+        # Lingua dell'audio rilevata da Whisper (per la card di riepilogo).
+        meta["detected_language"] = detected
 
     # (Here the temporary folder has already been deleted: the data we need
     #  — the segments — is already in memory.)
+    return segments or None
 
-    if not segments:
-        console.print("[error]Nessun testo trascritto.[/error]")
-        return
 
+def _save_outputs(meta: dict, segments: list[dict], engine_label: str,
+                  do_translate: bool, tclient, do_export: bool, out_root: str) -> None:
+    """Write all outputs for ONE transcription, then print the summary panel.
+
+    Layout: out_root/<title>/trascrizioni/ (+ traduzioni/ if translating). The
+    translation and export choices are passed in (asked once, up front) so the
+    same flags apply to every file in a batch."""
     # --- Saving: tidy folder structure ---
-    #   results/<video name>/
+    #   results/<title>/
     #       trascrizioni/  -> md, txt, json (+ pdf, tex if exported)
     #       traduzioni/    -> Italian version (+ pdf, tex if exported)
     safe_title = _safe_filename(meta["title"])
-    video_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results", safe_title)
+    video_dir = os.path.join(out_root, safe_title)
     trans_dir = os.path.join(video_dir, "trascrizioni")
     os.makedirs(trans_dir, exist_ok=True)
     base_orig = os.path.join(trans_dir, safe_title)  # base path (without extension) of the originals
 
     # Common basis (sections) used by all text formats and by the export.
     sections = _build_sections(meta, segments)
-    created: list[str] = []  # paths (relative to results/) of the generated files, for the summary
+    created: list[str] = []  # paths (relative to the video folder) of generated files, for the summary
 
     def _save(path: str, content: str) -> None:
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
-        # We save the path relative to the video folder (e.g. "trascrizioni/x.md").
         created.append(os.path.relpath(path, video_dir).replace("\\", "/"))
 
     _save(f"{base_orig}.md", build_md(meta["title"], meta, engine_label, sections, with_timestamps=True))
@@ -1237,41 +1560,32 @@ def run() -> None:
     it_sections = None       # translated sections (if requested), reused by the export
     it_title = None
     base_trad = None         # base path of the translated files (set if translating)
-    if _confirm("Vuoi creare anche la versione tradotta in italiano?", accent="bright_magenta"):
-        # To translate, a Groq client is needed (even if you transcribed locally).
-        tclient = client
-        if tclient is None:
-            console.print("[warning]La traduzione usa Groq (cloud): il testo verra' inviato ai loro server.[/warning]")
-            tclient = get_groq_client()
-        if tclient is None:
-            console.print("[warning]Traduzione saltata (nessun client Groq).[/warning]")
-        else:
-            console.print()
-            console.rule("[phase]🌐 Traduzione in italiano (Groq)[/phase]", style="bright_magenta")
-            with console.status("[info]Traduco il titolo...[/info]", spinner="dots"):
-                it_title = translate_text_groq(tclient, meta["title"])
-            it_sections = translate_sections(tclient, sections)
-            if it_sections:
-                # We create the 'traduzioni' subfolder only now that it is really needed.
-                trad_dir = os.path.join(video_dir, "traduzioni")
-                os.makedirs(trad_dir, exist_ok=True)
-                base_trad = os.path.join(trad_dir, safe_title)
-                # The translated files have NO timings (clean version to read).
-                _save(f"{base_trad}.md", build_md(it_title, meta, f"{engine_label} (tradotto in italiano)",
-                                                  it_sections, with_timestamps=False))
-                _save(f"{base_trad}.txt", build_txt(it_title, meta, it_sections))
-
-    # --- Export for reading: PDF + LaTeX (optional) ---
-    if _confirm("Vuoi esportare in PDF e LaTeX (per leggerli comodamente)?", accent="bright_blue"):
+    if do_translate and tclient is not None:
         console.print()
-        console.rule("[phase]📄 Esportazione PDF / LaTeX[/phase]", style="bright_blue")
-        # (title, sections, timings, base-path) for the original and, if present, the translated one.
+        console.rule("[phase]🌐 Traduzione in italiano (Groq)[/phase]", style="bright_magenta")
+        with console.status("[info]Traduco il titolo...[/info]", spinner="dots"):
+            it_title = translate_text_groq(tclient, meta["title"])
+        it_sections = translate_sections(tclient, sections)
+        if it_sections:
+            # We create the 'traduzioni' subfolder only now that it is really needed.
+            trad_dir = os.path.join(video_dir, "traduzioni")
+            os.makedirs(trad_dir, exist_ok=True)
+            base_trad = os.path.join(trad_dir, safe_title)
+            # The translated files have NO timings (clean version to read).
+            _save(f"{base_trad}.md", build_md(it_title, meta, f"{engine_label} (tradotto in italiano)",
+                                              it_sections, with_timestamps=False))
+            _save(f"{base_trad}.txt", build_txt(it_title, meta, it_sections))
+
+    # --- Export for reading: PDF (optional) ---
+    if do_export:
+        console.print()
+        console.rule("[phase]📄 Esportazione PDF[/phase]", style="bright_blue")
+        # (title, sections, timings, base-path, label) for the original and, if present, the translated one.
         exports = [(meta["title"], sections, True, base_orig, "originale")]
         if it_sections and base_trad:
             exports.append((it_title, it_sections, False, base_trad, "IT"))
         for title, secs, ts, base_path, etichetta in exports:
             try:
-                _save(f"{base_path}.tex", build_latex(title, meta, secs, with_timestamps=ts))
                 with console.status(f"[info]Creo il PDF ({etichetta})...[/info]", spinner="dots"):
                     build_pdf(title, meta, secs, f"{base_path}.pdf", with_timestamps=ts)
                 created.append(os.path.relpath(f"{base_path}.pdf", video_dir).replace("\\", "/"))
@@ -1285,6 +1599,9 @@ def run() -> None:
     stats.add_column("Label", style="dim", no_wrap=True)
     stats.add_column("Value")
     stats.add_row("🎙 ", "Motore", f"[info]{engine_label}[/info]")
+    audio_lang = _lang_name(meta.get("detected_language"))
+    if audio_lang:
+        stats.add_row("🗣 ", "Lingua audio", f"[bold]{audio_lang}[/bold]")
     stats.add_row("🧩", "Segmenti", f"[bold]{len(segments)}[/bold]")
     stats.add_row("📝", "Parole", f"[bold]~{n_words}[/bold]")
     stats.add_row("📑", "Sezioni", f"[bold]{len(meta['chapters']) or 'testo continuo'}[/bold]")
@@ -1312,6 +1629,179 @@ def run() -> None:
         body, title="[bold bright_green]✅ Completato![/bold bright_green]",
         border_style="bright_green", box=DOUBLE, expand=False, padding=(1, 3),
     ))
+
+
+def _translate_existing_cli(out_root: str, title: str, tclient) -> None:
+    """SOLA ri-traduzione (CLI): rilegge la trascrizione salvata e rigenera solo
+    i file di traduzione (md/txt/pdf), senza ri-trascrivere."""
+    loaded = load_existing_transcript(out_root, title)
+    if not loaded:
+        console.print("[error]Trascrizione esistente non trovata o illeggibile.[/error]")
+        return
+    meta, segments, engine_label = loaded
+    safe = _safe_filename(meta["title"])
+    video_dir = os.path.join(out_root, safe)
+    sections = _build_sections(meta, segments)
+    console.print()
+    console.rule("[phase]🌐 Sola traduzione in italiano (Groq)[/phase]", style="bright_magenta")
+    try:
+        with console.status("[info]Traduco il titolo...[/info]", spinner="dots"):
+            it_title = translate_text_groq(tclient, meta["title"])
+        it_sections = translate_sections(tclient, sections)
+    except Exception as e:
+        console.print(f"[error]Traduzione non riuscita: {e}[/error]")
+        return
+    if not it_sections:
+        console.print("[warning]Traduzione vuota.[/warning]")
+        return
+    trad_dir = os.path.join(video_dir, "traduzioni")
+    os.makedirs(trad_dir, exist_ok=True)
+    base = os.path.join(trad_dir, safe)
+    with open(f"{base}.md", "w", encoding="utf-8") as f:
+        f.write(build_md(it_title, meta, f"{engine_label} (tradotto in italiano)",
+                         it_sections, with_timestamps=True))
+    with open(f"{base}.txt", "w", encoding="utf-8") as f:
+        f.write(build_txt(it_title, meta, it_sections))
+    try:
+        with console.status("[info]Creo il PDF...[/info]", spinner="dots"):
+            build_pdf(it_title, meta, it_sections, f"{base}.pdf", with_timestamps=True)
+    except Exception as e:
+        console.print(f"[error]Export PDF fallito: {e}[/error]")
+    console.print(f"[success]✓ Traduzione aggiornata in {trad_dir}[/success]")
+
+
+def run() -> None:
+    """Orchestration: choose the engine and the SOURCE (YouTube URL or local
+    file/folder), confirm, then run download/preparation/transcription/saving.
+
+    A local folder becomes a BATCH: every audio file inside it is transcribed in
+    turn, reusing the same engine and the same translate/export choices."""
+    # Prerequisite check: ffmpeg must be in the PATH.
+    if not shutil.which("ffmpeg"):
+        console.print("[error]ffmpeg non trovato nel PATH. Installalo prima di continuare.[/error]")
+        return
+
+    # --- Transcription backend selection (local vs Groq) ---
+    backend = choose_backend()
+    if not backend:
+        return
+
+    # If local, we choose the model RIGHT AWAY (so that any cancellation happens
+    # before downloading anything).
+    local_model = None
+    if backend == "local":
+        local_model = choose_local_model()
+        if not local_model:
+            return
+
+    # --- Source selection: YouTube URL or local file/folder ---
+    source_kind = choose_source()
+    if not source_kind:
+        return
+
+    # Each job is (meta, (kind, ref)). YouTube yields exactly one job; a local
+    # folder yields one job per audio file found (batch).
+    jobs: list[tuple[dict, tuple[str, str]]] = []
+    if source_kind == "youtube":
+        url = _prompt("Incolla l'URL del video YouTube", "(q per uscire)", accent="bright_magenta")
+        if not url or url.lower() == "q":
+            return
+        with console.status("[info]Leggo le informazioni del video...[/info]", spinner="dots"):
+            meta = get_video_info(url)
+        if not meta:
+            return
+        display_video_info(meta)
+        if not _confirm("Procedo con la trascrizione di questo video?", accent="bright_cyan"):
+            console.print("[warning]Operazione annullata.[/warning]")
+            return
+        jobs.append((meta, ("youtube", url)))
+    else:
+        path = _prompt("Incolla il percorso del file o della cartella audio",
+                       "(q per uscire)", accent="bright_magenta")
+        if not path or path.lower() == "q":
+            return
+        files = resolve_local_sources(path)
+        if not files:
+            return
+        with console.status("[info]Leggo la durata dei file...[/info]", spinner="dots"):
+            metas = [local_file_meta(f) for f in files]
+        display_local_sources(metas)
+        what = "questo file" if len(metas) == 1 else f"questi {len(metas)} file"
+        if not _confirm(f"Procedo con la trascrizione di {what}?", accent="bright_green"):
+            console.print("[warning]Operazione annullata.[/warning]")
+            return
+        jobs = [(m, ("local", m["source_path"])) for m in metas]
+
+    # We initialize the Groq client only if it is really needed (cloud backend),
+    # and only after the user's confirmation.
+    client = None
+    if backend == "groq":
+        client = get_groq_client()
+        if not client:
+            return
+
+    # Engine label, shown in the file header and in the summary.
+    engine_label = (f"Locale / faster-whisper {local_model}" if backend == "local"
+                    else f"Groq / {GROQ_MODEL}")
+
+    # Translate/export are asked ONCE here and applied to every job (so a batch
+    # does not stop to ask between files).
+    do_translate = _confirm("Vuoi creare anche la versione tradotta in italiano?", accent="bright_magenta")
+    tclient = client  # the translation always uses Groq, even when transcribing locally
+    if do_translate and tclient is None:
+        console.print("[warning]La traduzione usa Groq (cloud): il testo verra' inviato ai loro server.[/warning]")
+        tclient = get_groq_client()
+        if tclient is None:
+            console.print("[warning]Traduzione saltata (nessun client Groq).[/warning]")
+            do_translate = False
+    # Il PDF viene SEMPRE generato (come nella GUI): niente più domanda.
+    do_export = True
+    console.print(f"  {SYM_OK} Il PDF verrà generato automaticamente.")
+
+    out_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
+
+    # --- Process each job (one for YouTube, one per file in a batch) ---
+    total = len(jobs)
+    for idx, (meta, source) in enumerate(jobs, 1):
+        if _interrupted:
+            break
+        if total > 1:
+            console.print()
+            console.rule(f"[bold bright_green]🎙 File {idx}/{total}: {meta['title']}[/bold bright_green]",
+                         style="bright_green")
+
+        # Controlli prima di trascrivere: già trascritto / parziale da riprendere.
+        resume_cp = load_checkpoint(meta) if backend == "groq" else None
+        if transcription_exists(out_root, meta["title"]):
+            console.print(f"[warning]«{meta['title']}» è già stato trascritto in results/.[/warning]")
+            ch = _prompt("Cosa fai? [r]itrascrivi tutto · [t]raduci soltanto · [s]alta",
+                         "(r/t/s)", accent="bright_yellow").strip().lower()
+            if ch.startswith("t"):
+                tc = tclient or client or get_groq_client()
+                if tc:
+                    _translate_existing_cli(out_root, meta["title"], tc)
+                continue
+            if not ch.startswith("r"):
+                console.print("[dim]Saltato.[/dim]")
+                continue
+            resume_cp = None  # ritrascrizione completa: ignora eventuale parziale
+        elif resume_cp:
+            done, tot = resume_cp.get("done_chunks", 0), resume_cp.get("total_chunks", 0)
+            console.print(f"[info]Ripresa disponibile per «{meta['title']}»: {done}/{tot} blocchi salvati.[/info]")
+            ch = _prompt("Cosa fai? [r]iprendi · [d]a capo · [s]alta",
+                         "(r/d/s)", accent="bright_cyan").strip().lower()
+            if ch.startswith("s"):
+                console.print("[dim]Saltato.[/dim]")
+                continue
+            if ch.startswith("d"):
+                delete_checkpoint(meta)
+                resume_cp = None
+
+        segments = _run_pipeline(meta, source, backend, client, local_model, resume_cp)
+        if not segments:
+            # _run_pipeline ha già spiegato il motivo (interruzione/limite o errore).
+            continue
+        _save_outputs(meta, segments, engine_label, do_translate, tclient, do_export, out_root)
 
 
 def _probe_duration(audio_path: str) -> float:
