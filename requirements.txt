@@ -1,4 +1,4 @@
-# Dipendenze Python di YouTube Transcriber
+# Dipendenze Python di EchoScript
 # Installa con:  pip install -r requirements.txt
 yt-dlp>=2024.1.0
 groq>=0.11.0
@@ -9,13 +9,18 @@ rich>=13.0.0
 faster-whisper>=1.0
 
 # Export PDF (leggero, pure-python, niente LaTeX di sistema). Serve solo se
-# vuoi generare i PDF. La traduzione in italiano usa l'LLM di Groq (gia' incluso
-# col pacchetto 'groq'); il LaTeX (.tex) viene generato senza dipendenze.
+# vuoi generare i PDF.
 fpdf2>=2.7
 
 # GUI desktop (Flet): interfaccia grafica nativa moderna. Serve solo per la
 # GUI (gui/main.py); la CLI funziona senza. Avvio: python gui/main.py
 flet>=0.27,<0.29
+
+# (OPZIONALE) Accelerazione GPU del backend locale: installa PyTorch con CUDA
+# per far girare faster-whisper su GPU (5-20x piu' veloce). Senza, gira su CPU.
+# Vedi https://pytorch.org per il comando giusto per la tua CUDA. Es.:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+# torch
 
 # NB: serve anche ffmpeg installato nel sistema (non e' un pacchetto pip).
 #   Windows:  winget install Gyan.FFmpeg

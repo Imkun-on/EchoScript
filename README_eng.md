@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  Transcribe (and <b>translate</b>) YouTube videos <b>and your local audio files</b> into <b>text, Markdown, JSON and PDF</b>,<br>
+  Transcribe YouTube videos <b>and your local audio files</b> into <b>text, Markdown, JSON and PDF</b>,<br>
   <b>fast</b> with Groq or <b>100% locally</b> for maximum privacy.<br>
   Built to <b>study</b> long videos (RAG, fine-tuning, lectures) by reading them instead of watching for hours.<br>
   Available as a <b>desktop app</b> (GUI) or from the <b>terminal</b> (CLI).<br>
@@ -43,13 +43,13 @@ python transcriber.py     # terminal interface (CLI)
 - [🖱️ Desktop app guide (for everyone)](#️-desktop-app-guide-for-everyone)
 - [🔀 The two backends: cloud or local](#-the-two-backends-cloud-or-local)
 - [✨ Features](#-features)
-- [📦 Installation](#-installation)
+- [⬇️ Download the ready-to-use app (.exe)](#️-download-the-ready-to-use-app-exe)
+- [📦 Install from source (developers)](#-install-from-source-developers)
 - [🔑 How to get a Groq API key](#-how-to-get-a-groq-api-key)
 - [📚 Libraries used and why](#-libraries-used-and-why)
 - [🚀 Usage & examples](#-usage--examples)
 - [⚙️ How it works (the phases)](#️-how-it-works-the-phases)
 - [💾 Output file structure](#-output-file-structure)
-- [🌐 Italian translation](#-italian-translation)
 - [📄 PDF export](#-pdf-export)
 - [🛠️ Configuration](#️-configuration)
 - [🔒 Privacy](#-privacy)
@@ -74,7 +74,7 @@ And you choose **how** to transcribe:
 - ⚡ **Groq (cloud)**: extremely fast even **without a GPU** (transcribes 2 hours in seconds), practically free.
 - 🔒 **Local (faster-whisper on CPU)**: **100% offline and private**, the audio never leaves your PC.
 
-When the transcription is done you can **translate it into Italian** (handy for English videos) and **export to PDF** to read comfortably, split by chapter.
+When the transcription is done you can **export to PDF** to read it comfortably, split by chapter.
 
 This tool is for:
 
@@ -103,7 +103,7 @@ EchoScript was built to **remove all these traps**:
 | **Account required** | yes | **no** (local); for Groq just a free key |
 | **Watermark / reduced quality** | common | **never** |
 | **Privacy** | upload to third-party servers | **local = nothing leaves your PC** |
-| **Output formats** | often only `.txt` | `.md`, `.txt`, `.json`, **`.pdf`** + **Italian translation** |
+| **Output formats** | often only `.txt` | `.md`, `.txt`, `.json`, **`.pdf`** |
 | **Works offline** | no | **yes** (local backend) |
 | **Open source** | rarely | **yes** |
 
@@ -124,7 +124,6 @@ The **GUI** adds a few conveniences:
 - ▶️ **Video preview**: loading a URL opens a **confirmation window** with the cover and details (channel, views, likes, subscribers, category, language)
 - 🏷️ **Engine badge** during transcription (Groq cloud or Local CPU), so you always know what you're transcribing with
 - 📊 **Real progress bar** with the phase number (e.g. "Phase 2/5")
-- 🌐 **Translation offered automatically** only when the audio isn't already Italian
 - 📄 **PDF always generated** automatically
 
 > Both write the same files to `results/<name>/`. Pick whichever you prefer: the result is identical.
@@ -148,7 +147,7 @@ This section is written for **non-technical users**: we explain every screen, ev
 ### Step 1 — "How do you want to transcribe?"
 Two cards to choose from (they glow green when selected):
 - 🔒 **Local**: transcribes **on your computer**, **offline**, sending nothing. Below you can pick the **model** (more accurate = slower). Best with a GPU; slower on CPU.
-- ⚡ **Groq (cloud)**: **very fast**, but the audio is sent to Groq's servers. Needs a **free key**: click **"Load key from .txt file"** and select your key file. The **"Check API limits"** button shows how many **free credits** you have left today; **"Get a key →"** opens the site to create one.
+- ⚡ **Groq (cloud)**: **very fast**, but the audio is sent to Groq's servers. Needs a **free key**: click **"Load key from .txt file"** and select your key file; **"Get a key →"** opens the site to create one.
 
 ### Step 2 — "What do you want to transcribe?"
 - 📺 **YouTube**: paste the video **link** in the field and click **"Load info"**.
@@ -169,20 +168,15 @@ A **real progress bar** appears (not a fake animation):
 - at the top a **badge** tells you what you're transcribing with: **Groq (cloud)** (green) or **Local CPU** (amber, because it can take minutes);
 - on the right the **phase number** (e.g. *"Phase 2/5"*) and the overall **percentage**.
 
-### Options at the end of transcription
-When transcription finishes a window opens:
-- if the audio is **not** Italian, it offers to **translate it to Italian** (switch already on);
-- if it's **already** Italian, it tells you and doesn't offer translation;
-- the **PDF is always created**, automatically.
-
-Press **"Continue"** to save.
+### At the end of transcription
+The **PDF is always created**, automatically, and the files are saved with no further prompts.
 
 ### The result
 A **"Done!"** window summarizes everything: engine used, number of words/sections, **where the files were saved** (the `results/` folder) and the list of created files. The **"Open results folder"** button opens the folder directly.
 
 ### Special messages (long or already-done video)
-- 🔁 **"Video already transcribed"**: if you redo a video already done, the app asks (as a list) whether to **Re-transcribe everything** (replaces the files) or do **Translation only** (reuses the existing transcription, **no credits spent again**).
-- ⏸️ **"Resume available"**: if a long video was interrupted by the Groq limit, the app **saved the point** and offers to **Resume** from where it stopped or **Start over**.
+- 🔁 **"Video already transcribed"**: if you redo a video already done, the app asks whether to **Re-transcribe everything** (replaces the files).
+- ⏸️ **"Resume available"**: if a long transcription was interrupted (Groq limit, or an interrupted local run), the app **saved the point** and offers to **Resume** from where it stopped or **Start over**.
 - ⏳ **"Groq limit reached"**: an amber notice showing how many chunks were done; **resume later**, when free credits return.
 
 ---
@@ -222,15 +216,37 @@ If you choose **Local**, a second panel lets you pick the model each time:
 - ⏱️ **Timings & sections**: uses YouTube **chapters** as document sections
 - 💾 **3 base formats** always generated: `.md` (human), `.txt` (for other LLMs), `.json` (for RAG)
 - 📄 **PDF always generated** automatically, split by chapter
-- 🌐 **Optional Italian translation** (via Groq LLM) in separate files
-- 🗂️ **Organized output** in `results/<video name>/` with `trascrizioni/` and `traduzioni/` subfolders
+- 🗂️ **Organized output** in `results/<video name>/` under the `trascrizioni/` subfolder
 - 🎨 **Polished interfaces**: dark GUI with animated background, or Rich CLI with bars and panels
 - 🔑 **Safe key handling**: environment variable or `.env` file (never in the code)
 - 🧯 **Clear errors**: the key is validated at startup; no pointless retries on auth errors
 
 ---
 
-## 📦 Installation
+## ⬇️ Download the ready-to-use app (.exe)
+
+If you're **not a developer** and just want to use the program, you don't need to install Python or anything else: download the ready-made app.
+
+1. Go to the project's **[Releases](https://github.com/Imkun-on/EchoScript/releases/latest)** page on GitHub.
+2. Download **`EchoScript-Windows.zip`** from the latest version.
+3. **Extract** the ZIP wherever you like (Desktop, Documents…). Keep the files **together**: you need both `EchoScript.exe` and the **`_internal`** folder next to it.
+4. Double-click **`EchoScript.exe`**. Done: the app opens, **nothing to install**.
+
+> 🛡️ **First launch – Windows SmartScreen:** since the app isn't code-signed, Windows may show *"Windows protected your PC"*. Click **"More info" → "Run anyway"**. This is normal for unsigned free software.
+
+**What's included and what isn't:**
+- ✅ **Everything bundled**: no Python, ffmpeg or other installs needed.
+- 📥 The **first time** you use the **local** backend, the app downloads the model once from HuggingFace (then it's cached, also offline).
+- ⚡ For the **Groq** (cloud) backend you only need a **free key** (see below).
+- 💻 The `.exe` release is for **Windows**. **macOS/Linux** versions come from their own builds (use the from-source install meanwhile).
+
+> To **uninstall**, just delete the folder: the app writes nothing to the system registry. (Transcriptions live in `results/` next to the executable.)
+
+---
+
+## 📦 Install from source (developers)
+
+This part is only for **running from code** or **modifying** the project. For plain usage, see [Download the ready-to-use app (.exe)](#️-download-the-ready-to-use-app-exe).
 
 ### Requirements
 
@@ -267,7 +283,7 @@ sudo apt install ffmpeg
 
 ## 🔑 How to get a Groq API key
 
-The key is needed **only** if you use the **Groq** (cloud) backend or the Italian **translation**. It is **free**.
+The key is needed **only** if you use the **Groq** (cloud) backend. It is **free**.
 
 1. Go to **https://console.groq.com** and **sign up** (you can use Google, GitHub or email).
 2. Once inside, open the **API Keys** section: **https://console.groq.com/keys**
@@ -301,7 +317,7 @@ The key is needed **only** if you use the **Groq** (cloud) backend or the Italia
 | Library | What it's for | Why this one |
 |---|---|---|
 | `yt-dlp` | Downloads audio and metadata (title, chapters, duration) from YouTube | The de-facto standard: handles streams, resume, and metadata extraction |
-| `groq` | Official Groq API client (Whisper + LLM for translation) | Official SDK, simple and fast |
+| `groq` | Official Groq API client (Whisper) | Official SDK, simple and fast |
 | `faster-whisper` | *(optional)* **Local** transcription on CPU | Optimized Whisper implementation (CTranslate2), great on CPU with `int8` |
 | `fpdf2` | *(optional)* **PDF** export | Pure-python, **no system LaTeX needed**; supports Unicode fonts |
 | `flet` | *(optional)* **desktop GUI** (`gui/main.py`) | Modern native graphical interface in Python; the CLI works without it |
@@ -309,8 +325,6 @@ The key is needed **only** if you use the **Groq** (cloud) backend or the Italia
 ### Standard library (no installation)
 
 `os`, `re`, `json`, `sys`, `signal`, `shutil`, `tempfile`, `subprocess`, `datetime`: paths/files, regex, JSON, Ctrl+C handling, ffmpeg/ffprobe calls, dates.
-
-> **Translation** uses Groq's LLM (already included in the `groq` package).
 
 ---
 
@@ -330,10 +344,10 @@ Typical flow:
 4. **Say what to transcribe**: the video **URL**, or the **path** of an audio file or a **folder** (batch).
 5. Check the **card** (video or file) and **confirm**.
 6. Wait: you'll see the phases (**Download** if from YouTube → **Preparation** if Groq → **Transcription**) with progress bars, and the engine in use (**Groq cloud** or **Local CPU**).
-7. Answer whether you want to **translate into Italian**: the **PDF is always generated** automatically.
+7. The **PDF is always generated** automatically.
 8. Find everything under `results/<name>/`.
 
-> 🎙️ **Local files**: no download is needed (you already have the file) and YouTube metadata (channel, chapters…) doesn't exist, so the output uses the **file name** as the title and a single "continuous text" section. Point it at a **folder** and every audio file inside is transcribed in sequence, reusing the same engine and the same translate/export choices.
+> 🎙️ **Local files**: no download is needed (you already have the file) and YouTube metadata (channel, chapters…) doesn't exist, so the output uses the **file name** as the title and a single "continuous text" section. Point it at a **folder** and every audio file inside is transcribed in sequence, reusing the same engine and the same export choices.
 
 ### Example: Groq backend
 
@@ -381,9 +395,9 @@ Typical flow:
 
 Transcribe your study videos, then use the **`.json`** files (segments with timestamps) as the source for your RAG pipeline: they're ready for *chunking* and indexing.
 
-### Use case: read an English talk in Italian
+### Use case: read a talk instead of watching it
 
-Transcribe an English talk, choose **Italian translation** and **PDF export**: you get a clean PDF in Italian, split by chapter, to read on a tablet or print.
+Transcribe a long talk and use **PDF export**: you get a clean PDF, split by chapter, to read on a tablet or print.
 
 ---
 
@@ -394,7 +408,7 @@ Transcribe an English talk, choose **Italian translation** and **PDF export**: y
 3. **Preparation** *(Groq only)*: the audio is re-encoded to 16 kHz mono and **split into ~10 min chunks** (to stay within the API size limit and give a meaningful bar).
 4. **Transcription**: each chunk (Groq) or the whole file (local) is transcribed into **segments with timestamps**; each chunk's timings are corrected relative to the whole video.
 5. **Assembly**: segments are grouped by **chapter** (if present) and saved in the various formats.
-6. **PDF export**: always, automatically. **Translation**: optional, on request.
+6. **PDF export**: always, automatically.
 
 > 🎙️ **With a local file** the *Info* and *Download* steps are skipped: the file is fed straight to ffmpeg/Whisper. The duration is read with `ffprobe`, the title from the file name and, having no chapters, you get a single "continuous text" section.
 
@@ -405,15 +419,11 @@ Transcribe an English talk, choose **Italian translation** and **PDF export**: y
 ```
 results/
 └── <Video or file name>/
-    ├── trascrizioni/      (transcriptions)
-    │   ├── <Name>.md      (sections with timing in the heading, clean prose)
-    │   ├── <Name>.txt     (clean text, for other LLMs)
-    │   ├── <Name>.json    (segments with timestamps, for RAG)
-    │   └── <Name>.pdf     (always, generated automatically)
-    └── traduzioni/        (translations, only if you translate)
-        ├── <Name>.md      (Italian)
-        ├── <Name>.txt
-        └── <Name>.pdf
+    └── trascrizioni/      (transcriptions)
+        ├── <Name>.md      (sections with timing in the heading, clean prose)
+        ├── <Name>.txt     (clean text, for other LLMs)
+        ├── <Name>.json    (segments with timestamps, for RAG)
+        └── <Name>.pdf     (always, generated automatically)
 ```
 
 > For **local files** `<Name>` is the file name (without extension); for YouTube videos it's the title. In **batch**, each file gets its own `results/<file name>/` folder.
@@ -422,44 +432,38 @@ results/
 - **`.txt`**: clean text with no timestamps: ideal to **paste into another LLM** (ChatGPT/Claude).
 - **`.json`**: metadata + chapters + **all segments with timestamps**: perfect for a **RAG** pipeline.
 
-> Folder names are in Italian (`trascrizioni` = transcriptions, `traduzioni` = translations) to match the app's interface.
-
----
-
-## 🌐 Italian translation
-
-When the transcription is done, if you confirm, EchoScript translates the text into Italian using an **LLM on Groq** (`llama-3.3-70b-versatile`: good quality on technical terms; it has a lower daily token limit, so for very long videos you can switch to `llama-3.1-8b-instant`). Long videos are translated **section by section** to stay within the model's limits.
-
-- Translated files go into the **`traduzioni/`** subfolder, as separate files.
-- The **original stays intact**.
-
-> Translation uses Groq (cloud): if you transcribed locally, EchoScript **warns you** before sending the text.
+> The folder name is in Italian (`trascrizioni` = transcriptions) to match the app's interface.
 
 ---
 
 ## 📄 PDF export
 
-The **PDF is always generated, automatically** (it is no longer asked). EchoScript creates:
+The **PDF is always generated, automatically**. EchoScript creates:
 
 - **`.pdf`**: via `fpdf2` (pure-python, **no LaTeX to install**, Arial font for accents), **split by chapter**.
-
-If you also created the translated version, its PDF in `traduzioni/` is exported too.
 
 ---
 
 ## 🛠️ Configuration
 
-The main "knobs" are constants at the top of `transcriber.py`:
+Every "knob" is set via environment variables / a `.env` file (see
+the `.env` file), no code editing needed. Each value has a sensible default:
 
-| Constant | Default | Description |
+| `.env` variable | Default | Description |
 |---|---|---|
-| `GROQ_MODEL` | `whisper-large-v3-turbo` | Whisper model on Groq (turbo = fast/cheap) |
-| `GROQ_TRANSLATE_MODEL` | `llama-3.3-70b-versatile` | LLM used for translation (better quality; lower daily limit. For very long videos: `llama-3.1-8b-instant`) |
-| `CHUNK_SECONDS` | `600` | Duration of each audio chunk (Groq only) |
-| `AUDIO_SAMPLE_RATE` | `16000` | 16 kHz, recommended for Whisper |
-| `LANGUAGE` | `None` | `None` = auto-detect; force with `"it"` / `"en"` |
-| `LOCAL_COMPUTE_TYPE` | `int8` | Quantization for the local backend (faster on CPU) |
-| `TRANSLATE_MAX_CHARS` | `2500` | Max length of translated pieces per call |
+| `GROQ_API_KEY` | — | Groq key (cloud transcription only) |
+| `ECHOSCRIPT_GROQ_MODEL` | `whisper-large-v3-turbo` | Whisper model on Groq (turbo = fast/cheap) |
+| `ECHOSCRIPT_AUDIO_LANG` | *(empty)* | Audio language: empty = auto-detect; force with `it` / `en` / … |
+| `ECHOSCRIPT_WORD_TIMESTAMPS` | `1` | Word-level timestamps (useful for subtitles) |
+| `ECHOSCRIPT_CHUNK_SECONDS` | `600` | Duration of each audio chunk (Groq only) |
+| `ECHOSCRIPT_DEVICE` | `auto` | Local backend: `auto` (GPU if present) / `cpu` / `cuda` |
+| `ECHOSCRIPT_COMPUTE_TYPE` | *(auto)* | Local precision: empty = `float16` on GPU, `int8` on CPU |
+
+> **Note.** Translation is temporarily disabled: for now EchoScript only does
+> transcription. It will be reintroduced in the future.
+
+> **Automatic GPU.** The local backend uses the GPU (CUDA) when available, else
+> the CPU. Install PyTorch with CUDA for acceleration (see `requirements.txt`).
 
 ---
 
@@ -467,7 +471,6 @@ The main "knobs" are constants at the top of `transcriber.py`:
 
 - **Local backend (faster-whisper)**: the **audio never leaves your PC**. (On first use it only downloads the model *weights* from HuggingFace.) Maximum privacy.
 - **Groq backend**: the audio is **uploaded to Groq's servers** for transcription. Great for public videos, not advised for private/sensitive audio.
-- **Translation**: uses Groq, so the text is sent to their servers (with a warning if you transcribed locally).
 
 The **API key** is never written in the code: it is read from `.env` or an environment variable, and excluded from version control via `.gitignore`.
 

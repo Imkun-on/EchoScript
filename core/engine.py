@@ -59,9 +59,8 @@ def _friendly_groq_error(e: Exception) -> str:
     """Turn a raw Groq exception into a short, user-friendly Italian message."""
     msg = str(e)
     if "429" in msg or "rate_limit" in msg or "tokens per day" in msg.lower():
-        return ("limite giornaliero di token Groq raggiunto per il modello di traduzione. "
-                "Riprova più tardi, oppure imposta un modello con limiti più alti "
-                "(GROQ_TRANSLATE_MODEL in transcriber.py).")
+        return ("limite giornaliero Groq raggiunto per la trascrizione. "
+                "Riprova più tardi (quando tornano i crediti gratuiti).")
     if "401" in msg or "invalid_api_key" in msg:
         return "chiave Groq non valida."
     return msg
@@ -158,41 +157,6 @@ def make_groq_client(api_key: str | None = None):
         raise EngineError(f"Impossibile contattare Groq: {e}")
 
 
-def get_rate_limits(api_key: str | None = None, model: str | None = None) -> dict:
-    """Read Groq's current rate-limit status for a chat model.
-
-    Groq has no "balance" endpoint: the limits live in the x-ratelimit-* response
-    headers of a real call. We make the smallest possible completion (1 token) and
-    parse those headers. By default we probe the TRANSLATION model, since its daily
-    token limit (TPD) is the one that actually blocks EchoScript's translation step.
-
-    Returns a dict with limit/remaining/reset for both requests and tokens (values
-    are strings as Groq sends them, or None if a header is absent). Raises
-    EngineError with a friendly message on failure (e.g. bad key)."""
-    client = make_groq_client(api_key)  # also validates the key
-    model = model or tx.GROQ_TRANSLATE_MODEL
-    try:
-        resp = client.chat.completions.with_raw_response.create(
-            model=model,
-            messages=[{"role": "user", "content": "ping"}],
-            max_tokens=1,
-        )
-        h = resp.headers
-    except Exception as e:
-        raise EngineError("Impossibile leggere i limiti Groq: " + _friendly_groq_error(e))
-
-    return {
-        "model": model,
-        "limit_requests": h.get("x-ratelimit-limit-requests"),
-        "remaining_requests": h.get("x-ratelimit-remaining-requests"),
-        "reset_requests": h.get("x-ratelimit-reset-requests"),
-        "limit_tokens": h.get("x-ratelimit-limit-tokens"),
-        "remaining_tokens": h.get("x-ratelimit-remaining-tokens"),
-        "reset_tokens": h.get("x-ratelimit-reset-tokens"),
-        "retry_after": h.get("retry-after"),
-    }
-
-
 # === AUDIO DOWNLOAD ===
 
 def download_audio(url: str, workdir: str, on_progress=_noop) -> str:
@@ -262,11 +226,12 @@ def split_audio(audio_path: str, duration: float, workdir: str, on_progress=_noo
 
 def transcribe_groq(client, chunks: list[tuple[float, str]], on_progress=_noop,
                     start_index: int = 0, prior_segments: list | None = None,
-                    prior_lang=None):
+                    prior_lang=None, language=None):
     """Transcribe chunks via Groq, con RIPRESA da 'start_index' (riusando
-    'prior_segments' già fatti). Shifta i timestamp di ogni blocco.
+    'prior_segments' già fatti). Shifta i timestamp di ogni blocco (e le parole).
 
-    Returns (segments, detected_language). Se Groq rifiuta per limite, solleva
+    'language' forza la lingua audio (None = autorileva). Returns (segments,
+    detected_language). Se Groq rifiuta per limite, solleva
     tx.TranscriptionInterrupted col parziale (per il checkpoint)."""
     all_segments: list[dict] = list(prior_segments or [])
     context = " ".join(s["text"] for s in all_segments[-6:]) if all_segments else ""
@@ -278,16 +243,19 @@ def transcribe_groq(client, chunks: list[tuple[float, str]], on_progress=_noop,
         try:
             if i == start_index:
                 segments, lang = tx._transcribe_chunk(
-                    client, path, prompt=context, return_language=True)
+                    client, path, prompt=context, return_language=True, language=language)
                 detected = detected or lang
             else:
-                segments = tx._transcribe_chunk(client, path, prompt=context)
+                segments = tx._transcribe_chunk(client, path, prompt=context, language=language)
         except tx.GroqRateLimit:
             # I blocchi 0..i-1 sono completati: passali a chi orchestra.
             raise tx.TranscriptionInterrupted(all_segments, i, n, detected)
         for seg in segments:
             seg["start"] += offset
             seg["end"] += offset
+            for w in seg.get("words", []):
+                w["start"] += offset
+                w["end"] += offset
             all_segments.append(seg)
         if segments:
             context = " ".join(s["text"] for s in segments)
@@ -295,51 +263,75 @@ def transcribe_groq(client, chunks: list[tuple[float, str]], on_progress=_noop,
     return all_segments, detected
 
 
-def transcribe_local(model_name: str, audio_path: str, duration: float, on_progress=_noop):
+def transcribe_local(model_name: str, audio_path: str, duration: float, on_progress=_noop,
+                     language=None, meta: dict | None = None,
+                     resume_cp: dict | None = None, workdir: str | None = None):
     """Transcribe the whole file locally with faster-whisper, reporting progress.
 
-    Returns (segments, detected_language): faster-whisper rileva la lingua
-    dell'audio (codice ISO tipo 'en'/'it'). Raises EngineError if faster-whisper
-    is not installed or fails to load."""
+    Picks GPU (CUDA) automatically when available, else CPU (see tx._resolve_device),
+    and asks for per-word timestamps when WORD_TIMESTAMPS is on. 'language' forces
+    the audio language (None = auto-detect).
+
+    RESUME: if 'meta' is given, the partial result is checkpointed every
+    LOCAL_CHECKPOINT_EVERY seconds of audio (so a crash/close mid-run can resume).
+    If 'resume_cp' matches (and 'workdir' is available), the audio is trimmed from
+    the saved point and only the remainder is transcribed, with timestamps shifted
+    back. Returns (segments, detected_language). Raises EngineError on load failure."""
     os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
     try:
         from faster_whisper import WhisperModel
     except ImportError:
         raise EngineError("faster-whisper non installato. Esegui: pip install faster-whisper")
 
-    on_progress("transcribe", None, None, f"Carico il modello '{model_name}' (primo uso: scarica i pesi)")
+    device, compute_type = tx._resolve_device()
+    dev_note = "GPU (CUDA)" if device == "cuda" else "CPU"
+
+    # Resume point (if a matching checkpoint is passed): trim and reuse prior segs.
+    start_offset, out, detected = tx._local_resume_point(model_name, duration, resume_cp)
+    transcribe_path = audio_path
+    if start_offset > 0 and workdir:
+        try:
+            transcribe_path = tx._trim_audio(audio_path, start_offset, workdir)
+        except Exception:
+            start_offset, out, detected = 0.0, [], None
+    elif start_offset > 0:
+        start_offset, out, detected = 0.0, [], None  # cannot trim without a workdir
+
+    note = (f" (ripresa da {tx._format_timestamp(start_offset)})" if start_offset > 0 else "")
+    on_progress("transcribe", None, None,
+                f"Carico il modello '{model_name}' su {dev_note}{note} (primo uso: scarica i pesi)")
     try:
-        model = WhisperModel(model_name, device="cpu", compute_type=tx.LOCAL_COMPUTE_TYPE)
+        model = WhisperModel(model_name, device=device, compute_type=compute_type)
         segments_gen, info = model.transcribe(
-            audio_path, language=tx.LANGUAGE, vad_filter=True, beam_size=5,
+            transcribe_path, language=language, vad_filter=True, beam_size=5,
+            word_timestamps=tx.WORD_TIMESTAMPS,
         )
     except Exception as e:
         raise EngineError(f"Errore nella trascrizione locale: {e}")
 
-    detected = getattr(info, "language", None)
-    out: list[dict] = []
+    detected = detected or getattr(info, "language", None)
+    last_saved = start_offset
     for seg in segments_gen:
-        out.append({"start": float(seg.start), "end": float(seg.end), "text": seg.text.strip()})
+        abs_start, abs_end = float(seg.start) + start_offset, float(seg.end) + start_offset
+        entry = {"start": abs_start, "end": abs_end, "text": seg.text.strip()}
+        seg_words = getattr(seg, "words", None) or []
+        if seg_words:
+            entry["words"] = [
+                {"word": w.word, "start": float(w.start) + start_offset,
+                 "end": float(w.end) + start_offset}
+                for w in seg_words if w.start is not None and w.end is not None
+            ]
+        out.append(entry)
         if duration:
-            on_progress("transcribe", min(seg.end, duration), duration, "Trascrizione in corso")
+            on_progress("transcribe", min(abs_end, duration), duration, "Trascrizione in corso")
+        if meta and (abs_end - last_saved) >= tx.LOCAL_CHECKPOINT_EVERY:
+            tx.save_local_checkpoint(meta, out, abs_end, model_name, duration, detected)
+            last_saved = abs_end
     if duration:
         on_progress("transcribe", duration, duration, "Trascrizione completata")
+    if meta:
+        tx.delete_local_checkpoint(meta)  # completed fully -> no partial to keep
     return out, detected
-
-
-# === TRANSLATION ===
-
-def translate_sections(client, sections: list[dict], on_progress=_noop) -> list[dict]:
-    """Translate each section's title and text into Italian via the Groq LLM."""
-    out: list[dict] = []
-    n = len(sections)
-    for i, sec in enumerate(sections, 1):
-        on_progress("translate", i - 1, n, f"Traduco sezione {i}/{n}")
-        t_title = tx.translate_text_groq(client, sec["title"]) if sec["title"] else None
-        t_text = tx.translate_text_groq(client, sec["text"]) if sec["text"] else ""
-        out.append({"start": sec["start"], "title": t_title, "text": t_text})
-        on_progress("translate", i, n, f"Sezione {i}/{n} tradotta")
-    return out
 
 
 # === FILE HELPERS ===
@@ -402,10 +394,12 @@ def transcribe_only(source: str, options: dict, on_progress=_noop, resume: bool 
     backend = options.get("backend", "groq")
     model = options.get("model")
     source_kind = options.get("source_kind", "youtube")
+    # Forced audio language (None = auto-detect); explicit option wins over .env.
+    audio_lang = options.get("audio_lang") or tx.LANGUAGE
 
-    # A Groq client is needed for cloud transcription and/or the translation step.
+    # A Groq client is needed only for cloud transcription.
     client = None
-    if backend == "groq" or bool(options.get("translate")):
+    if backend == "groq":
         client = make_groq_client(options.get("api_key"))
 
     # Metadata: YouTube needs a network call; a local file is described synthetically.
@@ -421,8 +415,14 @@ def transcribe_only(source: str, options: dict, on_progress=_noop, resume: bool 
     engine_label = (f"Locale / faster-whisper {model}" if backend == "local"
                     else f"Groq / {tx.GROQ_MODEL}")
 
-    # Checkpoint da cui riprendere (solo Groq, solo se richiesto).
-    cp = tx.load_checkpoint(meta) if (backend == "groq" and resume) else None
+    # Checkpoint da cui riprendere (Groq a blocchi, oppure locale a tempo).
+    cp = None
+    local_cp = None
+    if resume:
+        if backend == "groq":
+            cp = tx.load_checkpoint(meta)
+        else:
+            local_cp = tx.load_local_checkpoint(meta)
 
     with tempfile.TemporaryDirectory(prefix="echoscript_", ignore_cleanup_errors=True) as workdir:
         if source_kind == "local":
@@ -441,7 +441,8 @@ def transcribe_only(source: str, options: dict, on_progress=_noop, resume: bool 
                 prior_lang = cp.get("detected_language")
             try:
                 segments, detected_lang = transcribe_groq(
-                    client, chunks, on_progress, start_index, prior, prior_lang)
+                    client, chunks, on_progress, start_index, prior, prior_lang,
+                    language=audio_lang)
             except tx.TranscriptionInterrupted as ti:
                 # Limite raggiunto: salva/aggiorna il checkpoint e segnala.
                 tx.save_checkpoint(meta, {
@@ -458,7 +459,9 @@ def transcribe_only(source: str, options: dict, on_progress=_noop, resume: bool 
             # Trascrizione completa: niente più parziale da conservare.
             tx.delete_checkpoint(meta)
         else:
-            segments, detected_lang = transcribe_local(model, audio_path, duration, on_progress)
+            segments, detected_lang = transcribe_local(
+                model, audio_path, duration, on_progress, language=audio_lang,
+                meta=meta, resume_cp=local_cp, workdir=workdir)
 
     if not segments:
         raise EngineError("Nessun testo trascritto.")
@@ -473,10 +476,10 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
                  out_root: str, client=None, on_progress=_noop) -> dict:
     """PHASE 2 — write all outputs under 'out_root', creating the subfolders.
 
-    Layout: out_root/<title>/trascrizioni/ (+ traduzioni/ if translating). The
-    chosen 'out_root' lets the user save anywhere (e.g. outside OneDrive).
-    Returns the result summary dict."""
-    do_translate = bool(options.get("translate"))
+    Layout: out_root/<title>/trascrizioni/ (md, txt, json, + pdf if exporting).
+    The chosen 'out_root' lets the user save anywhere (e.g. outside OneDrive).
+    The 'client' argument (the Groq transcription client) is accepted for
+    backward compatibility but unused here. Returns the result dict."""
     do_export = bool(options.get("export"))
 
     safe_title = tx._safe_filename(meta["title"])
@@ -492,47 +495,19 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
     _write(f"{base_orig}.txt", tx.build_txt(meta["title"], meta, sections), created, video_dir)
     _write(f"{base_orig}.json", tx.build_transcript_json(meta, segments, engine_label), created, video_dir)
 
-    # Optional Italian translation -> out_root/<title>/traduzioni/
-    # A failure here (e.g. Groq daily token limit) must NOT lose the transcription
-    # already saved above: we warn and keep going (export still runs on the original).
-    it_sections = None
-    it_title = None
-    base_trad = None
-    if do_translate and client is not None:
-        try:
-            it_title = tx.translate_text_groq(client, meta["title"])
-            it_sections = translate_sections(client, sections, on_progress)
-            if it_sections:
-                base_trad = os.path.join(video_dir, "traduzioni", safe_title)
-                # with_timestamps=True: la traduzione esce nello STESSO formato
-                # della trascrizione (sezioni/capitoli con minutaggio nel titolo).
-                _write(f"{base_trad}.md", tx.build_md(it_title, meta, f"{engine_label} (tradotto in italiano)",
-                                                      it_sections, with_timestamps=True), created, video_dir)
-                _write(f"{base_trad}.txt", tx.build_txt(it_title, meta, it_sections), created, video_dir)
-        except Exception as e:
-            it_sections = None  # so the export step below skips the translated version
-            warnings.append("Traduzione non riuscita: " + _friendly_groq_error(e))
-
-    # Optional PDF export (original and, if present, translated).
-    # NB: il PDF è prodotto direttamente con fpdf2 (build_pdf), indipendente dal
-    # LaTeX; per la GUI non generiamo più il .tex (ridondante per lo scopo).
+    # Optional PDF export of the transcription.
     if do_export:
-        exports = [(meta["title"], sections, True, base_orig)]
-        if it_sections and base_trad:
-            # ts=True: PDF tradotto con sezioni + minutaggio, come l'originale.
-            exports.append((it_title, it_sections, True, base_trad))
-        for title, secs, ts, base_path in exports:
-            on_progress("export", None, None, "Creo il PDF")
-            for attempt in (1, 2):  # defensive dir-ensure + single retry (OneDrive)
-                try:
-                    _ensure_dir(f"{base_path}.pdf")
-                    tx.build_pdf(title, meta, secs, f"{base_path}.pdf", with_timestamps=ts)
-                    created.append(os.path.relpath(f"{base_path}.pdf", video_dir).replace("\\", "/"))
-                    break
-                except OSError:
-                    if attempt == 2:
-                        raise
-                    time.sleep(0.4)
+        on_progress("export", None, None, "Creo il PDF")
+        for attempt in (1, 2):  # defensive dir-ensure + single retry (OneDrive)
+            try:
+                _ensure_dir(f"{base_orig}.pdf")
+                tx.build_pdf(meta["title"], meta, sections, f"{base_orig}.pdf", with_timestamps=True)
+                created.append(os.path.relpath(f"{base_orig}.pdf", video_dir).replace("\\", "/"))
+                break
+            except OSError:
+                if attempt == 2:
+                    raise
+                time.sleep(0.4)
 
     n_words = sum(len(s["text"].split()) for s in segments)
     return {
@@ -544,55 +519,6 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
         "sections": len(meta["chapters"]) or 0,
         "engine_label": engine_label,
         "warnings": warnings,
-    }
-
-
-def translate_existing(out_root: str, title: str, client, on_progress=_noop) -> dict:
-    """SOLA ri-traduzione: rilegge la trascrizione già salvata e rigenera SOLO i
-    file di traduzione (md/txt/pdf), SENZA ri-trascrivere né toccare gli originali.
-
-    Riusa i segmenti dal .json esistente, quindi non spende crediti di
-    trascrizione. Restituisce il dict di riepilogo; solleva EngineError se non
-    trova la trascrizione o se la traduzione fallisce."""
-    loaded = tx.load_existing_transcript(out_root, title)
-    if not loaded:
-        raise EngineError("Trascrizione esistente non trovata o illeggibile.")
-    meta, segments, engine_label = loaded
-    safe_title = tx._safe_filename(meta["title"])
-    video_dir = os.path.join(out_root, safe_title)
-    sections = tx._build_sections(meta, segments)
-    created: list[str] = []
-
-    try:
-        it_title = tx.translate_text_groq(client, meta["title"])
-        it_sections = translate_sections(client, sections, on_progress)
-    except Exception as e:
-        raise EngineError("Traduzione non riuscita: " + _friendly_groq_error(e))
-    if not it_sections:
-        raise EngineError("La traduzione è risultata vuota.")
-
-    base_trad = os.path.join(video_dir, "traduzioni", safe_title)
-    on_progress("export", None, None, "Salvo la traduzione")
-    _write(f"{base_trad}.md", tx.build_md(it_title, meta, f"{engine_label} (tradotto in italiano)",
-                                          it_sections, with_timestamps=True), created, video_dir)
-    _write(f"{base_trad}.txt", tx.build_txt(it_title, meta, it_sections), created, video_dir)
-    for attempt in (1, 2):
-        try:
-            _ensure_dir(f"{base_trad}.pdf")
-            tx.build_pdf(it_title, meta, it_sections, f"{base_trad}.pdf", with_timestamps=True)
-            created.append(os.path.relpath(f"{base_trad}.pdf", video_dir).replace("\\", "/"))
-            break
-        except OSError:
-            if attempt == 2:
-                raise
-            time.sleep(0.4)
-
-    n_words = sum(len(s["text"].split()) for s in segments)
-    return {
-        "title": meta["title"], "video_dir": video_dir, "files": created,
-        "segments": len(segments), "words": n_words,
-        "sections": len(meta["chapters"]) or 0, "engine_label": engine_label,
-        "warnings": [],
     }
 
 

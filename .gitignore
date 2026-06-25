@@ -5,6 +5,10 @@
 # --- Output generato ---
 results/
 
+# --- Build PyInstaller (.exe) ---
+build/
+dist/
+
 # --- Python ---
 __pycache__/
 *.pyc
