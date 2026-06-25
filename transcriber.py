@@ -82,6 +82,13 @@ for _stream in (sys.stdout, sys.stderr):
     except Exception:
         pass
 
+# When running as a PyInstaller bundle (.exe), make the bundled ffmpeg/ffprobe
+# discoverable by prepending the bundle directory to PATH, so shutil.which() and
+# the subprocess calls find them without the user having ffmpeg installed.
+if getattr(sys, "frozen", False):
+    _bundle_dir = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+    os.environ["PATH"] = _bundle_dir + os.pathsep + os.environ.get("PATH", "")
+
 # === CONSOLE AND THEME ===
 # We define a small palette of style names so that in the rest of the code we
 # write [info]...[/info] instead of repeating the colors everywhere.
@@ -99,11 +106,70 @@ console = Console(theme=_theme)
 # Symbols used in messages (✓ ✗ → •). Keeping them here makes them easy to change.
 SYM_OK, SYM_FAIL, SYM_ARROW, SYM_DOT = "✓", "✗", "→", "•"
 
-# === CONFIGURATION ===
-# The program's "knobs", collected here at the top.
-GROQ_MODEL = "whisper-large-v3-turbo"   # Whisper model on Groq: "turbo" is very fast and cheap.
-                                        # Alternatives: "whisper-large-v3" (more accurate/slower),
-                                        # "distil-whisper-large-v3-en" (English only, ultra-fast).
+
+# === .env LOADING + CONFIG HELPERS ===========================================
+# Load the .env (next to this file) into os.environ at IMPORT time, so the
+# configuration constants further down can be overridden WITHOUT editing the
+# code. Values already present in the real environment win over the .env file.
+def _load_env_file() -> None:
+    """Read KEY=value lines from a sibling .env into os.environ (no overwrite)."""
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    try:
+        with open(env_path, "r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("export "):
+                    line = line[len("export "):]
+                if "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except OSError:
+        pass
+
+
+def _env_str(key: str, default: str) -> str:
+    """Read a string env var; blank/absent -> the default."""
+    v = os.environ.get(key, "").strip()
+    return v if v else default
+
+
+def _env_int(key: str, default: int) -> int:
+    """Read an integer env var; invalid/absent -> the default."""
+    try:
+        return int(os.environ.get(key, "").strip())
+    except (ValueError, TypeError):
+        return default
+
+
+def _env_opt(key: str) -> str | None:
+    """Read an OPTIONAL string env var; blank/absent -> None."""
+    v = os.environ.get(key, "").strip()
+    return v or None
+
+
+def _env_bool(key: str, default: bool) -> bool:
+    """Read a boolean env var ('1/true/yes/on'); blank/absent -> the default."""
+    v = os.environ.get(key, "").strip().lower()
+    if not v:
+        return default
+    return v in ("1", "true", "yes", "on", "si", "sì")
+
+
+# === CONFIGURATION (every value overridable from .env) =======================
+# The program's "knobs". Each has a sensible default but can be tuned from a .env
+# entry / environment variable, so users never need to edit this file.
+_load_env_file()
+
+# Whisper model on Groq: "turbo" is very fast and cheap. Alternatives:
+# "whisper-large-v3" (more accurate/slower), "distil-whisper-large-v3-en" (EN only).
+GROQ_MODEL = _env_str("ECHOSCRIPT_GROQ_MODEL", "whisper-large-v3-turbo")
+
 # Audio/video extensions accepted as LOCAL sources (phone recordings, PC files,
 # video files from which ffmpeg extracts the audio track). ffmpeg reads all of
 # these; anything not listed is still attempted but with a gentle warning.
@@ -113,28 +179,22 @@ AUDIO_EXTENSIONS = {
     ".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v",          # video (audio extracted)
 }
 
-CHUNK_SECONDS = 600                     # duration of each audio chunk in seconds (10 minutes)
-AUDIO_SAMPLE_RATE = 16000              # 16 kHz: the sample rate recommended for Whisper
-AUDIO_BITRATE = "64k"                  # audio bitrate of the chunks (low = small files, quality fine for speech)
-MAX_RETRIES = 3                        # attempts per chunk before giving up
-LANGUAGE = None                        # None = automatic language detection. Force with "it" or "en" if you want.
+CHUNK_SECONDS = _env_int("ECHOSCRIPT_CHUNK_SECONDS", 600)      # seconds per audio chunk (10 min)
+AUDIO_SAMPLE_RATE = _env_int("ECHOSCRIPT_SAMPLE_RATE", 16000)  # 16 kHz: recommended for Whisper
+AUDIO_BITRATE = _env_str("ECHOSCRIPT_BITRATE", "64k")          # chunk bitrate (low is fine for speech)
+MAX_RETRIES = _env_int("ECHOSCRIPT_MAX_RETRIES", 3)            # attempts per chunk before giving up
+# Audio language: None = auto-detect (Whisper). Force with e.g. "it"/"en" via the
+# ECHOSCRIPT_AUDIO_LANG env var or, per-run, the GUI/CLI selector.
+LANGUAGE = _env_opt("ECHOSCRIPT_AUDIO_LANG")
+# Word-level timestamps: ask Groq/faster-whisper for per-WORD timings (enables
+# precise subtitles later). On by default; disable with ECHOSCRIPT_WORD_TIMESTAMPS=0.
+WORD_TIMESTAMPS = _env_bool("ECHOSCRIPT_WORD_TIMESTAMPS", True)
 
-# --- Translation into Italian (via LLM on Groq) ---
-# Chat model used to translate the transcription. "llama-3.3-70b-versatile" gives
-# clearly BETTER quality (technical nuance, fluency) than the small models: it is
-# the default because translation quality matters more than speed here. Trade-off:
-# a lower free-tier daily token limit (~100k/day), so on very long videos you may
-# hit it (the run warns and keeps the transcription). For maximum throughput on
-# long videos you can switch back to "llama-3.1-8b-instant" (~500k/day, lower quality).
-GROQ_TRANSLATE_MODEL = "llama-3.3-70b-versatile"
-# Long texts are translated in pieces of ~at most this number of characters, so
-# as not to exceed the model's output limit (splitting at sentence boundaries).
-TRANSLATE_MAX_CHARS = 2500
-
-# --- LOCAL backend (faster-whisper on CPU) ---
-# compute_type "int8" is the fastest on CPU (8-bit quantization): it loses very
-# little quality but is much faster than "float32".
-LOCAL_COMPUTE_TYPE = "int8"
+# --- LOCAL backend (faster-whisper) ---
+# Device: "auto" picks CUDA (GPU) when available, else CPU. compute_type "" means
+# "auto" (float16 on GPU, int8 on CPU); both can be forced via .env.
+LOCAL_DEVICE = _env_str("ECHOSCRIPT_DEVICE", "auto")
+LOCAL_COMPUTE_TYPE = _env_str("ECHOSCRIPT_COMPUTE_TYPE", "")
 # Local models selectable in the panel (number -> (model_name, description)).
 # Bigger = more accurate but slower on CPU. The time estimates are for a video
 # of ~2 hours without a GPU and are indicative (they depend on your processor).
@@ -335,6 +395,91 @@ def delete_checkpoint(meta: dict) -> None:
         os.remove(checkpoint_path(meta))
     except OSError:
         pass
+
+
+# --- Local transcription checkpoint (resume a local run interrupted mid-way) -
+# faster-whisper processes the whole file in one pass (no chunks like Groq), so
+# to support resuming we periodically save the segments produced so far plus the
+# audio time reached. On resume we trim the audio from that point with ffmpeg,
+# transcribe only the remainder, and shift its timestamps back into place.
+
+# Save a local checkpoint every this many seconds of AUDIO processed (not wall
+# clock): a balance between losing little work and not writing too often.
+LOCAL_CHECKPOINT_EVERY = 120
+
+
+def local_checkpoint_path(meta: dict) -> str:
+    """Path of the local-transcription checkpoint for this source."""
+    return os.path.join(_checkpoints_dir(), _checkpoint_key(meta) + "_local.json")
+
+
+def load_local_checkpoint(meta: dict) -> dict | None:
+    """Read the partial local transcription, or None if absent/corrupt.
+
+    Valid only if it carries the segments produced and the audio time reached
+    ('done_seconds'); the caller also checks the model/duration still match."""
+    p = local_checkpoint_path(meta)
+    if not os.path.isfile(p):
+        return None
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if data.get("done_seconds") and isinstance(data.get("segments"), list):
+            return data
+    except Exception:
+        return None
+    return None
+
+
+def save_local_checkpoint(meta: dict, segments: list, done_seconds: float,
+                          model: str, duration: float, detected=None) -> None:
+    """Atomically save the partial local transcription (for resuming)."""
+    os.makedirs(_checkpoints_dir(), exist_ok=True)
+    p = local_checkpoint_path(meta)
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"model": model, "done_seconds": done_seconds, "duration": duration,
+                   "detected_language": detected, "segments": segments},
+                  f, ensure_ascii=False)
+    os.replace(tmp, p)
+
+
+def delete_local_checkpoint(meta: dict) -> None:
+    try:
+        os.remove(local_checkpoint_path(meta))
+    except OSError:
+        pass
+
+
+def _local_resume_point(model_name: str, duration: float, resume_cp: dict | None):
+    """Decide where a local transcription should start, from an EXPLICIT checkpoint.
+
+    Returns (start_offset_seconds, prior_segments, prior_detected). A non-zero
+    offset means the passed checkpoint is valid (same model and ~same duration);
+    the caller will trim the audio from that point. Returns (0, [], None) when no
+    checkpoint is passed or it does not match — the caller never auto-loads, so
+    "start over" reliably means start over."""
+    cp = resume_cp
+    if not cp:
+        return 0.0, [], None
+    same_model = cp.get("model") == model_name
+    same_audio = (not duration or not cp.get("duration")
+                  or abs(float(cp["duration"]) - float(duration)) < 1.0)
+    if same_model and same_audio:
+        return float(cp.get("done_seconds", 0)), list(cp.get("segments") or []), cp.get("detected_language")
+    return 0.0, [], None
+
+
+def _trim_audio(audio_path: str, start_seconds: float, workdir: str) -> str:
+    """Re-encode the audio from 'start_seconds' onward to a 16 kHz mono WAV.
+
+    Used when resuming a local transcription: we feed faster-whisper only the
+    not-yet-processed tail. Returns the path of the trimmed file."""
+    out_path = os.path.join(workdir, "resume_trim.wav")
+    cmd = ["ffmpeg", "-y", "-ss", str(start_seconds), "-i", audio_path,
+           "-ac", "1", "-ar", str(AUDIO_SAMPLE_RATE), out_path]
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+    return out_path
 
 
 def transcription_exists(out_root: str, title: str) -> bool:
@@ -851,8 +996,37 @@ def split_audio(audio_path: str, duration: float, workdir: str) -> list[tuple[fl
 
 # === PHASE 3: TRANSCRIPTION WITH GROQ ===
 
+# Sentinel telling a function to fall back to the module-level LANGUAGE config
+# (we cannot use None for that, since None is itself a valid value = "auto-detect").
+_USE_CONFIG = object()
+
+
+def _coerce(obj, key):
+    """Read 'key' from an item that may be a dict OR an object (the Groq SDK
+    returns both depending on version): obj['key'] if a mapping, else
+    getattr(obj, key)."""
+    if isinstance(obj, dict):
+        return obj.get(key)
+    return getattr(obj, key, None)
+
+
+def _extract_words(result) -> list[dict]:
+    """Normalize Groq's per-word timestamps (when requested) to a flat list of
+    {word, start, end}. Returns [] if the response carries no word timings."""
+    raw = getattr(result, "words", None) or []
+    words = []
+    for w in raw:
+        txt = _coerce(w, "word")
+        start, end = _coerce(w, "start"), _coerce(w, "end")
+        if txt is None or start is None or end is None:
+            continue
+        words.append({"word": str(txt), "start": float(start), "end": float(end)})
+    return words
+
+
 def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
-                      return_language: bool = False):
+                      return_language: bool = False, language=_USE_CONFIG,
+                      want_words: bool | None = None):
     """Send ONE audio chunk to Groq and return the list of its segments.
 
     Uses response_format='verbose_json' to receive, in addition to the text, the
@@ -861,11 +1035,24 @@ def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
     continuity (proper names, terminology) from one chunk to the next.
     Retries up to MAX_RETRIES times in case of a network/API error.
 
+    'language' forces the audio language (e.g. 'it'/'en'); the _USE_CONFIG
+    sentinel means "use the LANGUAGE config" (None there = auto-detect).
+    'want_words' requests per-word timestamps (defaults to the WORD_TIMESTAMPS
+    config); when on, each segment also carries a 'words' list (start/end/word).
+
     If return_language=True, returns (segments, language) where 'language' is the
     ISO code Whisper auto-detected (e.g. 'en'/'it'), otherwise just the segments
     (backward-compatible default for the CLI)."""
+    lang_opt = LANGUAGE if language is _USE_CONFIG else language
+    words_on = WORD_TIMESTAMPS if want_words is None else want_words
+    granularities = ["segment", "word"] if words_on else ["segment"]
+
     def _ret(segs, lang):
         return (segs, lang) if return_language else segs
+
+    def _attach_words(seg_start: float, seg_end: float, words: list[dict]) -> list[dict]:
+        """Pick the words whose start falls inside this segment's [start, end)."""
+        return [w for w in words if seg_start - 0.05 <= w["start"] < seg_end + 0.05]
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
@@ -874,9 +1061,8 @@ def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
                     file=(os.path.basename(chunk_path), f.read()),
                     model=GROQ_MODEL,
                     response_format="verbose_json",
-                    # timestamp_granularities requests timestamps at the segment (sentence) level.
-                    timestamp_granularities=["segment"],
-                    language=LANGUAGE,            # None = auto-detection
+                    timestamp_granularities=granularities,
+                    language=lang_opt,            # None = auto-detection
                     prompt=prompt[-400:],         # last ~400 characters as context
                     temperature=0.0,             # 0 = more deterministic/faithful output
                 )
@@ -886,10 +1072,15 @@ def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
             if segments is None:
                 # If for some reason there are no segments, we fall back to the whole text.
                 return _ret([{"start": 0.0, "end": 0.0, "text": getattr(result, "text", "").strip()}], lang)
-            return _ret([
-                {"start": float(s["start"]), "end": float(s["end"]), "text": s["text"].strip()}
-                for s in segments
-            ], lang)
+            words = _extract_words(result) if words_on else []
+            out_segs = []
+            for s in segments:
+                ss, se = float(s["start"]), float(s["end"])
+                seg = {"start": ss, "end": se, "text": s["text"].strip()}
+                if words:
+                    seg["words"] = _attach_words(ss, se, words)
+                out_segs.append(seg)
+            return _ret(out_segs, lang)
         except GroqRateLimit:
             raise
         except Exception as e:
@@ -963,9 +1154,12 @@ def transcribe(client: Groq, chunks: list[tuple[float, str]],
                 # parziale a chi chiama per il checkpoint.
                 raise TranscriptionInterrupted(all_segments, i, n, detected)
             for seg in segments:
-                # Timing correction: + the chunk's offset.
+                # Timing correction: + the chunk's offset (segment AND its words).
                 seg["start"] += offset
                 seg["end"] += offset
+                for w in seg.get("words", []):
+                    w["start"] += offset
+                    w["end"] += offset
                 all_segments.append(seg)
             # We update the context with the text of this chunk.
             if segments:
@@ -977,7 +1171,29 @@ def transcribe(client: Groq, chunks: list[tuple[float, str]],
 
 # === LOCAL BACKEND: TRANSCRIPTION WITH faster-whisper ===
 
-def transcribe_local(model_name: str, audio_path: str, duration: float):
+def _resolve_device() -> tuple[str, str]:
+    """Pick (device, compute_type) for faster-whisper, honoring the config.
+
+    LOCAL_DEVICE 'auto' (the default) selects CUDA when a GPU is available (5-20x
+    faster), otherwise CPU. An empty LOCAL_COMPUTE_TYPE auto-picks the fast,
+    low-loss default for the device: float16 on GPU, int8 on CPU. Both can be
+    forced via .env (ECHOSCRIPT_DEVICE / ECHOSCRIPT_COMPUTE_TYPE)."""
+    device = LOCAL_DEVICE.strip().lower()
+    if device in ("", "auto"):
+        device = "cpu"
+        try:
+            import torch  # optional: only present if the user installed it
+            if torch.cuda.is_available():
+                device = "cuda"
+        except Exception:
+            pass
+    compute = LOCAL_COMPUTE_TYPE.strip() or ("float16" if device == "cuda" else "int8")
+    return device, compute
+
+
+def transcribe_local(model_name: str, audio_path: str, duration: float,
+                     meta: dict | None = None, resume_cp: dict | None = None,
+                     workdir: str | None = None):
     """Transcribe the entire audio LOCALLY with faster-whisper (no data over the network).
 
     Returns (segments, detected_language).
@@ -986,6 +1202,12 @@ def transcribe_local(model_name: str, audio_path: str, duration: float):
     and returns the segments incrementally (a generator), so we can update the
     bar as we go. The bar uses the video's DURATION as the total and advances up
     to the 'end' of the last processed segment.
+
+    RESUME: if 'meta' is given, the partial result is checkpointed every
+    LOCAL_CHECKPOINT_EVERY seconds of audio. If a matching checkpoint exists (and
+    'workdir' is available for the trimmed file), we trim the audio from the saved
+    point with ffmpeg, transcribe only the remainder, and shift its timestamps
+    back, so an interrupted long run resumes instead of starting over.
 
     PRIVACY: on the first use of a model, faster-whisper downloads its "weights"
     from HuggingFace (once only, then they stay cached). The AUDIO, however, is
@@ -1000,30 +1222,50 @@ def transcribe_local(model_name: str, audio_path: str, duration: float):
         console.print("[error]faster-whisper non installato. Esegui:  pip install faster-whisper[/error]")
         return [], None
 
+    # Device/precision: GPU (CUDA) when available, else CPU (see _resolve_device).
+    device, compute_type = _resolve_device()
+    dev_note = "GPU (CUDA)" if device == "cuda" else "CPU"
+
+    # Resume point (if a matching checkpoint exists): reuse prior segments and feed
+    # faster-whisper only the not-yet-transcribed tail of the audio.
+    start_offset, all_segments, detected = _local_resume_point(model_name, duration, resume_cp)
+    transcribe_path = audio_path
+    if start_offset > 0:
+        if workdir is None:
+            start_offset, all_segments, detected = 0.0, [], None  # cannot trim: full re-run
+        else:
+            try:
+                transcribe_path = _trim_audio(audio_path, start_offset, workdir)
+                console.print(f"  [info]Ripresa dalla posizione {_format_timestamp(start_offset)} "
+                              f"({len(all_segments)} segmenti già fatti).[/info]")
+            except Exception:
+                start_offset, all_segments, detected = 0.0, [], None  # trim failed: full re-run
+
     # Loading the model (on first use it downloads the weights).
     with console.status(
-        f"[info]Carico il modello '{model_name}'... "
+        f"[info]Carico il modello '{model_name}' su {dev_note}... "
         f"(al primo uso scarica i pesi da HuggingFace, una volta sola)[/info]",
         spinner="dots",
     ):
         try:
-            model = WhisperModel(model_name, device="cpu", compute_type=LOCAL_COMPUTE_TYPE)
+            model = WhisperModel(model_name, device=device, compute_type=compute_type)
         except Exception as e:
             console.print(f"[error]Impossibile caricare il modello: {e}[/error]")
             return [], None
 
     # transcribe() returns (segment_generator, info). The segments are produced
-    # as the audio is processed. vad_filter skips the silences.
+    # as the audio is processed. vad_filter skips the silences; word_timestamps
+    # asks for per-word timings (so segments carry a 'words' list).
     try:
         segments_gen, info = model.transcribe(
-            audio_path, language=LANGUAGE, vad_filter=True, beam_size=5,
+            transcribe_path, language=LANGUAGE, vad_filter=True, beam_size=5,
+            word_timestamps=WORD_TIMESTAMPS,
         )
     except Exception as e:
         console.print(f"[error]Errore durante la trascrizione locale: {e}[/error]")
-        return [], None
-    detected = getattr(info, "language", None)
+        return all_segments or [], detected
+    detected = detected or getattr(info, "language", None)
 
-    all_segments: list[dict] = []
     progress = Progress(
         SpinnerColumn("dots", style="bright_green"),
         TextColumn("[phase]{task.description}"),
@@ -1036,21 +1278,45 @@ def transcribe_local(model_name: str, audio_path: str, duration: float):
         console=console, expand=False,
     )
 
+    last_abs_end = start_offset   # highest audio time reached (absolute)
+    last_saved = start_offset     # audio time at the last checkpoint save
+    completed_fully = True
     with progress:
         # total = the video's duration: the bar advances based on the reached timestamp.
-        task_id = progress.add_task("Trascrivo (locale)", total=duration or None)
+        task_id = progress.add_task("Trascrivo (locale)", total=duration or None,
+                                    completed=min(start_offset, duration) if duration else None)
         for seg in segments_gen:
             if _interrupted:
+                completed_fully = False
                 break
-            all_segments.append({
-                "start": float(seg.start), "end": float(seg.end), "text": seg.text.strip(),
-            })
+            # Shift the tail's timestamps back to their absolute position.
+            abs_start, abs_end = float(seg.start) + start_offset, float(seg.end) + start_offset
+            entry = {"start": abs_start, "end": abs_end, "text": seg.text.strip()}
+            seg_words = getattr(seg, "words", None) or []
+            if seg_words:
+                entry["words"] = [
+                    {"word": w.word, "start": float(w.start) + start_offset,
+                     "end": float(w.end) + start_offset}
+                    for w in seg_words if w.start is not None and w.end is not None
+                ]
+            all_segments.append(entry)
+            last_abs_end = abs_end
             if duration:
-                # min() avoids exceeding 100% if the last segment overruns the estimated duration.
-                progress.update(task_id, completed=min(seg.end, duration))
-        if duration:
-            progress.update(task_id, completed=duration)  # brings the bar to 100% at the end of the loop
+                # min() avoids exceeding 100% if the last segment overruns the estimate.
+                progress.update(task_id, completed=min(abs_end, duration))
+            # Periodic checkpoint, so an interruption loses at most a couple of minutes.
+            if meta and (abs_end - last_saved) >= LOCAL_CHECKPOINT_EVERY:
+                save_local_checkpoint(meta, all_segments, abs_end, model_name, duration, detected)
+                last_saved = abs_end
+        if duration and completed_fully:
+            progress.update(task_id, completed=duration)  # bring the bar to 100% when done
 
+    # Done -> drop the checkpoint; interrupted -> keep the latest partial to resume.
+    if meta:
+        if completed_fully:
+            delete_local_checkpoint(meta)
+        else:
+            save_local_checkpoint(meta, all_segments, last_abs_end, model_name, duration, detected)
     return all_segments, detected
 
 
@@ -1173,113 +1439,6 @@ def build_transcript_json(meta: dict, segments: list[dict], engine_label: str) -
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
-# === TRANSLATION INTO ITALIAN (via LLM on Groq) ===
-
-def _split_for_translation(text: str, max_chars: int) -> list[str]:
-    """Split a long text into pieces <= max_chars, cutting at sentence boundaries.
-
-    Avoids exceeding the model's output limit on very long texts (e.g. a video
-    without chapters). It splits at the sentence-ending punctuation (.!?) and
-    re-joins the sentences as long as they fit within the limit."""
-    text = text.strip()
-    if len(text) <= max_chars:
-        return [text] if text else []
-    # Split keeping the sentence-ending punctuation attached to the sentence.
-    sentences = re.split(r"(?<=[.!?])\s+", text)
-    chunks: list[str] = []
-    current = ""
-    for sent in sentences:
-        if len(current) + len(sent) + 1 > max_chars and current:
-            chunks.append(current.strip())
-            current = sent
-        else:
-            current = f"{current} {sent}".strip()
-    if current:
-        chunks.append(current.strip())
-    return chunks
-
-
-def _strip_markdown(s: str) -> str:
-    """Rimuove la formattazione Markdown che gli LLM tendono ad aggiungere.
-
-    Serve perché il modello (spec. il 70b) "abbellisce" il testo con grassetto
-    (`**parola**`), corsivo, titoli ed elenchi: nel `.md` diventa grassetto
-    indesiderato, nel PDF/TXT restano asterischi visibili. Qui togliamo gli
-    enfatici **/__/*/_ , i titoli (#) e i marcatori di elenco/citazione."""
-    # Grassetto e corsivo (coppie di marcatori attorno al testo).
-    s = re.sub(r"\*\*(.+?)\*\*", r"\1", s)
-    s = re.sub(r"__(.+?)__", r"\1", s)
-    s = re.sub(r"\*(.+?)\*", r"\1", s)
-    s = re.sub(r"(?<!\w)_(.+?)_(?!\w)", r"\1", s)
-    # Eventuali marcatori spaiati rimasti.
-    s = s.replace("**", "").replace("__", "")
-    # Marcatori a inizio riga: titoli #, citazioni >, elenchi -, *, +.
-    s = re.sub(r"(?m)^\s{0,3}(#{1,6}\s+|>\s+|[-*+]\s+)", "", s)
-    return s.strip()
-
-
-def translate_text_groq(client, text: str) -> str:
-    """Translate a text into Italian using an LLM on Groq.
-
-    The system prompt asks to keep the technical terms correct and to return
-    ONLY the translation, in PLAIN text (no Markdown). Long texts are translated
-    in pieces (see _split_for_translation) and stitched back together. As a
-    safety net we also strip any Markdown the model adds anyway."""
-    text = (text or "").strip()
-    if not text:
-        return ""
-    out_parts: list[str] = []
-    for piece in _split_for_translation(text, TRANSLATE_MAX_CHARS):
-        resp = client.chat.completions.create(
-            model=GROQ_TRANSLATE_MODEL,
-            messages=[
-                {"role": "system", "content": (
-                    "Sei un traduttore professionista. Traduci in italiano il testo dell'utente. "
-                    "Mantieni corretti i termini tecnici di informatica/AI (es. RAG, fine-tuning, "
-                    "embedding, prompt, token, dataset). Restituisci SOLO la traduzione, in "
-                    "TESTO SEMPLICE: NON usare formattazione Markdown, niente grassetto, corsivo, "
-                    "asterischi, titoli (#) o elenchi puntati. Niente introduzioni, note o "
-                    "virgolette aggiunte; mantieni la punteggiatura del testo originale."
-                )},
-                {"role": "user", "content": piece},
-            ],
-            temperature=0.2,
-        )
-        out_parts.append(_strip_markdown(resp.choices[0].message.content.strip()))
-    return " ".join(out_parts)
-
-
-def translate_sections(client, sections: list[dict]) -> list[dict]:
-    """Translate the title and text of each section, with a progress bar.
-
-    Returns new sections (same structure) with the contents in Italian. Keeps
-    'start' (for consistency) even though the translated version does not show
-    the timings."""
-    translated: list[dict] = []
-    progress = Progress(
-        SpinnerColumn("dots", style="bright_magenta"),
-        TextColumn("[phase]{task.description}"),
-        BarColumn(bar_width=40, style="bar.back", complete_style="bright_magenta", finished_style="bold magenta"),
-        TaskProgressColumn(),
-        MofNCompleteColumn(),
-        TextColumn("[dim]│[/dim]"),
-        TimeElapsedColumn(),
-        console=console, expand=False,
-    )
-    n = len(sections)
-    with progress:
-        task_id = progress.add_task(f"Traduco 1/{n}", total=n)
-        for i, sec in enumerate(sections, 1):
-            if _interrupted:
-                break
-            progress.update(task_id, description=f"Traduco sezione {i}/{n} (attendi)")
-            t_title = translate_text_groq(client, sec["title"]) if sec["title"] else None
-            t_text = translate_text_groq(client, sec["text"]) if sec["text"] else ""
-            translated.append({"start": sec["start"], "title": t_title, "text": t_text})
-            progress.update(task_id, advance=1, description=f"Sezione {i}/{n} tradotta")
-    return translated
-
-
 # === EXPORT FOR READING (PDF) ===
 
 def _section_heading(sec: dict, with_timestamps: bool) -> str:
@@ -1348,36 +1507,16 @@ def build_pdf(title: str, meta: dict, sections: list[dict], out_path: str,
 def load_dotenv() -> None:
     """Load the variables from a '.env' file next to the script, if present.
 
-    It is a mini-parser with no external dependencies: it reads lines in the
-    KEY=value format (ignoring empty lines and comments with '#'), removes any
-    quotes around the value, and sets the environment variable ONLY if it is not
-    already defined. This way a real environment variable (e.g. set with setx)
-    always takes precedence over the .env file.
+    Thin public wrapper around _load_env_file() (the same loader used at import
+    time): kept for backward compatibility, since the engine and the GUI call
+    tx.load_dotenv() before reading the Groq/DeepL keys. It reads KEY=value lines
+    (ignoring comments/blank lines, tolerating an 'export ' prefix), strips any
+    surrounding quotes, and sets each variable ONLY if not already defined, so a
+    real environment variable always wins over the .env file.
 
     The .env file must NOT be committed (it is already in .gitignore): keep it
-    only locally, it contains your secret key."""
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-    if not os.path.exists(env_path):
-        return
-    try:
-        with open(env_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                # Skip empty lines and comments. Tolerate the "export " prefix.
-                if not line or line.startswith("#"):
-                    continue
-                if line.startswith("export "):
-                    line = line[len("export "):]
-                if "=" not in line:
-                    continue
-                key, _, value = line.partition("=")  # partition splits at the FIRST '='
-                key = key.strip()
-                value = value.strip().strip('"').strip("'")  # strip spaces and quotes
-                # setdefault: does not overwrite an already existing variable.
-                if key and key not in os.environ:
-                    os.environ[key] = value
-    except OSError as e:
-        console.print(f"[warning]Impossibile leggere .env: {e}[/warning]")
+    only locally, it contains your secret keys."""
+    _load_env_file()
 
 
 # Placeholder value of the .env file: it must be treated as "key not entered".
@@ -1512,11 +1651,15 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
                 return None
             delete_checkpoint(meta)
         else:
+            dev, _ = _resolve_device()
+            dev_label = "GPU" if dev == "cuda" else "CPU"
             console.print()
-            console.rule(f"[phase]✎ Fase {step['transcribe']}/{n} — Trascrizione · Locale CPU ({local_model})[/phase]",
+            console.rule(f"[phase]✎ Fase {step['transcribe']}/{n} — Trascrizione · Locale {dev_label} ({local_model})[/phase]",
                          style="bright_green")
-            console.print("  [warning]La trascrizione locale gira sulla CPU: può richiedere diversi minuti.[/warning]")
-            segments, detected = transcribe_local(local_model, audio_path, duration)
+            if dev != "cuda":
+                console.print("  [warning]La trascrizione locale gira sulla CPU: può richiedere diversi minuti.[/warning]")
+            segments, detected = transcribe_local(local_model, audio_path, duration,
+                                                  meta=meta, resume_cp=resume_cp, workdir=workdir)
 
         # Lingua dell'audio rilevata da Whisper (per la card di riepilogo).
         meta["detected_language"] = detected
@@ -1527,16 +1670,15 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
 
 
 def _save_outputs(meta: dict, segments: list[dict], engine_label: str,
-                  do_translate: bool, tclient, do_export: bool, out_root: str) -> None:
+                  do_export: bool, out_root: str) -> None:
     """Write all outputs for ONE transcription, then print the summary panel.
 
-    Layout: out_root/<title>/trascrizioni/ (+ traduzioni/ if translating). The
-    translation and export choices are passed in (asked once, up front) so the
-    same flags apply to every file in a batch."""
+    Layout: out_root/<title>/trascrizioni/ (md, txt, json, + pdf if exporting).
+    The export choice is passed in (asked once, up front) so the same flag
+    applies to every file in a batch."""
     # --- Saving: tidy folder structure ---
     #   results/<title>/
-    #       trascrizioni/  -> md, txt, json (+ pdf, tex if exported)
-    #       traduzioni/    -> Italian version (+ pdf, tex if exported)
+    #       trascrizioni/  -> md, txt, json (+ pdf if exported)
     safe_title = _safe_filename(meta["title"])
     video_dir = os.path.join(out_root, safe_title)
     trans_dir = os.path.join(video_dir, "trascrizioni")
@@ -1556,35 +1698,11 @@ def _save_outputs(meta: dict, segments: list[dict], engine_label: str,
     _save(f"{base_orig}.txt", build_txt(meta["title"], meta, sections))
     _save(f"{base_orig}.json", build_transcript_json(meta, segments, engine_label))
 
-    # --- Translation into Italian (optional, in the 'traduzioni' subfolder) ---
-    it_sections = None       # translated sections (if requested), reused by the export
-    it_title = None
-    base_trad = None         # base path of the translated files (set if translating)
-    if do_translate and tclient is not None:
-        console.print()
-        console.rule("[phase]🌐 Traduzione in italiano (Groq)[/phase]", style="bright_magenta")
-        with console.status("[info]Traduco il titolo...[/info]", spinner="dots"):
-            it_title = translate_text_groq(tclient, meta["title"])
-        it_sections = translate_sections(tclient, sections)
-        if it_sections:
-            # We create the 'traduzioni' subfolder only now that it is really needed.
-            trad_dir = os.path.join(video_dir, "traduzioni")
-            os.makedirs(trad_dir, exist_ok=True)
-            base_trad = os.path.join(trad_dir, safe_title)
-            # The translated files have NO timings (clean version to read).
-            _save(f"{base_trad}.md", build_md(it_title, meta, f"{engine_label} (tradotto in italiano)",
-                                              it_sections, with_timestamps=False))
-            _save(f"{base_trad}.txt", build_txt(it_title, meta, it_sections))
-
     # --- Export for reading: PDF (optional) ---
     if do_export:
         console.print()
         console.rule("[phase]📄 Esportazione PDF[/phase]", style="bright_blue")
-        # (title, sections, timings, base-path, label) for the original and, if present, the translated one.
-        exports = [(meta["title"], sections, True, base_orig, "originale")]
-        if it_sections and base_trad:
-            exports.append((it_title, it_sections, False, base_trad, "IT"))
-        for title, secs, ts, base_path, etichetta in exports:
+        for title, secs, ts, base_path, etichetta in [(meta["title"], sections, True, base_orig, "originale")]:
             try:
                 with console.status(f"[info]Creo il PDF ({etichetta})...[/info]", spinner="dots"):
                     build_pdf(title, meta, secs, f"{base_path}.pdf", with_timestamps=ts)
@@ -1631,43 +1749,44 @@ def _save_outputs(meta: dict, segments: list[dict], engine_label: str,
     ))
 
 
-def _translate_existing_cli(out_root: str, title: str, tclient) -> None:
-    """SOLA ri-traduzione (CLI): rilegge la trascrizione salvata e rigenera solo
-    i file di traduzione (md/txt/pdf), senza ri-trascrivere."""
-    loaded = load_existing_transcript(out_root, title)
-    if not loaded:
-        console.print("[error]Trascrizione esistente non trovata o illeggibile.[/error]")
-        return
-    meta, segments, engine_label = loaded
-    safe = _safe_filename(meta["title"])
-    video_dir = os.path.join(out_root, safe)
-    sections = _build_sections(meta, segments)
-    console.print()
-    console.rule("[phase]🌐 Sola traduzione in italiano (Groq)[/phase]", style="bright_magenta")
-    try:
-        with console.status("[info]Traduco il titolo...[/info]", spinner="dots"):
-            it_title = translate_text_groq(tclient, meta["title"])
-        it_sections = translate_sections(tclient, sections)
-    except Exception as e:
-        console.print(f"[error]Traduzione non riuscita: {e}[/error]")
-        return
-    if not it_sections:
-        console.print("[warning]Traduzione vuota.[/warning]")
-        return
-    trad_dir = os.path.join(video_dir, "traduzioni")
-    os.makedirs(trad_dir, exist_ok=True)
-    base = os.path.join(trad_dir, safe)
-    with open(f"{base}.md", "w", encoding="utf-8") as f:
-        f.write(build_md(it_title, meta, f"{engine_label} (tradotto in italiano)",
-                         it_sections, with_timestamps=True))
-    with open(f"{base}.txt", "w", encoding="utf-8") as f:
-        f.write(build_txt(it_title, meta, it_sections))
-    try:
-        with console.status("[info]Creo il PDF...[/info]", spinner="dots"):
-            build_pdf(it_title, meta, it_sections, f"{base}.pdf", with_timestamps=True)
-    except Exception as e:
-        console.print(f"[error]Export PDF fallito: {e}[/error]")
-    console.print(f"[success]✓ Traduzione aggiornata in {trad_dir}[/success]")
+# === PRE-RUN ESTIMATE (cost for Groq, time for local) ========================
+# Approximate Groq audio pricing ($ per hour of audio) and local processing-speed
+# factors (processing time / audio time), used ONLY for the pre-run estimate so
+# the user knows what to expect before committing. Figures are indicative.
+GROQ_PRICE_PER_HOUR = {
+    "whisper-large-v3-turbo": 0.04,
+    "whisper-large-v3": 0.111,
+    "distil-whisper-large-v3-en": 0.02,
+}
+_LOCAL_REALTIME_CPU = {
+    "base": 0.10, "small": 0.18, "medium": 0.45,
+    "large-v3": 0.90, "large-v3-turbo": 0.22,
+}
+
+
+def estimate_job(meta: dict, backend: str, model: str | None = None) -> dict:
+    """Rough pre-run estimate for ONE source, BEFORE downloading/transcribing.
+
+    Groq: estimated $ cost from the audio duration and the model's per-hour price.
+    Local: estimated processing TIME from a per-model realtime factor, divided by
+    ~8 on GPU. Returns a dict with a ready-to-show Italian 'detail' string."""
+    duration = meta.get("duration") or 0
+    hours = duration / 3600
+    if backend == "groq":
+        price = GROQ_PRICE_PER_HOUR.get(GROQ_MODEL, 0.04)
+        cost = hours * price
+        return {"backend": "groq", "duration": duration, "cost_usd": cost,
+                "detail": (f"costo stimato ~${cost:.3f} (Groq {GROQ_MODEL}, "
+                           f"{_format_duration(duration)} di audio)")}
+    device, _ = _resolve_device()
+    rt = _LOCAL_REALTIME_CPU.get(model or "small", 0.2)
+    if device == "cuda":
+        rt /= 8
+    secs = duration * rt
+    dev = "GPU" if device == "cuda" else "CPU"
+    return {"backend": "local", "duration": duration, "device": device, "seconds": secs,
+            "detail": (f"tempo stimato ~{_format_duration(secs)} su {dev} "
+                       f"(modello {model or 'small'}); nessun costo (offline)")}
 
 
 def run() -> None:
@@ -1711,6 +1830,7 @@ def run() -> None:
         if not meta:
             return
         display_video_info(meta)
+        console.print(f"  [dim]💡 {estimate_job(meta, backend, local_model)['detail']}[/dim]")
         if not _confirm("Procedo con la trascrizione di questo video?", accent="bright_cyan"):
             console.print("[warning]Operazione annullata.[/warning]")
             return
@@ -1726,11 +1846,21 @@ def run() -> None:
         with console.status("[info]Leggo la durata dei file...[/info]", spinner="dots"):
             metas = [local_file_meta(f) for f in files]
         display_local_sources(metas)
+        total_dur = sum(m["duration"] or 0 for m in metas)
+        console.print(f"  [dim]💡 {estimate_job({'duration': total_dur}, backend, local_model)['detail']}[/dim]")
         what = "questo file" if len(metas) == 1 else f"questi {len(metas)} file"
         if not _confirm(f"Procedo con la trascrizione di {what}?", accent="bright_green"):
             console.print("[warning]Operazione annullata.[/warning]")
             return
         jobs = [(m, ("local", m["source_path"])) for m in metas]
+
+    # Optional: force the audio language (otherwise Whisper auto-detects it).
+    # Helps on noisy/multilingual audio where auto-detection can pick wrong.
+    global LANGUAGE
+    al = _prompt("Lingua dell'audio", "(invio = autorileva · es. it, en, es, fr, de)",
+                 accent="bright_blue").strip().lower()
+    if al:
+        LANGUAGE = al
 
     # We initialize the Groq client only if it is really needed (cloud backend),
     # and only after the user's confirmation.
@@ -1744,16 +1874,6 @@ def run() -> None:
     engine_label = (f"Locale / faster-whisper {local_model}" if backend == "local"
                     else f"Groq / {GROQ_MODEL}")
 
-    # Translate/export are asked ONCE here and applied to every job (so a batch
-    # does not stop to ask between files).
-    do_translate = _confirm("Vuoi creare anche la versione tradotta in italiano?", accent="bright_magenta")
-    tclient = client  # the translation always uses Groq, even when transcribing locally
-    if do_translate and tclient is None:
-        console.print("[warning]La traduzione usa Groq (cloud): il testo verra' inviato ai loro server.[/warning]")
-        tclient = get_groq_client()
-        if tclient is None:
-            console.print("[warning]Traduzione saltata (nessun client Groq).[/warning]")
-            do_translate = False
     # Il PDF viene SEMPRE generato (come nella GUI): niente più domanda.
     do_export = True
     console.print(f"  {SYM_OK} Il PDF verrà generato automaticamente.")
@@ -1771,37 +1891,47 @@ def run() -> None:
                          style="bright_green")
 
         # Controlli prima di trascrivere: già trascritto / parziale da riprendere.
-        resume_cp = load_checkpoint(meta) if backend == "groq" else None
+        # La ripresa esiste sia per Groq (a blocchi) sia per il locale (a tempo).
+        resume_cp = load_checkpoint(meta) if backend == "groq" else load_local_checkpoint(meta)
+        is_local_cp = bool(resume_cp) and "done_seconds" in resume_cp
+
+        def _drop_cp() -> None:
+            """Delete whichever checkpoint kind applies to this run."""
+            delete_local_checkpoint(meta) if backend == "local" else delete_checkpoint(meta)
+
         if transcription_exists(out_root, meta["title"]):
             console.print(f"[warning]«{meta['title']}» è già stato trascritto in results/.[/warning]")
-            ch = _prompt("Cosa fai? [r]itrascrivi tutto · [t]raduci soltanto · [s]alta",
-                         "(r/t/s)", accent="bright_yellow").strip().lower()
-            if ch.startswith("t"):
-                tc = tclient or client or get_groq_client()
-                if tc:
-                    _translate_existing_cli(out_root, meta["title"], tc)
-                continue
+            ch = _prompt("Cosa fai? [r]itrascrivi tutto · [s]alta",
+                         "(r/s)", accent="bright_yellow").strip().lower()
             if not ch.startswith("r"):
                 console.print("[dim]Saltato.[/dim]")
                 continue
-            resume_cp = None  # ritrascrizione completa: ignora eventuale parziale
+            _drop_cp()         # ritrascrizione completa: butta via ogni parziale
+            resume_cp = None
         elif resume_cp:
-            done, tot = resume_cp.get("done_chunks", 0), resume_cp.get("total_chunks", 0)
-            console.print(f"[info]Ripresa disponibile per «{meta['title']}»: {done}/{tot} blocchi salvati.[/info]")
+            if is_local_cp:
+                done_s = int(resume_cp.get("done_seconds", 0))
+                tot_s = int(resume_cp.get("duration", 0) or 0)
+                prog = (f"{_format_timestamp(done_s)} / {_format_timestamp(tot_s)}"
+                        if tot_s else _format_timestamp(done_s))
+                console.print(f"[info]Ripresa disponibile per «{meta['title']}»: arrivato a {prog}.[/info]")
+            else:
+                done, tot = resume_cp.get("done_chunks", 0), resume_cp.get("total_chunks", 0)
+                console.print(f"[info]Ripresa disponibile per «{meta['title']}»: {done}/{tot} blocchi salvati.[/info]")
             ch = _prompt("Cosa fai? [r]iprendi · [d]a capo · [s]alta",
                          "(r/d/s)", accent="bright_cyan").strip().lower()
             if ch.startswith("s"):
                 console.print("[dim]Saltato.[/dim]")
                 continue
             if ch.startswith("d"):
-                delete_checkpoint(meta)
+                _drop_cp()
                 resume_cp = None
 
         segments = _run_pipeline(meta, source, backend, client, local_model, resume_cp)
         if not segments:
             # _run_pipeline ha già spiegato il motivo (interruzione/limite o errore).
             continue
-        _save_outputs(meta, segments, engine_label, do_translate, tclient, do_export, out_root)
+        _save_outputs(meta, segments, engine_label, do_export, out_root)
 
 
 def _probe_duration(audio_path: str) -> float:

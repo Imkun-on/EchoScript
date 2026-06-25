@@ -76,7 +76,7 @@ _LOCAL_MODELS = [
 # current language; the ones with {placeholders} are used with .format().
 T = {
     "it": {
-        "header_sub": "Trascrivi e traduci video YouTube o audio locali, veloce con Groq o 100% offline",
+        "header_sub": "Trascrivi video YouTube o audio locali, veloce con Groq o 100% offline",
         # Step 1 — backend
         "step1_title": "Come vuoi trascrivere?",
         "backend_local_name": "Locale",
@@ -168,14 +168,15 @@ T = {
         "resume_desc": "Una trascrizione di questo video si era interrotta. Cosa vuoi fare?",
         "resume_opt_resume": "Riprendi",
         "resume_opt_resume_desc": "Continua dal punto salvato (blocco {done}/{total}).",
+        "resume_opt_resume_desc_time": "Continua dalla posizione salvata ({done} / {total}).",
         "resume_opt_restart": "Ricomincia da capo",
         "resume_opt_restart_desc": "Ignora il parziale e ritrascrive tutto da zero.",
         # Rate-limit-reached warning
         "ratelimit_title": "Limite Groq raggiunto",
         "ratelimit_msg": "Trascritti {done}/{total} blocchi. Il progresso è stato salvato: "
                          "riapri questo video più tardi (quando tornano i crediti) e scegli «Riprendi».",
-        "engine_translate": "Groq · traduzione",
-        "opt_key_needed": "Per tradurre serve una chiave Groq:",
+        "engine_translate": "DeepL · traduzione",
+        "opt_key_needed": "Per tradurre serve una chiave DeepL:",
         "btn_continue": "Continua e scegli cartella",
         "dir_dialog": "Scegli la cartella di destinazione",
         "groq_key_error": "Errore con la chiave Groq: {e}",
@@ -210,9 +211,12 @@ T = {
         "err_key_read": "Impossibile leggere il file della chiave: {e}",
         "err_key_invalid": "Il file selezionato non contiene una chiave valida.",
         "err_limits": "Errore nel controllo dei limiti: {e}",
+        # Language selector + pre-run estimate
+        "est_cost": "Costo stimato ~${c} · Groq {m}",
+        "est_time": "Tempo stimato ~{t} su {d} · offline",
     },
     "en": {
-        "header_sub": "Transcribe and translate YouTube videos or local audio, fast with Groq or 100% offline",
+        "header_sub": "Transcribe YouTube videos or local audio, fast with Groq or 100% offline",
         "step1_title": "How do you want to transcribe?",
         "backend_local_name": "Local",
         "backend_local_desc": "Full privacy, offline. GPU recommended.",
@@ -296,13 +300,14 @@ T = {
         "resume_desc": "A transcription of this video was interrupted. What do you want to do?",
         "resume_opt_resume": "Resume",
         "resume_opt_resume_desc": "Continue from the saved point (chunk {done}/{total}).",
+        "resume_opt_resume_desc_time": "Continue from the saved position ({done} / {total}).",
         "resume_opt_restart": "Start over",
         "resume_opt_restart_desc": "Discard the partial and re-transcribe from scratch.",
         "ratelimit_title": "Groq limit reached",
         "ratelimit_msg": "Transcribed {done}/{total} chunks. Progress was saved: reopen this video "
                          "later (when credits return) and choose “Resume”.",
-        "engine_translate": "Groq · translation",
-        "opt_key_needed": "Translation requires a Groq key:",
+        "engine_translate": "DeepL · translation",
+        "opt_key_needed": "Translation requires a DeepL key:",
         "btn_continue": "Continue and choose folder",
         "dir_dialog": "Choose the destination folder",
         "groq_key_error": "Groq key error: {e}",
@@ -334,6 +339,8 @@ T = {
         "err_key_read": "Cannot read the key file: {e}",
         "err_key_invalid": "The selected file does not contain a valid key.",
         "err_limits": "Error while checking limits: {e}",
+        "est_cost": "Estimated cost ~${c} · Groq {m}",
+        "est_time": "Estimated time ~{t} on {d} · offline",
     },
 }
 
@@ -357,15 +364,13 @@ class EchoScriptApp:
         self.last_thumb = None      # video cover (URL) for the summary
         self.busy = False           # True while a job is in progress
         self._run_enabled = False   # True when "Transcribe" can be enabled
-        self._pending = None        # result of phase 1, waiting to be saved
-        self.loaded_api_key = None  # Groq key read from a .txt file (or None)
+        self.loaded_api_key = None  # Groq key read from a .txt file (or None) — transcription
         self.loaded_api_key_name = ""   # name of the file it was read from
-        self._key_status_labels = []    # status labels to refresh once a key loads
+        self._key_status_labels = []    # Groq status labels to refresh once a key loads
         self._yt_meta = None        # last YouTube meta loaded (for language re-fill)
         self._yt_ok = False         # True only after confirming the YouTube video
         self._local_meta = None     # last local-file meta loaded
-        self._detected_lang = None  # detected audio language (to offer translation)
-        self._cur_phase = "info"    # current phase (to re-translate on language change)
+        self._cur_phase = "info"    # current phase (for re-translating the label on lang change)
         self._plan = []             # phase sequence of the current run (for "Phase i/n")
         self._last_g = 0.0          # highest global progress reached (anti-regress bar)
         self._i18n = []             # [(control, attribute, key)] to re-translate
@@ -495,7 +500,6 @@ class EchoScriptApp:
         )
 
         # Modal windows built separately (up front, then reused).
-        self._build_options_dialog()
         self._build_error_dialog()
         self._build_warn_dialog()
 
@@ -780,10 +784,14 @@ class EchoScriptApp:
         """Generic surface card (rounded, bordered) wrapping a tight column.
 
         Factored out because both configuration steps share the exact same
-        chrome; extra kwargs (e.g. the fixed height) are forwarded to the container."""
+        chrome; extra kwargs (e.g. the fixed height) are forwarded to the
+        container. The inner column is scrollable so that, on a small window or
+        when the card holds many fields (Groq + DeepL keys), content never clips."""
         return ft.Container(
             bgcolor=SURFACE, border=ft.border.all(1, BORDER), border_radius=16,
-            padding=22, content=ft.Column(list(controls), spacing=14, tight=True),
+            padding=22,
+            content=ft.Column(list(controls), spacing=14, tight=True,
+                              scroll=ft.ScrollMode.AUTO),
             **kwargs,
         )
 
@@ -892,26 +900,17 @@ class EchoScriptApp:
         self.model_dd.options = [ft.dropdown.Option(k, self.t(tk)) for k, tk in _LOCAL_MODELS]
         self.model_dd.value = val
 
-    # --- Groq API key loader from a .txt file ------------------------------
+    # --- Groq API key loader from a .txt file (TRANSCRIPTION) --------------
     def _key_loader(self) -> ft.Control:
-        """Build the key-loading widget: load button, limits check, get-key link.
+        """Build the Groq key-loading widget (load button + get-key link).
 
-        Used in TWO places (the backend card and the options dialog), so its
-        status label is appended to a list and refreshed everywhere a key change
-        must be reflected (see _refresh_key_status)."""
+        The Groq key is used ONLY for cloud transcription now (translation uses
+        DeepL, loaded separately). Its status label is appended to a list and
+        refreshed wherever a key change must be reflected (see _refresh_key_status)."""
         status = ft.Text(
             self._key_status_text(), size=12,
             color=GREEN_HI if self.loaded_api_key else MUTED)
         self._key_status_labels.append(status)
-
-        limits_btn = ft.OutlinedButton(
-            icon=ft.Icons.SPEED,
-            style=ft.ButtonStyle(
-                color=GREEN_HI, side=ft.BorderSide(1, BORDER_HI),
-                shape=ft.RoundedRectangleBorder(radius=10),
-                padding=ft.padding.symmetric(horizontal=14, vertical=14)))
-        self._reg(limits_btn, "text", "limits_btn")
-        limits_btn.on_click = lambda e: self._check_limits(limits_btn)
 
         load_btn = ft.OutlinedButton(
             icon=ft.Icons.UPLOAD_FILE, on_click=lambda e: self._pick_key(),
@@ -929,19 +928,19 @@ class EchoScriptApp:
         return ft.Column(
             spacing=8,
             controls=[
-                ft.Row([load_btn, limits_btn, get_btn], spacing=10, wrap=True),
+                ft.Row([load_btn, get_btn], spacing=10, wrap=True),
                 status,
             ],
         )
 
     def _key_status_text(self) -> str:
-        """Status line under the key loader: which file is loaded, or a hint."""
+        """Status line under the Groq key loader: which file is loaded, or a hint."""
         if self.loaded_api_key:
             return self.t("key_loaded").format(name=self.loaded_api_key_name)
         return self.t("key_none")
 
     def _refresh_key_status(self) -> None:
-        """Update every key-status label (both loaders) after a key change/lang switch."""
+        """Update every Groq key-status label after a key change/lang switch."""
         for lbl in self._key_status_labels:
             lbl.value = self._key_status_text()
             lbl.color = GREEN_HI if self.loaded_api_key else MUTED
@@ -954,7 +953,7 @@ class EchoScriptApp:
             allow_multiple=False, allowed_extensions=["txt"])
 
     def _on_key_picked(self, e: ft.FilePickerResultEvent) -> None:
-        """File-picker callback: read the chosen file and extract a usable key.
+        """File-picker callback: read the chosen file and extract a usable Groq key.
 
         Read with utf-8-sig so a BOM (common on Windows-saved .txt) is stripped.
         Failures and empty/invalid files surface a clear error instead of
@@ -995,109 +994,6 @@ class EchoScriptApp:
             if line:
                 return line
         return ""
-
-    # --- Groq API usage-limit check ----------------------------------------
-    def _check_limits(self, btn: ft.OutlinedButton) -> None:
-        """Query Groq's current rate limits and show them in a dialog.
-
-        The network call runs on a background thread so the button (and the rest
-        of the UI) stays responsive; the button shows a "checking" label and is
-        disabled meanwhile, then restored in 'finally' whatever the outcome."""
-        self._hide_error()
-        btn.text = self.t("limits_checking")
-        btn.disabled = True
-        self.page.update()
-
-        def work():
-            """Background worker: read limits, then open the dialog or show an error."""
-            try:
-                info = engine.get_rate_limits(self.loaded_api_key or None)
-                self._show_limits_dialog(info)
-            except engine.EngineError as ex:
-                self._show_error(str(ex))
-            except Exception as ex:
-                self._show_error(self.t("err_limits").format(e=ex))
-            finally:
-                btn.text = self.t("limits_btn")
-                btn.disabled = False
-                self.page.update()
-
-        threading.Thread(target=work, daemon=True).start()
-
-    def _show_limits_dialog(self, info: dict) -> None:
-        """Build and open the modal showing remaining tokens/requests and resets.
-
-        Built on demand (not up front) because its content is entirely derived
-        from the freshly fetched 'info' dict."""
-        def fmt(v) -> str:
-            """Render a header value, using an em dash for missing/empty ones."""
-            return str(v) if v not in (None, "") else "—"
-
-        def metric(icon, label, remaining, limit, reset):
-            """One metric row: icon + label + 'remaining / limit' + reset window."""
-            value = fmt(remaining)
-            if limit not in (None, ""):
-                value += f" / {limit}"
-            line2 = (self.t("lim_reset").format(v=reset) if reset not in (None, "")
-                     else self.t("lim_no_window"))
-            return ft.Row(
-                spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[
-                    ft.Container(
-                        width=40, height=40, border_radius=10,
-                        bgcolor=ft.Colors.with_opacity(0.10, GREEN),
-                        alignment=ft.alignment.center,
-                        content=ft.Icon(icon, color=GREEN_HI, size=20)),
-                    ft.Column(spacing=2, tight=True, controls=[
-                        ft.Text(label, size=12, color=MUTED),
-                        ft.Text(value, size=16, color=TEXT, weight=ft.FontWeight.W_700),
-                        ft.Text(line2, size=11, color=MUTED),
-                    ]),
-                ])
-
-        rows: list[ft.Control] = [
-            metric(ft.Icons.TOKEN, self.t("lim_tokens"),
-                   info.get("remaining_tokens"), info.get("limit_tokens"),
-                   info.get("reset_tokens")),
-            ft.Divider(height=1, color=BORDER),
-            metric(ft.Icons.REPEAT, self.t("lim_requests"),
-                   info.get("remaining_requests"), info.get("limit_requests"),
-                   info.get("reset_requests")),
-        ]
-        if info.get("retry_after") not in (None, ""):
-            rows.append(ft.Container(
-                border_radius=8, padding=10,
-                bgcolor=ft.Colors.with_opacity(0.10, WARN),
-                content=ft.Text(self.t("lim_retry").format(v=info["retry_after"]),
-                                size=12, color=WARN)))
-
-        dlg = ft.AlertDialog(
-            modal=True, bgcolor=SURFACE,
-            shape=ft.RoundedRectangleBorder(radius=16),
-            title=ft.Row([
-                ft.Icon(ft.Icons.SPEED, color=GREEN_HI, size=22),
-                ft.Text(self.t("lim_title"), size=18, weight=ft.FontWeight.W_600, color=TEXT),
-            ], spacing=10),
-            content=ft.Container(
-                width=420,
-                content=ft.Column(spacing=14, tight=True, controls=[
-                    ft.Text(self.t("lim_model").format(m=info.get("model", "?")),
-                            size=12, color=MUTED),
-                    ft.Text(self.t("lim_desc"), size=12, color=MUTED),
-                    ft.Divider(height=1, color=BORDER),
-                    *rows,
-                ]),
-            ),
-            actions=[ft.FilledButton(
-                self.t("btn_close"), icon=ft.Icons.CHECK,
-                on_click=lambda e: self.page.close(dlg),
-                style=ft.ButtonStyle(
-                    bgcolor=GREEN, color="#06140C",
-                    shape=ft.RoundedRectangleBorder(radius=10),
-                    padding=ft.padding.symmetric(horizontal=18, vertical=16)))],
-            actions_alignment=ft.MainAxisAlignment.END,
-        )
-        self.page.open(dlg)
 
     def _step_source(self) -> ft.Control:
         """Step 2 card: choose the source (YouTube URL vs local file) + its inputs.
@@ -1259,11 +1155,30 @@ class EchoScriptApp:
         return names.get(self.lang, names["it"]).get(c, code.upper())
 
     def _local_pairs(self, meta: dict, path: str) -> list:
-        """(icon, label, value) pairs for a local file: just file name and duration."""
+        """(icon, label, value) pairs for a local file: file name, duration, estimate."""
         return [
             (ft.Icons.AUDIO_FILE, self.t("info_file"), os.path.basename(path)),
             (ft.Icons.SCHEDULE, self.t("info_duration"), tx._format_duration(meta["duration"])),
+            (ft.Icons.SAVINGS_OUTLINED, "≈", self._estimate_text(meta)),
         ]
+
+    def _estimate_text(self, meta: dict) -> str:
+        """Localized pre-run estimate line (Groq cost or local time) for a source."""
+        est = tx.estimate_job(meta, self.backend, self.model_dd.value)
+        if est["backend"] == "groq":
+            return self.t("est_cost").format(c=f"{est['cost_usd']:.3f}", m=tx.GROQ_MODEL)
+        dev = "GPU" if est.get("device") == "cuda" else "CPU"
+        return self.t("est_time").format(t=tx._format_duration(est["seconds"]), d=dev)
+
+    def _estimate_chip(self, meta: dict) -> ft.Control:
+        """A small highlighted row showing the pre-run estimate (used in dialogs)."""
+        return ft.Container(
+            border_radius=8, padding=ft.padding.symmetric(horizontal=10, vertical=8),
+            bgcolor=ft.Colors.with_opacity(0.07, GREEN),
+            content=ft.Row(spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER, controls=[
+                ft.Icon(ft.Icons.SAVINGS_OUTLINED, size=15, color=GREEN_HI),
+                ft.Text(self._estimate_text(meta), size=12, color=TEXT, no_wrap=False),
+            ]))
 
     def _refresh_info_boxes(self) -> None:
         """Rewrite already-loaded info in the new language (YouTube confirm label
@@ -1277,72 +1192,6 @@ class EchoScriptApp:
         if self._local_meta and self.local_path:
             self._fill_info_box(self.file_box, self._local_meta["title"],
                                 self._local_pairs(self._local_meta, self.local_path))
-
-    def _build_options_dialog(self) -> None:
-        """Build (once) the post-transcription options dialog shown before saving.
-
-        Created up front so its switch/label/key-loader controls are registered
-        for i18n; the per-run visibility (translate switch, key prompt, "already
-        Italian" note) is toggled later in _start_transcription/_confirm_options."""
-        self.opt_translate = ft.Switch(
-            value=False, active_color=GREEN,
-            label_style=ft.TextStyle(color=TEXT, size=14),
-            on_change=lambda e: self._refresh_prompt_key(),
-        )
-        self._reg(self.opt_translate, "label", "opt_switch")
-        # Note shown when the audio is already in Italian (no translation switch).
-        self.opt_lang_note = ft.Row(
-            visible=False, spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            controls=[ft.Icon(ft.Icons.INFO_OUTLINE, color=GREEN_HI, size=18),
-                      self._T("opt_already_it", size=12, color=MUTED)])
-        self.prompt_key_panel = ft.Container(
-            visible=False,
-            padding=ft.padding.only(left=4, top=2),
-            content=ft.Column(
-                spacing=6,
-                controls=[
-                    self._T("opt_key_needed", size=12, color=MUTED),
-                    self._key_loader(),
-                ],
-            ),
-        )
-        self.prompt_error = ft.Container(
-            visible=False, border_radius=8, padding=10,
-            bgcolor=ft.Colors.with_opacity(0.10, DANGER),
-            content=ft.Text("", size=12, color=DANGER, selectable=True),
-        )
-        continue_btn = ft.FilledButton(
-            icon=ft.Icons.ARROW_FORWARD, on_click=self._confirm_options,
-            style=ft.ButtonStyle(
-                bgcolor=GREEN, color="#06140C",
-                shape=ft.RoundedRectangleBorder(radius=10),
-                padding=ft.padding.symmetric(horizontal=20, vertical=18)))
-        self._reg(continue_btn, "text", "btn_continue")
-        self._opt_title = self._T("opt_title", size=18, weight=ft.FontWeight.W_600, color=TEXT)
-        self.options_dialog = ft.AlertDialog(
-            modal=True, bgcolor=SURFACE,
-            shape=ft.RoundedRectangleBorder(radius=16),
-            title=ft.Row([
-                ft.Icon(ft.Icons.CHECK_CIRCLE, color=GREEN_HI, size=22),
-                self._opt_title,
-            ], spacing=10),
-            content=ft.Container(
-                width=460,
-                content=ft.Column(
-                    spacing=14, tight=True,
-                    controls=[
-                        self._T("opt_desc", size=13, color=MUTED),
-                        ft.Divider(height=1, color=BORDER),
-                        self.opt_translate,
-                        self.opt_lang_note,
-                        self.prompt_key_panel,
-                        self.prompt_error,
-                    ],
-                ),
-            ),
-            actions=[continue_btn],
-            actions_alignment=ft.MainAxisAlignment.END,
-        )
 
     def _build_warn_dialog(self) -> None:
         """Build (once) the amber modal that explains what is missing to start a run.
@@ -1565,16 +1414,6 @@ class EchoScriptApp:
         self.yt_panel.visible = self.source == "youtube"
         self.local_panel.visible = self.source == "local"
 
-    def _refresh_prompt_key(self) -> None:
-        """Show the in-dialog key loader only when translation is on but no client exists.
-
-        Called when the translate switch flips: translation needs a Groq client,
-        so we prompt for a key only if one was not already created during transcription."""
-        need = (bool(self.opt_translate.value)
-                and (not self._pending or self._pending.get("client") is None))
-        self.prompt_key_panel.visible = need
-        self.page.update()
-
     # --------------------------------------------------------- RUN STATE / WARNING
     def _source_ready(self) -> bool:
         """True when the chosen source is ready to transcribe."""
@@ -1689,6 +1528,7 @@ class EchoScriptApp:
         body.append(ft.Text(meta["title"], size=15, weight=ft.FontWeight.W_700,
                             color=TEXT, no_wrap=False))
         body.append(ft.Column(rows, spacing=6, tight=True))
+        body.append(self._estimate_chip(meta))
         body.append(ft.Divider(height=1, color=BORDER))
         body.append(ft.Text(self.t("confirm_question"), size=13, color=MUTED))
 
@@ -1797,12 +1637,13 @@ class EchoScriptApp:
 
         # CHECKS before transcribing (to avoid wasting Groq credits):
         #  1) already transcribed in results/  -> ask what to do (list);
-        #  2) partial present (Groq only)       -> offer to resume;
+        #  2) partial present (Groq blocks, or local time) -> offer to resume;
         #  otherwise proceed normally.
         if tx.transcription_exists(self.out_root, meta["title"]):
             self._show_already_dialog(src, meta)
             return
-        cp = tx.load_checkpoint(meta) if self.backend == "groq" else None
+        cp = (tx.load_checkpoint(meta) if self.backend == "groq"
+              else tx.load_local_checkpoint(meta))
         if cp:
             self._show_resume_dialog(src, meta, cp)
             return
@@ -1865,39 +1706,41 @@ class EchoScriptApp:
         self.page.open(dlg)
 
     def _show_already_dialog(self, src, meta: dict) -> None:
-        """Video already in results/: offer re-transcribe vs translate-only.
-
-        Translate-only reuses the saved transcript and spends no transcription
-        credits, so it is presented as a distinct, cheaper option."""
+        """Video already in results/: offer to re-transcribe it from scratch."""
         self._choice_dialog(
             ft.Icons.HISTORY, self.t("already_title"), self.t("already_desc"),
             [
                 {"icon": ft.Icons.REFRESH, "label": self.t("opt_retranscribe"),
                  "desc": self.t("opt_retranscribe_desc"), "color": GREEN,
                  "action": lambda: self._start_transcription(src, meta, resume=False)},
-                {"icon": ft.Icons.TRANSLATE, "label": self.t("opt_only_translate"),
-                 "desc": self.t("opt_only_translate_desc"), "color": GREEN_HI,
-                 "action": lambda: self._start_translate_only(meta)},
             ])
 
     def _show_resume_dialog(self, src, meta: dict, cp: dict) -> None:
         """A partial run exists: offer to resume from the checkpoint or start over.
 
-        Resuming continues from the saved chunk (no credits re-spent on done
-        chunks); starting over deletes the checkpoint first so the partial is not
-        later mistaken for a resumable state."""
-        done, total = cp.get("done_chunks", 0), cp.get("total_chunks", 0)
+        Resuming continues from the saved point (Groq: done chunks not re-spent;
+        local: only the not-yet-transcribed tail is processed); starting over
+        deletes the checkpoint first so the partial is not later mistaken for a
+        resumable state."""
+        is_local = "done_seconds" in cp
+        if is_local:
+            done = tx._format_timestamp(int(cp.get("done_seconds", 0)))
+            total = tx._format_timestamp(int(cp.get("duration", 0) or 0))
+            resume_desc = self.t("resume_opt_resume_desc_time").format(done=done, total=total)
+        else:
+            done, total = cp.get("done_chunks", 0), cp.get("total_chunks", 0)
+            resume_desc = self.t("resume_opt_resume_desc").format(done=done, total=total)
 
         def restart():
-            """Discard the checkpoint and transcribe from scratch."""
-            tx.delete_checkpoint(meta)
+            """Discard the checkpoint (the right kind) and transcribe from scratch."""
+            (tx.delete_local_checkpoint if is_local else tx.delete_checkpoint)(meta)
             self._start_transcription(src, meta, resume=False)
 
         self._choice_dialog(
             ft.Icons.HOURGLASS_BOTTOM, self.t("resume_title"), self.t("resume_desc"),
             [
                 {"icon": ft.Icons.PLAY_ARROW, "label": self.t("resume_opt_resume"),
-                 "desc": self.t("resume_opt_resume_desc").format(done=done, total=total),
+                 "desc": resume_desc,
                  "color": GREEN,
                  "action": lambda: self._start_transcription(src, meta, resume=True)},
                 {"icon": ft.Icons.RESTART_ALT, "label": self.t("resume_opt_restart"),
@@ -1906,20 +1749,16 @@ class EchoScriptApp:
             ])
 
     def _start_transcription(self, src, meta: dict, resume: bool = False) -> None:
-        """PHASE 1: kick off download + transcription on a background thread.
+        """Download + transcribe + save ONE source on a background thread.
 
-        Translation/export are deferred (translate/export False here): once the
-        transcription is in memory we show the options dialog and only then save,
-        so the user picks translation AFTER seeing the detected language. The
-        phase plan is built with translate=True so the bar reserves room for a
-        possible translation phase. The heavy work runs off-thread to keep the
-        window alive; on rate limit/error it routes to the dedicated handlers."""
+        Everything runs off-thread to keep the window alive; the PDF export is
+        always produced. On rate limit/error it routes to the dedicated handlers."""
         options = {
             "backend": self.backend, "model": self.model_dd.value,
-            "api_key": self.loaded_api_key or "", "translate": False,
-            "export": False, "source_kind": self.source,
+            "api_key": self.loaded_api_key or "", "export": True,
+            "source_kind": self.source,
         }
-        self._plan = self._phase_plan(self.backend, self.source, translate=True)
+        self._plan = self._phase_plan(self.backend, self.source)
         self._last_g = 0.0
         self._hide_error()
         self._set_busy(True)
@@ -1929,144 +1768,26 @@ class EchoScriptApp:
         self.page.update()
 
         def work():
-            """Background worker: transcribe, stash the result, then open the options dialog."""
+            """Background worker: transcribe, save all outputs, then show the summary."""
             try:
                 meta2, segments, engine_label, client = engine.transcribe_only(
                     src, options, on_progress=self._on_progress, resume=resume)
-                self._pending = {
-                    "meta": meta2, "segments": segments,
-                    "engine_label": engine_label, "client": client, "options": options,
-                }
                 self.last_thumb = meta2.get("thumbnail")
-                lang = (meta2.get("detected_language") or "").lower()
-                self._detected_lang = lang
-                italian = lang.startswith("it")
-                self._show_progress(False)
-                self.opt_translate.visible = not italian
-                self.opt_lang_note.visible = italian
-                self.opt_translate.value = not italian
-                self.prompt_error.visible = False
-                self.prompt_key_panel.visible = (not italian) and (client is None)
-                self._set_busy(False)
+                result = engine.save_results(
+                    meta2, segments, engine_label, options, self.out_root,
+                    client, on_progress=self._on_progress)
+                self.prog_bar.value = 1.0
+                self.prog_pct.value = "100%"
                 self.page.update()
-                self.page.open(self.options_dialog)
+                self._show_progress(False)
+                self._set_busy(False)
+                self._render_result(result)
             except engine.RateLimitReached as ex:
                 self._fail_ratelimit(ex)
             except engine.EngineError as ex:
                 self._fail(str(ex))
             except Exception as ex:
                 self._fail(self.t("err_unexpected").format(e=ex))
-
-        threading.Thread(target=work, daemon=True).start()
-
-    def _start_translate_only(self, meta: dict) -> None:
-        """Re-translate an existing transcription only (no re-transcription).
-
-        Runs on a background thread; the phase plan is just translate+export
-        since nothing is downloaded/transcribed. The engine badge is forced to
-        the Groq/translation look because translation always uses Groq."""
-        self._plan = ["translate", "export"]
-        self._last_g = 0.0
-        self._hide_error()
-        self._set_busy(True)
-        # Badge: translation always uses Groq.
-        self.prog_engine_icon.name = ft.Icons.TRANSLATE
-        self.prog_engine_icon.color = GREEN_HI
-        self.prog_engine_text.value = self.t("engine_translate")
-        self.prog_engine_text.color = GREEN_HI
-        self.prog_engine.bgcolor = ft.Colors.with_opacity(0.12, GREEN)
-        self.prog_engine.border = ft.border.all(1, ft.Colors.with_opacity(0.35, GREEN))
-        self.prog_engine_hint.visible = False
-        self._set_phase("translate", None, None, "")
-        self._show_progress(True)
-        self.page.update()
-
-        def work():
-            """Background worker: make a Groq client, re-translate, render the result."""
-            try:
-                client = engine.make_groq_client(self.loaded_api_key or None)
-                result = engine.translate_existing(
-                    self.out_root, meta["title"], client, on_progress=self._on_progress)
-                self.last_thumb = meta.get("thumbnail")
-                self.prog_bar.value = 1.0
-                self.prog_pct.value = "100%"
-                self.page.update()
-                self._show_progress(False)
-                self._set_busy(False)
-                self._render_result(result)
-            except engine.EngineError as ex:
-                self._fail(str(ex))
-            except Exception as ex:
-                self._fail(self.t("err_unexpected").format(e=ex))
-
-        threading.Thread(target=work, daemon=True).start()
-
-    def _confirm_options(self, e: ft.ControlEvent) -> None:
-        """Apply the chosen options and proceed to saving (PHASE 2).
-
-        If translation was enabled but no Groq client exists yet, create one from
-        the just-loaded key, surfacing any key error inside the dialog instead of
-        closing it. Export (PDF) is always on per product decision."""
-        p = self._pending
-        if not p:
-            return
-        p["options"]["translate"] = bool(self.opt_translate.value)
-        p["options"]["export"] = True  # PDF always generated (user request)
-
-        if p["options"]["translate"] and p["client"] is None:
-            self.prompt_error.visible = False
-            try:
-                p["client"] = engine.make_groq_client(self.loaded_api_key or None)
-            except engine.EngineError as ex:
-                self._prompt_show_error(str(ex))
-                return
-            except Exception as ex:
-                self._prompt_show_error(self.t("groq_key_error").format(e=ex))
-                return
-
-        self.page.close(self.options_dialog)
-        self._do_save(self.out_root)
-
-    def _prompt_show_error(self, msg: str) -> None:
-        """Show an error inside the options dialog (and re-reveal the key loader)."""
-        self.prompt_error.content.value = msg
-        self.prompt_error.visible = True
-        self.prompt_key_panel.visible = True
-        self.page.update()
-
-    def _do_save(self, out_root: str) -> None:
-        """PHASE 2: write all outputs under out_root (results/) on a background thread.
-
-        The first phase shown depends on whether translation was chosen (it runs
-        before export). Saving is off-thread so the progress bar keeps updating
-        while the engine writes files / calls Groq for the translation."""
-        if not self._pending:
-            return
-        self._set_busy(True)
-        # First saving phase: translation (if chosen) or export.
-        first = "translate" if self._pending["options"]["translate"] else "export"
-        self._set_phase(first, None, None,
-                        "" if first == "translate" else self.t("saving_files"))
-        self._show_progress(True)
-        self.page.update()
-
-        def work():
-            """Background worker: save all outputs, then render the result summary."""
-            p = self._pending
-            try:
-                result = engine.save_results(
-                    p["meta"], p["segments"], p["engine_label"], p["options"],
-                    out_root, p["client"], on_progress=self._on_progress)
-                self._pending = None
-                # Done: bring the bar to 100% before showing the summary.
-                self.prog_bar.value = 1.0
-                self.prog_pct.value = "100%"
-                self.page.update()
-                self._show_progress(False)
-                self._set_busy(False)
-                self._render_result(result)
-            except Exception as ex:
-                self._fail(self.t("err_save").format(e=ex))
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -2106,20 +1827,18 @@ class EchoScriptApp:
         self.page.update()
 
     @staticmethod
-    def _phase_plan(backend: str, source_kind: str, translate: bool) -> list:
+    def _phase_plan(backend: str, source_kind: str) -> list:
         """Ordered sequence of run phases, used to number 'Phase i/n'.
 
         Context-dependent: local files skip the download, only Groq does the
-        splitting ('prepare'), and translation is an optional phase. A FIXED plan
-        is what lets the global progress bar advance monotonically (see _set_phase)."""
+        splitting ('prepare'). A FIXED plan is what lets the global progress bar
+        advance monotonically (see _set_phase)."""
         plan = ["info"]
         if source_kind != "local":
             plan.append("download")
         if backend == "groq":
             plan.append("prepare")
         plan.append("transcribe")
-        if translate:
-            plan.append("translate")
         plan.append("export")
         return plan
 
@@ -2131,8 +1850,6 @@ class EchoScriptApp:
         self._cur_phase = phase
         key = "phase_" + phase
         label = self.t(key) if key in T[self.lang] else self.t("phase_default")
-        if phase == "translate":
-            label += " " + self.t("phase_optional")  # translation is optional
         self.prog_phase.value = label
 
         self.prog_detail.value = detail or ""
@@ -2228,7 +1945,7 @@ class EchoScriptApp:
 
         file_rows: list[ft.Control] = []
         for folder, names in groups.items():
-            icon = ft.Icons.TRANSLATE if folder == "traduzioni" else ft.Icons.FOLDER
+            icon = ft.Icons.FOLDER
             file_rows.append(ft.Row([
                 ft.Icon(icon, size=15, color=GREEN_HI),
                 ft.Text(f"{folder}/" if folder else self.t("res_root"), size=13,
@@ -2304,10 +2021,8 @@ class EchoScriptApp:
             self.page.close(dlg)
 
     def _fail(self, message: str) -> None:
-        """Generic failure path: hide progress, close any open options dialog,
-        clear busy and show the error modal."""
+        """Generic failure path: hide progress, clear busy and show the error modal."""
         self._show_progress(False)
-        self._close_dialog(getattr(self, "options_dialog", None))
         self._set_busy(False)
         self._show_error(message)
 

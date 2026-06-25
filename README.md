@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  Trascrivi (e <b>traduci</b>) i video YouTube <b>e i tuoi audio locali</b> in <b>testo, Markdown, JSON e PDF</b>,<br>
+  Trascrivi i video YouTube <b>e i tuoi audio locali</b> in <b>testo, Markdown, JSON e PDF</b>,<br>
   <b>velocemente</b> con Groq oppure <b>100% in locale</b> per la massima privacy.<br>
   Pensato per <b>studiare</b> video lunghi (RAG, fine-tuning, lezioni) leggendoli invece di guardarli per ore.<br>
   Disponibile come <b>app desktop</b> (GUI) o da <b>terminale</b> (CLI).<br>
@@ -41,13 +41,13 @@ python transcriber.py     # interfaccia da terminale (CLI)
 - [🖱️ Guida all'app desktop (per tutti)](#️-guida-allapp-desktop-per-tutti)
 - [🔀 I due backend: cloud o locale](#-i-due-backend-cloud-o-locale)
 - [✨ Caratteristiche](#-caratteristiche)
-- [📦 Installazione](#-installazione)
+- [⬇️ Scarica l'app pronta (.exe)](#️-scarica-lapp-pronta-exe)
+- [📦 Installazione da sorgente (sviluppatori)](#-installazione-da-sorgente-sviluppatori)
 - [🔑 Come ottenere una API key Groq](#-come-ottenere-una-api-key-groq)
 - [📚 Librerie usate e perché](#-librerie-usate-e-perché)
 - [🚀 Uso ed esempi](#-uso-ed-esempi)
 - [⚙️ Come funziona (le fasi)](#️-come-funziona-le-fasi)
 - [💾 Struttura dei file di output](#-struttura-dei-file-di-output)
-- [🌐 Traduzione in italiano](#-traduzione-in-italiano)
 - [📄 Esportazione PDF](#-esportazione-pdf)
 - [🛠️ Configurazione](#️-configurazione)
 - [🔒 Privacy](#-privacy)
@@ -72,7 +72,7 @@ E puoi scegliere **come** trascrivere:
 - ⚡ **Groq (cloud)**: velocissimo anche **senza GPU** (trascrive 2 ore in pochi secondi), praticamente gratis.
 - 🔒 **Locale (faster-whisper su CPU)**: **100% offline e privato**, l'audio non lascia mai il tuo PC.
 
-A fine trascrizione puoi **tradurre in italiano** (utile per i video in inglese) ed **esportare in PDF** per leggerlo comodamente, diviso per capitoli.
+A fine trascrizione puoi **esportare in PDF** per leggerla comodamente, divisa per capitoli.
 
 Lo strumento è pensato per:
 
@@ -101,7 +101,7 @@ EchoScript nasce per **eliminare tutte queste trappole**:
 | **Account obbligatorio** | sì | **no** (locale); per Groq solo una chiave gratuita |
 | **Watermark / qualità ridotta** | frequenti | **mai** |
 | **Privacy** | upload su server terzi | **locale = niente lascia il tuo PC** |
-| **Formati di output** | spesso solo `.txt` | `.md`, `.txt`, `.json`, **`.pdf`** + **traduzione IT** |
+| **Formati di output** | spesso solo `.txt` | `.md`, `.txt`, `.json`, **`.pdf`** |
 | **Funziona offline** | no | **sì** (backend locale) |
 | **Open source** | quasi mai | **sì** |
 
@@ -167,20 +167,15 @@ Compare una **barra di avanzamento reale** (non un'animazione finta):
 - in alto un **badge** dice con cosa stai trascrivendo: **Groq (cloud)** (verde) o **Locale CPU** (arancione, perché può richiedere minuti);
 - a destra il **numero di fase** (es. *"Fase 2/5"*) e la **percentuale** complessiva.
 
-### Le opzioni a fine trascrizione
-Finita la trascrizione si apre una finestra:
-- se l'audio **non** è in italiano, ti propone di **tradurlo in italiano** (interruttore già acceso);
-- se è **già** in italiano, te lo dice e non propone la traduzione;
-- il **PDF viene creato sempre**, in automatico.
-
-Premi **"Continua"** per salvare.
+### A fine trascrizione
+Il **PDF viene creato sempre**, in automatico, e i file vengono salvati senza ulteriori domande.
 
 ### Il risultato
 Una finestra **"Completato!"** riassume tutto: motore usato, numero di parole/sezioni, **dove sono stati salvati i file** (cartella `results/`) e l'elenco dei file creati. Il pulsante **"Apri cartella risultati"** apre direttamente la cartella.
 
 ### Messaggi speciali (video lungo o già fatto)
-- 🔁 **"Video già trascritto"**: se rifai un video già fatto, l'app ti chiede (a elenco) se **Ritrascrivere tutto** (sostituisce i file) o fare **Solo la traduzione** (riusa la trascrizione esistente, **senza rispendere crediti**).
-- ⏸️ **"Ripresa disponibile"**: se un video lungo si era interrotto per il limite Groq, l'app ha **salvato il punto** e ti propone di **Riprendere** da dove si era fermato o **Ricominciare** da capo.
+- 🔁 **"Video già trascritto"**: se rifai un video già fatto, l'app ti chiede se **Ritrascrivere tutto** (sostituisce i file).
+- ⏸️ **"Ripresa disponibile"**: se una trascrizione lunga si era interrotta (limite Groq, o trascrizione locale interrotta), l'app ha **salvato il punto** e ti propone di **Riprendere** da dove si era fermata o **Ricominciare** da capo.
 - ⏳ **"Limite Groq raggiunto"**: avviso arancione che indica quanti blocchi sono stati fatti; **riprendi più tardi**, quando tornano i crediti gratuiti.
 
 ---
@@ -220,15 +215,37 @@ Se scegli **Locale**, un secondo pannello ti fa scegliere il modello ogni volta:
 - ⏱️ **Minutaggi e sezioni**: usa i **capitoli** di YouTube come sezioni del documento
 - 💾 **3 formati base** sempre generati: `.md` (umano), `.txt` (per altri LLM), `.json` (per RAG)
 - 📄 **PDF generato sempre** in automatico, diviso per capitoli
-- 🌐 **Traduzione in italiano** opzionale (via LLM Groq) in file separati
-- 🗂️ **Output organizzato** in `results/<nome video>/` con sottocartelle `trascrizioni/` e `traduzioni/`
+- 🗂️ **Output organizzato** in `results/<nome video>/` nella sottocartella `trascrizioni/`
 - 🎨 **Interfacce curate**: GUI scura con sfondo animato, oppure CLI Rich con barre e pannelli
 - 🔑 **Gestione chiave sicura**: variabile d'ambiente o file `.env` (mai nel codice)
 - 🧯 **Errori chiari**: la chiave viene validata all'avvio; niente retry inutili su errori di autenticazione
 
 ---
 
-## 📦 Installazione
+## ⬇️ Scarica l'app pronta (.exe)
+
+Se **non sei uno sviluppatore** e vuoi solo usare il programma, non serve installare Python né altro: scarica l'app già pronta.
+
+1. Vai alla pagina **[Releases](https://github.com/Imkun-on/EchoScript/releases/latest)** del progetto su GitHub.
+2. Scarica il file **`EchoScript-Windows.zip`** dell'ultima versione.
+3. **Estrai** lo ZIP in una cartella a piacere (Desktop, Documenti…). Tieni i file **insieme**: serve sia `EchoScript.exe` sia la cartella **`_internal`** che lo accompagna.
+4. Doppio click su **`EchoScript.exe`**. Fatto: si apre l'app, **senza installare nulla**.
+
+> 🛡️ **Primo avvio – Windows SmartScreen:** poiché l'app non è firmata digitalmente, Windows può mostrare *"Windows ha protetto il PC"*. Clicca **"Ulteriori informazioni" → "Esegui comunque"**. È normale per i programmi gratuiti non firmati.
+
+**Cosa è incluso e cosa no:**
+- ✅ **Tutto incluso**: non servono Python, ffmpeg o altre installazioni.
+- 📥 La **prima volta** che usi il backend **locale**, l'app scarica una tantum il modello da HuggingFace (poi resta in cache, anche offline).
+- ⚡ Per il backend **Groq** (cloud) serve solo una **chiave gratuita** (vedi più sotto).
+- 💻 La release `.exe` è per **Windows**. Le versioni per **macOS/Linux** arrivano dai rispettivi build (vedi sezione installazione da sorgente nel frattempo).
+
+> Per **disinstallare** basta cancellare la cartella: l'app non scrive nel registro di sistema. (Le trascrizioni stanno in `results/` accanto all'eseguibile.)
+
+---
+
+## 📦 Installazione da sorgente (sviluppatori)
+
+Questa parte serve solo se vuoi **eseguire dal codice** o **modificare** il progetto. Per il semplice uso, vedi [Scarica l'app pronta (.exe)](#️-scarica-lapp-pronta-exe).
 
 ### Requisiti
 
@@ -265,7 +282,7 @@ sudo apt install ffmpeg
 
 ## 🔑 Come ottenere una API key Groq
 
-La chiave serve **solo** se usi il backend **Groq** (cloud) o la **traduzione** in italiano. È **gratuita**.
+La chiave serve **solo** se usi il backend **Groq** (cloud). È **gratuita**.
 
 1. Vai su **https://console.groq.com** e **registrati** (puoi usare Google, GitHub o email).
 2. Una volta dentro, apri la sezione **API Keys**: **https://console.groq.com/keys**
@@ -299,7 +316,7 @@ La chiave serve **solo** se usi il backend **Groq** (cloud) o la **traduzione** 
 | Libreria | A cosa serve | Perché proprio questa |
 |---|---|---|
 | `yt-dlp` | Scarica audio e metadati (titolo, capitoli, durata) da YouTube | Lo standard de facto: gestisce stream, resume, e l'estrazione dei metadati |
-| `groq` | Client ufficiale dell'API Groq (Whisper + LLM per la traduzione) | SDK ufficiale, semplice e veloce |
+| `groq` | Client ufficiale dell'API Groq (Whisper) | SDK ufficiale, semplice e veloce |
 | `rich` | Interfaccia da terminale: pannelli, tabelle, barre, colori | Trasforma la CLI in un'esperienza curata (`Panel`, `Progress`, `Columns`) |
 | `faster-whisper` | *(opzionale)* Trascrizione **locale** su CPU | Implementazione ottimizzata di Whisper (CTranslate2), ottima su CPU con `int8` |
 | `fpdf2` | *(opzionale)* Esportazione in **PDF** | Pure-python, **niente LaTeX di sistema**; supporta font Unicode |
@@ -308,8 +325,6 @@ La chiave serve **solo** se usi il backend **Groq** (cloud) o la **traduzione** 
 ### Libreria standard (nessuna installazione)
 
 `os`, `re`, `json`, `sys`, `signal`, `shutil`, `tempfile`, `subprocess`, `datetime`: percorsi/file, regex, JSON, gestione Ctrl+C, chiamate a ffmpeg/ffprobe, date.
-
-> La **traduzione** usa l'LLM di Groq (già incluso nel pacchetto `groq`).
 
 ---
 
@@ -329,10 +344,10 @@ Flusso tipico:
 4. **Indica cosa trascrivere**: l'**URL** del video, oppure il **percorso** di un file audio o di una **cartella** (batch).
 5. Controlla la **scheda** (video o file) e **conferma**.
 6. Attendi: vedrai le fasi (**Download** se da YouTube → **Preparazione** se Groq → **Trascrizione**) con barre di avanzamento, e il motore in uso (**Groq cloud** o **Locale CPU**).
-7. Rispondi se vuoi **tradurre in italiano**: il **PDF viene generato sempre**, in automatico.
+7. Il **PDF viene generato sempre**, in automatico.
 8. Trovi tutto in `results/<nome>/`.
 
-> 🎙️ **File locali**: il download non serve (il file ce l'hai già) e i metadati YouTube (canale, capitoli…) non esistono, quindi l'output usa il **nome del file** come titolo e una singola sezione "testo continuo". Indicando una **cartella**, ogni file audio al suo interno viene trascritto in sequenza, riusando lo stesso motore e le stesse scelte di traduzione/export.
+> 🎙️ **File locali**: il download non serve (il file ce l'hai già) e i metadati YouTube (canale, capitoli…) non esistono, quindi l'output usa il **nome del file** come titolo e una singola sezione "testo continuo". Indicando una **cartella**, ogni file audio al suo interno viene trascritto in sequenza, riusando lo stesso motore e le stesse scelte di export.
 
 ### Esempio: backend Groq
 
@@ -401,9 +416,9 @@ Flusso tipico:
 
 Trascrivi i video di studio, poi usa i file **`.json`** (segmenti con timestamp) come fonte per la tua pipeline RAG: sono già pronti per il *chunking* e l'indicizzazione.
 
-### Caso d'uso: leggere un talk inglese in italiano
+### Caso d'uso: leggere un talk invece di guardarlo
 
-Trascrivi un talk in inglese, scegli **traduzione in italiano** ed **export PDF**: ottieni un PDF pulito in italiano, diviso per capitoli, da leggere sul tablet o stampare.
+Trascrivi un talk lungo e usa l'**export PDF**: ottieni un PDF pulito, diviso per capitoli, da leggere sul tablet o stampare.
 
 ---
 
@@ -414,7 +429,7 @@ Trascrivi un talk in inglese, scegli **traduzione in italiano** ed **export PDF*
 3. **Preparazione** *(solo Groq)*: l'audio viene riconvertito a 16 kHz mono e **spezzato in blocchi da ~10 min** (per stare nei limiti di dimensione dell'API e avere una barra sensata).
 4. **Trascrizione**: ogni blocco (Groq) o l'intero file (locale) viene trascritto in **segmenti con timestamp**; i minutaggi di ogni blocco vengono corretti rispetto all'intero video.
 5. **Assemblaggio**: i segmenti vengono raggruppati per **capitolo** (se presenti) e salvati nei vari formati.
-6. **Export PDF**: sempre, in automatico. **Traduzione**: opzionale, su richiesta.
+6. **Export PDF**: sempre, in automatico.
 
 > 🎙️ **Con un file locale** i passi *Info* e *Download* non servono: il file viene dato direttamente a ffmpeg/Whisper. La durata si ricava con `ffprobe`, il titolo dal nome del file e, non essendoci capitoli, si ottiene un'unica sezione "testo continuo".
 
@@ -425,15 +440,11 @@ Trascrivi un talk in inglese, scegli **traduzione in italiano** ed **export PDF*
 ```
 results/
 └── <Nome Video o nome file>/
-    ├── trascrizioni/
-    │   ├── <Nome>.md      (sezioni con minutaggio nel titolo, prosa pulita)
-    │   ├── <Nome>.txt     (testo pulito, per altri LLM)
-    │   ├── <Nome>.json    (segmenti con timestamp, per RAG)
-    │   └── <Nome>.pdf     (sempre, generato in automatico)
-    └── traduzioni/        (solo se traduci)
-        ├── <Nome>.md      (italiano)
-        ├── <Nome>.txt
-        └── <Nome>.pdf
+    └── trascrizioni/
+        ├── <Nome>.md      (sezioni con minutaggio nel titolo, prosa pulita)
+        ├── <Nome>.txt     (testo pulito, per altri LLM)
+        ├── <Nome>.json    (segmenti con timestamp, per RAG)
+        └── <Nome>.pdf     (sempre, generato in automatico)
 ```
 
 > Per i **file locali** `<Nome>` è il nome del file (senza estensione); per i video YouTube è il titolo. In **batch** ogni file produce la sua cartella `results/<nome file>/`.
@@ -444,40 +455,35 @@ results/
 
 ---
 
-## 🌐 Traduzione in italiano
-
-A fine trascrizione, se confermi, EchoScript traduce il testo in italiano usando un **LLM su Groq** (`llama-3.3-70b-versatile`: buona qualità sui termini tecnici; ha un limite giornaliero di token più basso, quindi per video molto lunghi puoi passare a `llama-3.1-8b-instant`). I video lunghi vengono tradotti **sezione per sezione** per non superare i limiti del modello.
-
-- I file tradotti finiscono nella sottocartella **`traduzioni/`**, in file separati.
-- L'**originale resta intatto**.
-
-> La traduzione usa Groq (cloud): se hai trascritto in locale, EchoScript ti **avvisa** prima di inviare il testo.
-
----
-
 ## 📄 Esportazione PDF
 
-Il **PDF viene generato sempre, in automatico** (non viene più chiesto). EchoScript crea:
+Il **PDF viene generato sempre, in automatico**. EchoScript crea:
 
 - **`.pdf`**: tramite `fpdf2` (pure-python, **niente LaTeX da installare**, font Arial per gli accenti), **diviso per capitoli**.
-
-Se hai creato anche la versione tradotta, viene esportato anche il PDF nella cartella `traduzioni/`.
 
 ---
 
 ## 🛠️ Configurazione
 
-Le "manopole" principali sono costanti in cima a `transcriber.py`:
+Tutte le "manopole" si impostano da variabili d'ambiente / file `.env` (vedi
+il file `.env`), senza toccare il codice. Ogni valore ha un default sensato:
 
-| Costante | Default | Descrizione |
+| Variabile `.env` | Default | Descrizione |
 |---|---|---|
-| `GROQ_MODEL` | `whisper-large-v3-turbo` | Modello Whisper su Groq (turbo = veloce/economico) |
-| `GROQ_TRANSLATE_MODEL` | `llama-3.3-70b-versatile` | LLM usato per la traduzione (qualità migliore; limite giornaliero più basso. Per video molto lunghi: `llama-3.1-8b-instant`) |
-| `CHUNK_SECONDS` | `600` | Durata di ogni blocco audio (solo Groq) |
-| `AUDIO_SAMPLE_RATE` | `16000` | 16 kHz, consigliato per Whisper |
-| `LANGUAGE` | `None` | `None` = autorileva; forza con `"it"` / `"en"` |
-| `LOCAL_COMPUTE_TYPE` | `int8` | Quantizzazione per il backend locale (più veloce su CPU) |
-| `TRANSLATE_MAX_CHARS` | `2500` | Lunghezza max dei pezzi tradotti per chiamata |
+| `GROQ_API_KEY` | — | Chiave Groq (solo per la trascrizione cloud) |
+| `ECHOSCRIPT_GROQ_MODEL` | `whisper-large-v3-turbo` | Modello Whisper su Groq (turbo = veloce/economico) |
+| `ECHOSCRIPT_AUDIO_LANG` | *(vuoto)* | Lingua dell'audio: vuoto = autorileva; forza con `it` / `en` / … |
+| `ECHOSCRIPT_WORD_TIMESTAMPS` | `1` | Timestamp a livello di parola (utili per sottotitoli) |
+| `ECHOSCRIPT_CHUNK_SECONDS` | `600` | Durata di ogni blocco audio (solo Groq) |
+| `ECHOSCRIPT_DEVICE` | `auto` | Backend locale: `auto` (GPU se c'è) / `cpu` / `cuda` |
+| `ECHOSCRIPT_COMPUTE_TYPE` | *(auto)* | Precisione locale: vuoto = `float16` su GPU, `int8` su CPU |
+
+> **Nota.** La traduzione è temporaneamente disabilitata: per ora EchoScript fa
+> solo trascrizione. Verrà reintrodotta in futuro.
+
+> **GPU automatica.** Il backend locale usa la GPU (CUDA) se disponibile,
+> altrimenti la CPU. Installa PyTorch con CUDA per l'accelerazione (vedi
+> `requirements.txt`).
 
 ---
 
