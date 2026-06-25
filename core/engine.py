@@ -44,15 +44,24 @@ class RateLimitReached(EngineError):
     """Trascrizione Groq interrotta dal limite (429 / token-al-giorno).
 
     Il parziale è stato salvato in un checkpoint: il video potrà riprendere da
-    dove si è fermato. Porta con sé i blocchi fatti/totali per il messaggio."""
+    dove si è fermato. Porta con sé il MINUTAGGIO raggiunto (done_seconds) sul
+    totale (total_seconds), oltre ai blocchi fatti/totali, per comporre un
+    messaggio elegante e leggibile dall'utente."""
 
-    def __init__(self, done: int, total: int):
+    def __init__(self, done: int, total: int, done_seconds: float = 0.0,
+                 total_seconds: float = 0.0):
         self.done = done
         self.total = total
+        self.done_seconds = done_seconds
+        self.total_seconds = total_seconds
+        at = tx._format_timestamp(done_seconds)
+        of = tx._format_timestamp(total_seconds) if total_seconds else None
+        where = f"{at} su {of}" if of else at
         super().__init__(
-            f"Limite Groq raggiunto: trascritti {done}/{total} blocchi. "
-            "Il progresso è stato salvato: riprendi questo video più tardi, "
-            "quando tornano i crediti gratuiti.")
+            "I crediti gratuiti Groq per oggi sono esauriti. La trascrizione si è "
+            f"fermata a {where} ed è stata salvata automaticamente: riprendila "
+            "quando i crediti tornano disponibili (di norma il giorno successivo) "
+            "scegliendo «Riprendi», oppure completala subito in locale.")
 
 
 def _friendly_groq_error(e: Exception) -> str:
@@ -455,7 +464,13 @@ def transcribe_only(source: str, options: dict, on_progress=_noop, resume: bool 
                     "detected_language": ti.lang, "segments": ti.segments,
                     "duration": duration,
                 })
-                raise RateLimitReached(ti.done, ti.total)
+                # Minutaggio raggiunto: i blocchi sono uniformi (CHUNK_SECONDS),
+                # quindi il tempo fatto = blocchi completati × durata blocco,
+                # limitato alla durata totale del video.
+                done_s = ti.done * tx.CHUNK_SECONDS
+                if duration:
+                    done_s = min(done_s, duration)
+                raise RateLimitReached(ti.done, ti.total, done_s, duration or 0.0)
             # Trascrizione completa: niente più parziale da conservare.
             tx.delete_checkpoint(meta)
         else:
@@ -470,6 +485,75 @@ def transcribe_only(source: str, options: dict, on_progress=_noop, resume: bool 
     # proporre la traduzione (italiano -> non serve; inglese -> sì).
     meta["detected_language"] = detected_lang or meta.get("language")
     return meta, segments, engine_label, client
+
+
+def continue_local_from_groq(source: str, options: dict, on_progress=_noop):
+    """Completa IN LOCALE una trascrizione Groq fermata dal limite giornaliero.
+
+    Riusa il parziale salvato nel checkpoint Groq (i blocchi già trascritti),
+    riscarica/riusa l'audio, trascrive in locale (faster-whisper: GPU se c'è,
+    altrimenti CPU) SOLO la parte mancante e la unisce al parziale. A fine
+    lavoro rimuove ogni checkpoint del video.
+
+    Serve al pulsante «Continua ora in locale» mostrato quando i crediti Groq si
+    esauriscono. Returns (meta, segments, engine_label, None)."""
+    source_kind = options.get("source_kind", "youtube")
+    model = options.get("model") or "small"
+    audio_lang = options.get("audio_lang") or tx.LANGUAGE
+
+    # Metadati: servono a ritrovare il checkpoint (chiave) e a conoscere la durata.
+    if source_kind == "local":
+        if not os.path.isfile(source):
+            raise EngineError(f"File non trovato: {source}")
+        on_progress("info", None, None, "Leggo il file audio")
+        meta = tx.local_file_meta(source)
+    else:
+        on_progress("info", None, None, "Leggo le informazioni del video")
+        meta = get_video_info(source)
+
+    cp = tx.load_checkpoint(meta)
+    if not cp:
+        raise EngineError("Nessun parziale Groq da completare per questo video.")
+
+    duration = cp.get("duration") or meta.get("duration") or 0.0
+    meta["duration"] = duration
+    chunk_seconds = cp.get("chunk_seconds") or tx.CHUNK_SECONDS
+    done_seconds = int(cp.get("done_chunks", 0)) * chunk_seconds
+    if duration:
+        done_seconds = min(done_seconds, duration)
+
+    # Checkpoint "locale" sintetico costruito dal parziale Groq: stesso modello e
+    # stessa durata, così _local_resume_point lo accetta, riusa i segmenti già
+    # fatti e riparte esattamente dal minuto in cui Groq si era fermato.
+    local_cp = {
+        "model": model,
+        "done_seconds": done_seconds,
+        "duration": duration,
+        "detected_language": cp.get("detected_language"),
+        "segments": list(cp.get("segments") or []),
+    }
+    engine_label = f"Groq + Locale / faster-whisper {model}"
+
+    with tempfile.TemporaryDirectory(prefix="echoscript_", ignore_cleanup_errors=True) as workdir:
+        if source_kind == "local":
+            audio_path = source
+        else:
+            audio_path = download_audio(source, workdir, on_progress)
+        if not duration:
+            duration = tx._probe_duration(audio_path)
+            meta["duration"] = duration
+            local_cp["duration"] = duration
+        segments, detected = transcribe_local(
+            model, audio_path, duration, on_progress, language=audio_lang,
+            meta=meta, resume_cp=local_cp, workdir=workdir)
+
+    if not segments:
+        raise EngineError("Nessun testo trascritto.")
+    # Completato: via ogni parziale (sia Groq sia l'eventuale locale intermedio).
+    tx.delete_checkpoint(meta)
+    tx.delete_local_checkpoint(meta)
+    meta["detected_language"] = detected or cp.get("detected_language") or meta.get("language")
+    return meta, segments, engine_label, None
 
 
 def save_results(meta: dict, segments: list[dict], engine_label: str, options: dict,

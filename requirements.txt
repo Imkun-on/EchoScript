@@ -12,6 +12,10 @@ faster-whisper>=1.0
 # vuoi generare i PDF.
 fpdf2>=2.7
 
+# Traduzione automatica GRATUITA (senza API key): traduce una trascrizione gia
+# salvata in italiano via Google Translate. Serve solo per l'opzione "traduci".
+deep-translator>=1.11
+
 # GUI desktop (Flet): interfaccia grafica nativa moderna. Serve solo per la
 # GUI (gui/main.py); la CLI funziona senza. Avvio: python gui/main.py
 flet>=0.27,<0.29
