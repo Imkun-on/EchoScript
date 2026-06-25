@@ -819,6 +819,17 @@ def _lang_name(code: str | None) -> str | None:
     return names.get(c, str(code).upper())
 
 
+def _is_italian(code: str | None) -> bool:
+    """True se il codice/nome lingua indica l'italiano (es. 'it', 'italian').
+
+    Usata per saltare la traduzione automatica quando l'audio è già in italiano
+    (tradurre it -> it sarebbe inutile)."""
+    if not code:
+        return False
+    c = str(code).split("-")[0].strip().lower()
+    return c in ("it", "ita", "italian", "italiano")
+
+
 def display_video_info(meta: dict) -> None:
     """Show the video card in a colored box (title, channel, views, likes,
     subscribers, category, date, duration, number of chapters)."""
@@ -1502,6 +1513,89 @@ def build_pdf(title: str, meta: dict, sections: list[dict], out_path: str,
     pdf.output(out_path)
 
 
+# === TRADUZIONE (gratuita, via Google Translate) ============================
+# Riusa una trascrizione GIÀ salvata e ne produce una versione tradotta, senza
+# ri-trascrivere (quindi senza spendere crediti Groq) e senza alcuna API key:
+# si appoggia a deep_translator.GoogleTranslator (endpoint pubblico gratuito).
+
+# Google Translate accetta ~5000 caratteri per richiesta: spezziamo il testo in
+# blocchi più piccoli sui confini di frase, per stare comodi sotto il limite.
+_TRANSLATE_MAX_CHARS = 4500
+
+
+def _make_translator(target: str = "it"):
+    """Crea un traduttore Google (sorgente autorilevata) verso 'target'.
+
+    Solleva un errore chiaro se deep_translator non è installato."""
+    try:
+        from deep_translator import GoogleTranslator
+    except ImportError:
+        raise RuntimeError("deep_translator non installato. Esegui:  "
+                           "pip install deep-translator")
+    return GoogleTranslator(source="auto", target=target)
+
+
+def _split_for_translation(text: str) -> list[str]:
+    """Spezza 'text' in blocchi <= _TRANSLATE_MAX_CHARS sui confini di frase.
+
+    Se una singola frase supera il limite, viene tagliata a forza per non
+    eccedere il massimo accettato da Google Translate."""
+    text = (text or "").strip()
+    if not text:
+        return []
+    # Confini di frase mantenendo la punteggiatura (split su spazio dopo .?!).
+    parts = re.split(r"(?<=[.!?])\s+", text)
+    chunks: list[str] = []
+    buf = ""
+    for part in parts:
+        while len(part) > _TRANSLATE_MAX_CHARS:
+            # Frase mostruosa: tagliala in pezzi grezzi.
+            chunks.append(part[:_TRANSLATE_MAX_CHARS])
+            part = part[_TRANSLATE_MAX_CHARS:]
+        if len(buf) + len(part) + 1 > _TRANSLATE_MAX_CHARS:
+            if buf:
+                chunks.append(buf)
+            buf = part
+        else:
+            buf = f"{buf} {part}".strip()
+    if buf:
+        chunks.append(buf)
+    return chunks
+
+
+def _translate_text(translator, text: str) -> str:
+    """Traduce un testo (anche lungo) unendo i blocchi tradotti."""
+    out = []
+    for chunk in _split_for_translation(text):
+        try:
+            out.append(translator.translate(chunk) or "")
+        except Exception:
+            # Un blocco fallito non deve far saltare l'intera traduzione:
+            # si tiene l'originale come fallback per quel pezzo.
+            out.append(chunk)
+    return " ".join(s for s in out if s).strip()
+
+
+def translate_sections(sections: list[dict], target: str = "it",
+                       on_progress=None) -> list[dict]:
+    """Traduce titolo e testo di ogni sezione verso 'target' (default italiano).
+
+    'on_progress(i, n)' (opzionale) viene chiamato dopo ogni sezione tradotta,
+    per aggiornare una barra/spinner. Restituisce nuove sezioni (non muta quelle
+    in ingresso)."""
+    translator = _make_translator(target)
+    out: list[dict] = []
+    n = len(sections)
+    for i, sec in enumerate(sections, 1):
+        title = sec.get("title")
+        new_title = (_translate_text(translator, title) if title else title)
+        new_text = _translate_text(translator, sec.get("text", ""))
+        out.append({"start": sec.get("start"), "title": new_title, "text": new_text})
+        if on_progress:
+            on_progress(i, n)
+    return out
+
+
 # === API KEY ===
 
 def load_dotenv() -> None:
@@ -1576,6 +1670,28 @@ def get_groq_client() -> Groq | None:
 
 # === MAIN FLOW ===
 
+def _print_ratelimit_notice(title: str, done_seconds: float, total_seconds: float) -> None:
+    """Mostra un avviso elegante (non un errore) quando i crediti Groq finiscono.
+
+    Riporta il MINUTAGGIO a cui la trascrizione si è fermata e ricorda che il
+    progresso è salvato: si potrà riprendere quando i crediti tornano."""
+    where = _format_timestamp(done_seconds)
+    if total_seconds:
+        where += f" / {_format_timestamp(total_seconds)}"
+    body = Text()
+    body.append("I crediti gratuiti Groq per oggi sono esauriti.\n\n", style="bold")
+    body.append("La trascrizione si è fermata a ")
+    body.append(where, style="bold bright_yellow")
+    body.append(" ed è stata salvata automaticamente.\n\n")
+    body.append("Quando i crediti torneranno disponibili (di norma domani) riavvia "
+                "con lo stesso video e scegli «Riprendi» per continuare da dove si "
+                "è interrotto.", style="dim")
+    console.print()
+    console.print(Panel(body, title="[warning]⏳ Crediti Groq esauriti[/warning]",
+                        border_style="yellow", box=ROUNDED, padding=(1, 2),
+                        title_align="left"))
+
+
 def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
                   client, local_model: str | None,
                   resume_cp: dict | None = None) -> list[dict] | None:
@@ -1645,10 +1761,37 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
                     "detected_language": ti.lang, "segments": ti.segments,
                     "duration": duration,
                 })
-                console.print(f"\n[warning]Limite Groq raggiunto: trascritti "
-                              f"{ti.done}/{ti.total} blocchi. Progresso salvato: "
-                              f"riavvia con lo stesso video per riprendere.[/warning]")
-                return None
+                # Minutaggio raggiunto: i blocchi sono uniformi (CHUNK_SECONDS).
+                done_s = ti.done * CHUNK_SECONDS
+                if duration:
+                    done_s = min(done_s, duration)
+                _print_ratelimit_notice(meta["title"], done_s, duration)
+                # Si può completare SUBITO la parte mancante in locale (CPU/GPU),
+                # riusando l'audio già scaricato (nessun nuovo download).
+                ans = _prompt("Completo ora la parte mancante in locale?",
+                              "(s = sì, in locale · invio = riprendo più tardi)",
+                              accent="bright_cyan").strip().lower()
+                if not ans.startswith("s"):
+                    return None
+                cont_model = local_model or choose_local_model()
+                if not cont_model:
+                    return None
+                # Checkpoint "locale" sintetico dal parziale Groq: stesso modello e
+                # durata, così la ripresa locale riparte dal minuto già raggiunto.
+                local_cp = {"model": cont_model, "done_seconds": done_s,
+                            "duration": duration, "detected_language": ti.lang,
+                            "segments": ti.segments}
+                dev, _ = _resolve_device()
+                dev_label = "GPU" if dev == "cuda" else "CPU"
+                console.print()
+                console.rule(f"[phase]✎ Completamento in locale {dev_label} ({cont_model})[/phase]",
+                             style="bright_green")
+                if dev != "cuda":
+                    console.print("  [warning]La trascrizione locale gira sulla CPU: può richiedere diversi minuti.[/warning]")
+                segments, detected = transcribe_local(cont_model, audio_path, duration,
+                                                      meta=meta, resume_cp=local_cp, workdir=workdir)
+                # Header dei file: motore combinato Groq + locale.
+                meta["engine_label_override"] = f"Groq + Locale / faster-whisper {cont_model}"
             delete_checkpoint(meta)
         else:
             dev, _ = _resolve_device()
@@ -1747,6 +1890,83 @@ def _save_outputs(meta: dict, segments: list[dict], engine_label: str,
         body, title="[bold bright_green]✅ Completato![/bold bright_green]",
         border_style="bright_green", box=DOUBLE, expand=False, padding=(1, 3),
     ))
+
+
+def translate_existing(out_root: str, title: str, target: str = "it",
+                       do_export: bool = True) -> bool:
+    """Traduce una trascrizione GIÀ salvata (niente ri-trascrizione, nessun credito).
+
+    Rilegge i file da out_root/<title>/, traduce le sezioni verso 'target'
+    (default italiano) con Google Translate e salva md/txt (+ pdf) sotto
+    out_root/<title>/traduzioni/ col suffisso della lingua. Restituisce True se
+    la traduzione è stata prodotta, False se non c'era nulla da tradurre."""
+    existing = load_existing_transcript(out_root, title)
+    if not existing:
+        console.print("[warning]Nessuna trascrizione salvata da tradurre.[/warning]")
+        return False
+    meta, segments, _ = existing
+    sections = _build_sections(meta, segments)
+
+    safe_title = _safe_filename(meta["title"])
+    video_dir = os.path.join(out_root, safe_title)
+    trad_dir = os.path.join(video_dir, "traduzioni")
+    os.makedirs(trad_dir, exist_ok=True)
+    base = os.path.join(trad_dir, f"{safe_title}_{target}")
+    lang_label = _lang_name(target) or target
+
+    # Traduzione con barra di avanzamento (una tacca per sezione).
+    console.print()
+    console.rule(f"[phase]🌐 Traduzione → {lang_label}[/phase]", style="bright_blue")
+    progress = Progress(
+        SpinnerColumn("dots", style="bright_blue"),
+        TextColumn("[phase]{task.description}"),
+        BarColumn(bar_width=40, style="bar.back", complete_style="bright_blue", finished_style="bold blue"),
+        TaskProgressColumn(), console=console, expand=False,
+    )
+    try:
+        with progress:
+            task_id = progress.add_task("Traduco le sezioni", total=len(sections))
+            translated = translate_sections(
+                sections, target,
+                on_progress=lambda i, n: progress.update(task_id, completed=i))
+    except RuntimeError as e:  # deep_translator mancante
+        console.print(f"[error]{e}[/error]")
+        return False
+    except Exception as e:
+        console.print(f"[error]Traduzione fallita: {e}[/error]")
+        return False
+
+    engine_label = f"Traduzione automatica (Google Translate) → {lang_label}"
+    created: list[str] = []
+
+    def _save(path: str, content: str) -> None:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        created.append(os.path.relpath(path, video_dir).replace("\\", "/"))
+
+    # La versione tradotta non porta i timestamp (testo continuo, più leggibile).
+    _save(f"{base}.md", build_md(meta["title"], meta, engine_label, translated, with_timestamps=False))
+    _save(f"{base}.txt", build_txt(meta["title"], meta, translated))
+    if do_export:
+        try:
+            with console.status("[info]Creo il PDF (traduzione)...[/info]", spinner="dots"):
+                build_pdf(meta["title"], meta, translated, f"{base}.pdf", with_timestamps=False)
+            created.append(os.path.relpath(f"{base}.pdf", video_dir).replace("\\", "/"))
+        except Exception as e:
+            console.print(f"[error]Export PDF traduzione fallito: {e}[/error]")
+
+    files = "  ".join(os.path.splitext(c.split('/')[-1])[1] for c in created)
+    console.print()
+    console.print(Panel(
+        Group(
+            Text.from_markup(f"[bold]Lingua:[/bold] {lang_label}"),
+            Text.from_markup(f"[dim]📁 {trad_dir}[/dim]"),
+            Text.from_markup(f"[info]🌐 traduzioni/[/info]  {files}"),
+        ),
+        title="[bold bright_blue]✅ Traduzione completata![/bold bright_blue]",
+        border_style="bright_blue", box=DOUBLE, expand=False, padding=(1, 3),
+    ))
+    return True
 
 
 # === PRE-RUN ESTIMATE (cost for Groq, time for local) ========================
@@ -1877,6 +2097,8 @@ def run() -> None:
     # Il PDF viene SEMPRE generato (come nella GUI): niente più domanda.
     do_export = True
     console.print(f"  {SYM_OK} Il PDF verrà generato automaticamente.")
+    console.print(f"  {SYM_OK} A trascrizione completata, la traduzione in italiano "
+                  "verrà generata in automatico.")
 
     out_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
 
@@ -1899,15 +2121,35 @@ def run() -> None:
             """Delete whichever checkpoint kind applies to this run."""
             delete_local_checkpoint(meta) if backend == "local" else delete_checkpoint(meta)
 
+        # Di default, dopo una trascrizione COMPLETATA al 100% si genera anche la
+        # traduzione italiana in automatico. L'unica eccezione è «ritrascrivi
+        # solamente» (vedi sotto), dove l'utente chiede esplicitamente di NON
+        # tradurre. Se i crediti finiscono a metà, _run_pipeline torna None e si
+        # salta tutto (incluso il blocco di traduzione): mai tradotti i parziali.
+        also_translate = True
+
         if transcription_exists(out_root, meta["title"]):
             console.print(f"[warning]«{meta['title']}» è già stato trascritto in results/.[/warning]")
-            ch = _prompt("Cosa fai? [r]itrascrivi tutto · [s]alta",
-                         "(r/s)", accent="bright_yellow").strip().lower()
-            if not ch.startswith("r"):
+            # NB: le parentesi vanno escapate (\[) o rich le interpreta come markup.
+            ch = _prompt("Cosa fai? \\[r]itrascrivi solamente · \\[t]raduci · "
+                         "\\[e]ntrambi (ritrascrivi+traduci) · \\[s]alta",
+                         "(r/t/e/s)", accent="bright_yellow").strip().lower()
+            if ch.startswith("t"):
+                # Solo traduzione: riusa i file salvati, nessuna ri-trascrizione e
+                # nessun credito speso. Poi passa al prossimo job.
+                translate_existing(out_root, meta["title"], target="it", do_export=do_export)
+                continue
+            if ch.startswith("e"):
+                # Ritrascrivi DA CAPO e poi traduci: butta il parziale.
+                _drop_cp()
+                resume_cp = None
+            elif ch.startswith("r"):
+                _drop_cp()                 # ritrascrizione completa: butta via ogni parziale
+                also_translate = False     # «solamente»: niente traduzione
+                resume_cp = None
+            else:
                 console.print("[dim]Saltato.[/dim]")
                 continue
-            _drop_cp()         # ritrascrizione completa: butta via ogni parziale
-            resume_cp = None
         elif resume_cp:
             if is_local_cp:
                 done_s = int(resume_cp.get("done_seconds", 0))
@@ -1918,7 +2160,7 @@ def run() -> None:
             else:
                 done, tot = resume_cp.get("done_chunks", 0), resume_cp.get("total_chunks", 0)
                 console.print(f"[info]Ripresa disponibile per «{meta['title']}»: {done}/{tot} blocchi salvati.[/info]")
-            ch = _prompt("Cosa fai? [r]iprendi · [d]a capo · [s]alta",
+            ch = _prompt("Cosa fai? \\[r]iprendi · \\[d]a capo · \\[s]alta",
                          "(r/d/s)", accent="bright_cyan").strip().lower()
             if ch.startswith("s"):
                 console.print("[dim]Saltato.[/dim]")
@@ -1931,7 +2173,20 @@ def run() -> None:
         if not segments:
             # _run_pipeline ha già spiegato il motivo (interruzione/limite o errore).
             continue
-        _save_outputs(meta, segments, engine_label, do_export, out_root)
+        # Se si è completato in locale dopo il limite Groq, l'etichetta motore è
+        # stata aggiornata (Groq + Locale); altrimenti vale quella scelta a monte.
+        label = meta.pop("engine_label_override", engine_label)
+        _save_outputs(meta, segments, label, do_export, out_root)
+        # Traduzione automatica dopo una trascrizione COMPLETATA (rilegge il .json
+        # appena scritto). Si arriva qui solo se _run_pipeline ha restituito i
+        # segmenti, cioè a trascrizione al 100%: i parziali da crediti esauriti
+        # tornano None e non passano di qui. Disattivata solo da «ritrascrivi
+        # solamente». Saltata anche se l'audio è già in italiano (it -> it inutile).
+        if also_translate:
+            if _is_italian(meta.get("detected_language")):
+                console.print("  [dim]🇮🇹 Audio già in italiano: traduzione automatica saltata.[/dim]")
+            else:
+                translate_existing(out_root, meta["title"], target="it", do_export=do_export)
 
 
 def _probe_duration(audio_path: str) -> float:

@@ -172,9 +172,15 @@ T = {
         "resume_opt_restart": "Ricomincia da capo",
         "resume_opt_restart_desc": "Ignora il parziale e ritrascrive tutto da zero.",
         # Rate-limit-reached warning
-        "ratelimit_title": "Limite Groq raggiunto",
-        "ratelimit_msg": "Trascritti {done}/{total} blocchi. Il progresso è stato salvato: "
-                         "riapri questo video più tardi (quando tornano i crediti) e scegli «Riprendi».",
+        "ratelimit_title": "Crediti Groq esauriti",
+        "ratelimit_msg": "I crediti gratuiti Groq per oggi sono terminati.\n\n"
+                         "La trascrizione si è fermata a {done} su {total} ed è stata "
+                         "salvata automaticamente.\n\n"
+                         "Quando i crediti torneranno disponibili (di norma domani) riapri "
+                         "questo video e scegli «Riprendi» per continuare da dove si è "
+                         "interrotto. In alternativa puoi completarlo subito in locale.",
+        "ratelimit_close": "Riprendo domani",
+        "ratelimit_continue_local": "Continua ora in locale (CPU)",
         "engine_translate": "DeepL · traduzione",
         "opt_key_needed": "Per tradurre serve una chiave DeepL:",
         "btn_continue": "Continua e scegli cartella",
@@ -303,9 +309,15 @@ T = {
         "resume_opt_resume_desc_time": "Continue from the saved position ({done} / {total}).",
         "resume_opt_restart": "Start over",
         "resume_opt_restart_desc": "Discard the partial and re-transcribe from scratch.",
-        "ratelimit_title": "Groq limit reached",
-        "ratelimit_msg": "Transcribed {done}/{total} chunks. Progress was saved: reopen this video "
-                         "later (when credits return) and choose “Resume”.",
+        "ratelimit_title": "Groq credits exhausted",
+        "ratelimit_msg": "Today's free Groq credits are used up.\n\n"
+                         "Transcription stopped at {done} of {total} and was saved "
+                         "automatically.\n\n"
+                         "When credits become available again (usually tomorrow), reopen "
+                         "this video and choose “Resume” to continue from where it stopped. "
+                         "Alternatively, you can finish it now locally.",
+        "ratelimit_close": "I'll resume tomorrow",
+        "ratelimit_continue_local": "Continue now, locally (CPU)",
         "engine_translate": "DeepL · translation",
         "opt_key_needed": "Translation requires a DeepL key:",
         "btn_continue": "Continue and choose folder",
@@ -1724,12 +1736,18 @@ class EchoScriptApp:
         resumable state."""
         is_local = "done_seconds" in cp
         if is_local:
-            done = tx._format_timestamp(int(cp.get("done_seconds", 0)))
-            total = tx._format_timestamp(int(cp.get("duration", 0) or 0))
-            resume_desc = self.t("resume_opt_resume_desc_time").format(done=done, total=total)
+            done_s = int(cp.get("done_seconds", 0))
         else:
-            done, total = cp.get("done_chunks", 0), cp.get("total_chunks", 0)
-            resume_desc = self.t("resume_opt_resume_desc").format(done=done, total=total)
+            # Groq: i blocchi sono uniformi, quindi il minutaggio fatto =
+            # blocchi completati × durata blocco (limitato alla durata totale).
+            ch_s = cp.get("chunk_seconds") or tx.CHUNK_SECONDS
+            done_s = int(cp.get("done_chunks", 0)) * ch_s
+        dur = int(cp.get("duration", 0) or 0)
+        if dur:
+            done_s = min(done_s, dur)
+        done = tx._format_timestamp(done_s)
+        total = tx._format_timestamp(dur)
+        resume_desc = self.t("resume_opt_resume_desc_time").format(done=done, total=total)
 
         def restart():
             """Discard the checkpoint (the right kind) and transcribe from scratch."""
@@ -1783,7 +1801,7 @@ class EchoScriptApp:
                 self._set_busy(False)
                 self._render_result(result)
             except engine.RateLimitReached as ex:
-                self._fail_ratelimit(ex)
+                self._fail_ratelimit(ex, src, meta)
             except engine.EngineError as ex:
                 self._fail(str(ex))
             except Exception as ex:
@@ -1791,21 +1809,37 @@ class EchoScriptApp:
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _fail_ratelimit(self, ex) -> None:
-        """Groq limit reached: a dedicated (amber) notice, not a red error. The
-        partial has already been saved by the engine: it can be resumed later.
+    def _fail_ratelimit(self, ex, src=None, meta: dict | None = None) -> None:
+        """Groq credits exhausted: a dedicated (amber) notice, not a red error.
 
-        Treated apart from generic failures because it is an expected, recoverable
-        condition (free-tier daily tokens), not a bug."""
+        The partial has already been saved by the engine, so the run can be
+        resumed tomorrow when credits return ("Riprendo domani"), or finished
+        right now on the local backend ("Continua ora in locale"). Treated apart
+        from generic failures because it is an expected, recoverable condition
+        (free-tier daily tokens), not a bug. The message reports the MINUTAGGIO
+        reached, not the internal chunk count."""
         self._show_progress(False)
         self._set_busy(False)
-        msg = self.t("ratelimit_msg").format(done=ex.done, total=ex.total)
-        close = ft.FilledButton(
-            self.t("btn_close"), icon=ft.Icons.CHECK,
+        done = tx._format_timestamp(int(getattr(ex, "done_seconds", 0) or 0))
+        total = tx._format_timestamp(int(getattr(ex, "total_seconds", 0) or 0))
+        msg = self.t("ratelimit_msg").format(done=done, total=total)
+        close = ft.OutlinedButton(
+            self.t("ratelimit_close"), icon=ft.Icons.SCHEDULE,
             on_click=lambda e: self.page.close(self._rl_dialog),
-            style=ft.ButtonStyle(bgcolor=WARN, color="#1A1206",
+            style=ft.ButtonStyle(color=MUTED,
                                  shape=ft.RoundedRectangleBorder(radius=10),
-                                 padding=ft.padding.symmetric(horizontal=18, vertical=16)))
+                                 padding=ft.padding.symmetric(horizontal=16, vertical=16)))
+        actions = [close]
+        # "Continua ora in locale" is offered only when we know which source to
+        # finish (and only for Groq runs — local runs never hit this path).
+        if src is not None and meta is not None:
+            cont = ft.FilledButton(
+                self.t("ratelimit_continue_local"), icon=ft.Icons.COMPUTER,
+                on_click=lambda e: self._continue_local(src, meta),
+                style=ft.ButtonStyle(bgcolor=WARN, color="#1A1206",
+                                     shape=ft.RoundedRectangleBorder(radius=10),
+                                     padding=ft.padding.symmetric(horizontal=18, vertical=16)))
+            actions.append(cont)
         self._rl_dialog = ft.AlertDialog(
             modal=True, bgcolor=SURFACE, shape=ft.RoundedRectangleBorder(radius=16),
             title=ft.Row([ft.Icon(ft.Icons.HOURGLASS_DISABLED, color=WARN, size=22),
@@ -1813,9 +1847,57 @@ class EchoScriptApp:
                                   weight=ft.FontWeight.W_600, color=WARN)], spacing=10),
             content=ft.Container(width=460,
                                  content=ft.Text(msg, size=13, color=TEXT, no_wrap=False)),
-            actions=[close], actions_alignment=ft.MainAxisAlignment.END,
+            actions=actions, actions_alignment=ft.MainAxisAlignment.END,
         )
         self.page.open(self._rl_dialog)
+
+    def _continue_local(self, src, meta: dict) -> None:
+        """Finish a credit-exhausted Groq run on the LOCAL backend (CPU/GPU).
+
+        Re-uses the saved partial: only the not-yet-transcribed tail is processed
+        locally and merged with it. Switches the UI to the local backend so the
+        engine badge and config screen stay consistent, then runs off-thread."""
+        self.page.close(self._rl_dialog)
+        # Switch to local so badges/cards/fields stay coherent if the user goes back.
+        self.backend = "local"
+        self._sync_select_visuals()
+        self._sync_fields()
+
+        options = {
+            "backend": "local", "model": self.model_dd.value or "small",
+            "api_key": "", "export": True, "source_kind": self.source,
+        }
+        # Local plan: no Groq "prepare" phase (info -> [download] -> transcribe -> export).
+        self._plan = self._phase_plan("local", self.source)
+        self._last_g = 0.0
+        self._hide_error()
+        self._set_busy(True)
+        self._set_engine_badge()
+        self._set_phase("info", None, None, "")
+        self._show_progress(True)
+        self.page.update()
+
+        def work():
+            """Background worker: transcribe the remaining tail locally, then save."""
+            try:
+                meta2, segments, engine_label, _ = engine.continue_local_from_groq(
+                    src, options, on_progress=self._on_progress)
+                self.last_thumb = meta2.get("thumbnail")
+                result = engine.save_results(
+                    meta2, segments, engine_label, options, self.out_root,
+                    None, on_progress=self._on_progress)
+                self.prog_bar.value = 1.0
+                self.prog_pct.value = "100%"
+                self.page.update()
+                self._show_progress(False)
+                self._set_busy(False)
+                self._render_result(result)
+            except engine.EngineError as ex:
+                self._fail(str(ex))
+            except Exception as ex:
+                self._fail(self.t("err_unexpected").format(e=ex))
+
+        threading.Thread(target=work, daemon=True).start()
 
     # --------------------------------------------------------------- PROGRESS UI
     def _on_progress(self, phase, current, total, detail="") -> None:
