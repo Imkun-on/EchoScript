@@ -228,7 +228,7 @@ If you choose **Local**, a second panel lets you pick the model each time:
 If you're **not a developer** and just want to use the program, you don't need to install Python or anything else: download the ready-made app.
 
 1. Go to the project's **[Releases](https://github.com/Imkun-on/EchoScript/releases/latest)** page on GitHub.
-2. Download **`EchoScript-Windows.zip`** from the latest version.
+2. Download **`EchoScript.zip`** from the latest version.
 3. **Extract** the ZIP wherever you like (Desktop, Documents…). Keep the files **together**: you need both `EchoScript.exe` and the **`_internal`** folder next to it.
 4. Double-click **`EchoScript.exe`**. Done: the app opens, **nothing to install**.
 
