@@ -7,14 +7,19 @@
   <img src="https://img.shields.io/badge/Groq-Whisper-F55036?logo=groq&logoColor=white" alt="Groq">
   <img src="https://img.shields.io/badge/faster--whisper-local-0A9396?logo=openai&logoColor=white" alt="faster-whisper">
   <img src="https://img.shields.io/badge/Rich-TUI-4EC820?logo=windowsterminal&logoColor=white" alt="Rich">
+  <img src="https://img.shields.io/badge/Flet-GUI-02569B?logo=flutter&logoColor=white" alt="Flet">
   <img src="https://img.shields.io/badge/yt--dlp-downloader-FF0000?logo=youtube&logoColor=white" alt="yt-dlp">
   <img src="https://img.shields.io/badge/fpdf2-PDF-EC1C24?logo=adobeacrobatreader&logoColor=white" alt="fpdf2">
+  <img src="https://img.shields.io/badge/Google_Translate-translation-4285F4?logo=googletranslate&logoColor=white" alt="deep-translator">
+  <img src="https://img.shields.io/badge/Ollama-local_summary-000000?logo=ollama&logoColor=white" alt="Ollama">
+  <img src="https://img.shields.io/badge/Llama_3.3_·_Qwen_2.5-LLM-7C3AED" alt="LLM">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="MIT License">
 </p>
 
 <p align="center">
   Transcribe YouTube videos <b>and your local audio files</b> into <b>text, Markdown, JSON and PDF</b>,<br>
-  <b>fast</b> with Groq or <b>100% locally</b> for maximum privacy.<br>
+  then <b>translate</b> them to Italian and get a <b>clean summary</b> (no "uh/um", repetitions or self-corrections).<br>
+  <b>Fast</b> with Groq or <b>100% locally</b> for maximum privacy.<br>
   Built to <b>study</b> long videos (RAG, fine-tuning, lectures) by reading them instead of watching for hours.<br>
   Available as a <b>desktop app</b> (GUI) or from the <b>terminal</b> (CLI).<br>
   <b>No subscriptions, no daily limits, no reduced minutes.</b>
@@ -51,6 +56,8 @@ python transcriber.py     # terminal interface (CLI)
 - [⚙️ How it works (the phases)](#️-how-it-works-the-phases)
 - [💾 Output file structure](#-output-file-structure)
 - [📄 PDF export](#-pdf-export)
+- [🌐 Automatic translation](#-automatic-translation)
+- [🧠 Automatic summary](#-automatic-summary)
 - [🛠️ Configuration](#️-configuration)
 - [🔒 Privacy](#-privacy)
 - [⚖️ Legal notice](#️-legal-notice)
@@ -216,7 +223,9 @@ If you choose **Local**, a second panel lets you pick the model each time:
 - ⏱️ **Timings & sections**: uses YouTube **chapters** as document sections
 - 💾 **3 base formats** always generated: `.md` (human), `.txt` (for other LLMs), `.json` (for RAG)
 - 📄 **PDF always generated** automatically, split by chapter
-- 🗂️ **Organized output** in `results/<video name>/` under the `trascrizioni/` subfolder
+- 🌐 **Automatic translation** to Italian (when the audio isn't already Italian), free via Google Translate
+- 🧠 **Automatic summary** of the text, **per section**: strips fillers, repetitions and self-corrections (Groq in the cloud · Ollama locally)
+- 🗂️ **Organized output** in `results/<video name>/` under the `trascrizioni/`, `traduzioni/`, `riassunti/` subfolders
 - 🎨 **Polished interfaces**: dark GUI with animated background, or Rich CLI with bars and panels
 - 🔑 **Safe key handling**: environment variable or `.env` file (never in the code)
 - 🧯 **Clear errors**: the key is validated at startup; no pointless retries on auth errors
@@ -319,12 +328,21 @@ The key is needed **only** if you use the **Groq** (cloud) backend. It is **free
 | `yt-dlp` | Downloads audio and metadata (title, chapters, duration) from YouTube | The de-facto standard: handles streams, resume, and metadata extraction |
 | `groq` | Official Groq API client (Whisper) | Official SDK, simple and fast |
 | `faster-whisper` | *(optional)* **Local** transcription on CPU | Optimized Whisper implementation (CTranslate2), great on CPU with `int8` |
+| `deep-translator` | **Translation** to Italian | Uses Google Translate (free endpoint): no key, no credits |
 | `fpdf2` | *(optional)* **PDF** export | Pure-python, **no system LaTeX needed**; supports Unicode fonts |
 | `flet` | *(optional)* **desktop GUI** (`gui/main.py`) | Modern native graphical interface in Python; the CLI works without it |
 
+### External tool (not pip)
+
+| Tool | What it's for | Notes |
+|---|---|---|
+| **[Ollama](https://ollama.com)** | **Local summary** (100% offline) | A separate program to install once; talked to over HTTP (no pip library). Not needed if you use Groq for the summary. Recommended model: `qwen2.5:7b` |
+
+> For the **cloud** summary the existing **`groq`** client is reused (with a chat model, not Whisper): no extra dependency.
+
 ### Standard library (no installation)
 
-`os`, `re`, `json`, `sys`, `signal`, `shutil`, `tempfile`, `subprocess`, `datetime`: paths/files, regex, JSON, Ctrl+C handling, ffmpeg/ffprobe calls, dates.
+`os`, `re`, `json`, `sys`, `signal`, `shutil`, `tempfile`, `subprocess`, `datetime`, `urllib`: paths/files, regex, JSON, Ctrl+C handling, ffmpeg/ffprobe calls, dates and — for Ollama — the HTTP calls.
 
 ---
 
@@ -419,20 +437,34 @@ Transcribe a long talk and use **PDF export**: you get a clean PDF, split by cha
 ```
 results/
 └── <Video or file name>/
-    └── trascrizioni/      (transcriptions)
-        ├── <Name>.md      (sections with timing in the heading, clean prose)
-        ├── <Name>.txt     (clean text, for other LLMs)
-        ├── <Name>.json    (segments with timestamps, for RAG)
-        └── <Name>.pdf     (always, generated automatically)
+    ├── trascrizioni/          (the original transcription)
+    │   ├── <Name>.md          (sections with timing in the heading, clean prose)
+    │   ├── <Name>.txt         (clean text, for other LLMs)
+    │   ├── <Name>.json        (segments with timestamps, for RAG)
+    │   └── <Name>.pdf         (always, generated automatically)
+    ├── traduzioni/            (if the audio wasn't in Italian)
+    │   ├── <Name>_it.md
+    │   ├── <Name>_it.txt
+    │   ├── <Name>_it.json     (translated sections, reused by "Summary only")
+    │   └── <Name>_it.pdf
+    └── riassunti/             (clean summary, per section)
+        ├── <Name>_riassunto.md
+        ├── <Name>_riassunto.txt
+        └── <Name>_riassunto.pdf
 ```
 
-> For **local files** `<Name>` is the file name (without extension); for YouTube videos it's the title. In **batch**, each file gets its own `results/<file name>/` folder.
+> For **local files** `<Name>` is the file name (without extension); for YouTube videos it's the title. In **batch**, each file gets its own `results/<file name>/` folder. The `traduzioni/` and `riassunti/` folders appear only when those steps run. (Folder names are in Italian to match the app's interface; in the GUI they follow the chosen UI language, e.g. `transcriptions/`, `translations/`, `summaries/` in English.)
 
-- **`.md`**: human-readable: timings appear **only in section headings**, the body is flowing prose.
-- **`.txt`**: clean text with no timestamps: ideal to **paste into another LLM** (ChatGPT/Claude).
-- **`.json`**: metadata + chapters + **all segments with timestamps**: perfect for a **RAG** pipeline.
+### Why three (actually four) formats, and what they're for
 
-> The folder name is in Italian (`trascrizioni` = transcriptions) to match the app's interface.
+It's not redundancy: each format solves a different need, so you never have to reconvert the text by hand.
+
+- **`.md` (Markdown)** → **reading and publishing**. Timings appear **only in section headings**, the body is flowing prose: perfect to open in an editor, on GitHub, Notion or Obsidian, with chapters already as headings.
+- **`.txt` (plain text)** → **feeding it to another LLM**. No timestamps, no formatting: the cleanest way to **paste it into ChatGPT/Claude** ("ask me questions about this", "explain it"), for full-text search or scripts.
+- **`.json` (structured)** → **RAG and programmatic use**. Contains metadata + chapters + **all segments with timestamps**: ready for *chunking*, indexing into a vector DB, and reconstructing "at what minute X was said".
+- **`.pdf`** → **comfortable offline reading**. Laid out and split by chapter: to read on a tablet, annotate or print.
+
+> The same applies to **translation** and **summary**: they are saved in the same formats, so you can read the summary as a PDF, paste its `.txt` into another model, or index it.
 
 ---
 
@@ -441,6 +473,101 @@ results/
 The **PDF is always generated, automatically**. EchoScript creates:
 
 - **`.pdf`**: via `fpdf2` (pure-python, **no LaTeX to install**, Arial font for accents), **split by chapter**.
+
+---
+
+## 🌐 Automatic translation
+
+> ℹ️ Translation and summary currently run in the **CLI** (`transcriber.py`). GUI integration is coming.
+
+After transcription, if the audio is **not already in Italian**, EchoScript **translates it to Italian** automatically (if it's already Italian it skips the step: translating `it → it` would be pointless).
+
+- **Free and key-less.** Translation uses **Google Translate** via the `deep-translator` library: no API key, **no Groq credits spent**. The transcription stays intact; the translation goes to `traduzioni/` as separate `.md`/`.txt`/`.pdf` files, **without timings** (continuous text, easier to read).
+
+### How long videos are handled (in blocks)
+
+Translation services accept only a **limited number of characters per request** (~5,000 for Google). A 1-2 hour transcription is much longer and would exceed the limit. The solution is **chunking**:
+
+1. the text is **split into ~4,500-character blocks**, cutting **on sentence boundaries** (after `.`/`?`/`!`) so sentences aren't broken mid-way;
+2. each block is translated on its own;
+3. the translated blocks are **stitched back** together in the original order.
+
+This way text of any length goes through without errors. If a single sentence were monstrously long it gets force-cut to fit the limit, and if one block fails it **doesn't break everything** (that piece keeps the original as a fallback).
+
+---
+
+## 🧠 Automatic summary
+
+After translation (or, if the audio was already Italian, on the **original transcription**), EchoScript generates a **clean summary** of the text, saved to `riassunti/` in the usual `.md`/`.txt`/`.pdf` formats.
+
+### Why a summary is needed too
+
+A transcription is **raw speech written down**: by nature it carries "noise" that makes reading tiring and hard to study:
+
+- **fillers** ("uh", "um", "you know", "like", "so"…);
+- **repetitions** and roundabout phrasing;
+- **interrupted sentences** and speaker **self-corrections** ("I mean… actually no…");
+- digressions and thinking pauses.
+
+The summary produces a **concise, tidy** version that **keeps the important concepts, data, names and examples** while removing the noise. Above all, it's **per section**: if the video has **chapters**, you get **one summary per chapter** (otherwise a single summary). The result: you study a one-hour video in minutes, with the full transcription kept alongside for the details.
+
+### Which models were introduced and why
+
+Summarizing isn't transcribing: it needs an **LLM** (a language model), because Whisper can only turn audio into text, not rework it. EchoScript uses **two engines**, chosen based on the transcription backend:
+
+| Backend | Summary engine | Model (default) | Why |
+|---|---|---|---|
+| ⚡ **Groq (cloud)** | Groq chat API | `llama-3.3-70b-versatile` | Runs on Groq's servers: you can afford a **large 70B** model → high-quality summaries, **very fast**, using the free key you already use for transcription |
+| 🔒 **Local** | **Ollama** (offline) | `qwen2.5:7b` | Stays **100% offline**. **Qwen 2.5 7B** is light (~4.7 GB), **fast on CPU** and especially good **in Italian** and at following structured instructions (better than Llama 3.1 8B at the same size) |
+
+> **Ollama** is the *program* that runs the model locally (like a "player" for models); **Qwen** is the *model*. Locally you install Ollama once (https://ollama.com) and pull the model: `ollama pull qwen2.5:7b`. No extra pip dependency: EchoScript talks to Ollama over HTTP. With **Groq** none of this is needed.
+
+### Handling long videos: map-reduce + context
+
+As with translation, a very long text doesn't fit in a single request (it exceeds the model's **context**). Here the solution is **map-reduce**:
+
+1. **map** — if a section exceeds `SUMMARY_MAX_CHARS` (12,000 characters) it's split into blocks, and **each block is summarized** on its own;
+2. **reduce** — the partial summaries are **merged and summarized again** into a single coherent section summary.
+
+On top of that, for the local engine we **raise Ollama's context window to 8,192 tokens** (`num_ctx`): by default Ollama uses only 2,048 and would **silently truncate** long blocks, ruining summaries of long videos.
+
+### The prompt used (identical for Groq and Ollama)
+
+Quality depends on the instructions given to the model. EchoScript always sends this **system prompt** (in Italian, since the output is Italian):
+
+```
+Sei un editor esperto. Ricevi la trascrizione di una sezione di un video parlato
+(testo in italiano). Trasformala in un riassunto chiaro, fedele e scorrevole,
+sempre in italiano, seguendo queste regole:
+- elimina intercalari e riempitivi (ehm, uhm, cioè, tipo, no?, allora, insomma)
+  e le esitazioni;
+- togli ripetizioni, frasi interrotte e autocorrezioni di chi parla, tenendo solo
+  la versione corretta;
+- CONSERVA tutti i concetti, i dati, i nomi propri e gli esempi importanti;
+- NON aggiungere nulla che non sia nel testo e non inventare;
+- struttura: da 3 a 6 punti elenco concisi e, se utile, 1-2 frasi finali di sintesi.
+Rispondi SOLO con il riassunto, senza preamboli né commenti.
+```
+
+*(Translation: "You are an expert editor. You receive the transcription of a section of a spoken video (Italian text). Turn it into a clear, faithful, fluent summary in Italian: remove fillers and hesitations; remove repetitions, broken sentences and the speaker's self-corrections, keeping only the corrected version; PRESERVE all concepts, data, proper names and important examples; DO NOT add anything not in the text and do not make things up; structure it as 3 to 6 concise bullet points and, if useful, 1-2 final summary sentences. Reply ONLY with the summary, no preamble or comments.")*
+
+The model is then given the **section title** (if the video has chapters) and the text to summarize, with `temperature=0.3` for a faithful, non-"creative" output.
+
+### On an already-transcribed video (regenerate without re-spending)
+
+If you transcribe again a video **already present** in `results/`, the CLI shows a panel to choose **what to regenerate**, without necessarily starting over:
+
+| Option | What it does |
+|---|---|
+| 🔁 **Re-transcribe everything** | redoes transcription + translation + summary from scratch |
+| 🌐 **Translation + summary** | reuses the saved transcription, translates and summarizes it (**no transcription credits**) |
+| 🧠 **Summary only** | generates **only** the summary from the saved text (the **translation** if present, otherwise the original) |
+| 🎙 **Re-transcribe only** | redoes just the transcription, no translation or summary |
+| ⏭ **Skip** | does nothing for that video |
+
+> To reuse the translation, "Summary only" reads `traduzioni/<Name>_it.json` (saved alongside the translation). If that file is missing (older translations), it summarizes the original transcription.
+
+> ⏱️ **Timing.** With Groq the summary is nearly instant. Locally on **CPU** it can take a few minutes for long videos (with a **GPU** it drops to seconds: Ollama uses it automatically when present). Everything is configurable via `.env` (model, host, context, map-reduce threshold).
 
 ---
 
@@ -458,9 +585,15 @@ the `.env` file), no code editing needed. Each value has a sensible default:
 | `ECHOSCRIPT_CHUNK_SECONDS` | `600` | Duration of each audio chunk (Groq only) |
 | `ECHOSCRIPT_DEVICE` | `auto` | Local backend: `auto` (GPU if present) / `cpu` / `cuda` |
 | `ECHOSCRIPT_COMPUTE_TYPE` | *(auto)* | Local precision: empty = `float16` on GPU, `int8` on CPU |
+| `ECHOSCRIPT_GROQ_SUMMARY_MODEL` | `llama-3.3-70b-versatile` | **Groq chat** model used for the summary (cloud) |
+| `ECHOSCRIPT_OLLAMA_MODEL` | `qwen2.5:7b` | **Ollama** model for the local summary |
+| `ECHOSCRIPT_OLLAMA_HOST` | `http://localhost:11434` | Ollama server address |
+| `ECHOSCRIPT_OLLAMA_NUM_CTX` | `8192` | Ollama context window (avoids truncating long blocks) |
+| `ECHOSCRIPT_SUMMARY_MAX_CHARS` | `12000` | Threshold above which a section is summarized in blocks (map-reduce) |
 
-> **Note.** Translation is temporarily disabled: for now EchoScript only does
-> transcription. It will be reintroduced in the future.
+> **Local summary.** Requires [Ollama](https://ollama.com) installed and running,
+> with the model pulled: `ollama pull qwen2.5:7b`. With the **Groq** backend the
+> summary uses the key you already have, with nothing else to install.
 
 > **Automatic GPU.** The local backend uses the GPU (CUDA) when available, else
 > the CPU. Install PyTorch with CUDA for acceleration (see `requirements.txt`).
@@ -471,6 +604,8 @@ the `.env` file), no code editing needed. Each value has a sensible default:
 
 - **Local backend (faster-whisper)**: the **audio never leaves your PC**. (On first use it only downloads the model *weights* from HuggingFace.) Maximum privacy.
 - **Groq backend**: the audio is **uploaded to Groq's servers** for transcription. Great for public videos, not advised for private/sensitive audio.
+- **Translation**: uses **Google Translate**, so the transcription text is sent to Google's servers.
+- **Summary**: with the **Groq** backend the text goes to Groq's servers; with the **local** backend it uses **Ollama on your PC**, so it **stays 100% offline** (nothing leaves the computer).
 
 The **API key** is never written in the code: it is read from `.env` or an environment variable, and excluded from version control via `.gitignore`.
 

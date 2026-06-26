@@ -7,14 +7,19 @@
   <img src="https://img.shields.io/badge/Groq-Whisper-F55036?logo=groq&logoColor=white" alt="Groq">
   <img src="https://img.shields.io/badge/faster--whisper-locale-0A9396?logo=openai&logoColor=white" alt="faster-whisper">
   <img src="https://img.shields.io/badge/Rich-TUI-4EC820?logo=windowsterminal&logoColor=white" alt="Rich">
+  <img src="https://img.shields.io/badge/Flet-GUI-02569B?logo=flutter&logoColor=white" alt="Flet">
   <img src="https://img.shields.io/badge/yt--dlp-downloader-FF0000?logo=youtube&logoColor=white" alt="yt-dlp">
   <img src="https://img.shields.io/badge/fpdf2-PDF-EC1C24?logo=adobeacrobatreader&logoColor=white" alt="fpdf2">
+  <img src="https://img.shields.io/badge/Google_Translate-traduzione-4285F4?logo=googletranslate&logoColor=white" alt="deep-translator">
+  <img src="https://img.shields.io/badge/Ollama-riassunto_locale-000000?logo=ollama&logoColor=white" alt="Ollama">
+  <img src="https://img.shields.io/badge/Llama_3.3_·_Qwen_2.5-LLM-7C3AED" alt="LLM">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="MIT License">
 </p>
 
 <p align="center">
   Trascrivi i video YouTube <b>e i tuoi audio locali</b> in <b>testo, Markdown, JSON e PDF</b>,<br>
-  <b>velocemente</b> con Groq oppure <b>100% in locale</b> per la massima privacy.<br>
+  poi <b>traducili</b> in italiano e ottienine un <b>riassunto pulito</b> (senza "ehm/uhm", ripetizioni e autocorrezioni).<br>
+  <b>Velocemente</b> con Groq oppure <b>100% in locale</b> per la massima privacy.<br>
   Pensato per <b>studiare</b> video lunghi (RAG, fine-tuning, lezioni) leggendoli invece di guardarli per ore.<br>
   Disponibile come <b>app desktop</b> (GUI) o da <b>terminale</b> (CLI).<br>
   <b>Niente abbonamenti, niente limiti giornalieri, niente minutaggio ridotto.</b>
@@ -49,6 +54,8 @@ python transcriber.py     # interfaccia da terminale (CLI)
 - [⚙️ Come funziona (le fasi)](#️-come-funziona-le-fasi)
 - [💾 Struttura dei file di output](#-struttura-dei-file-di-output)
 - [📄 Esportazione PDF](#-esportazione-pdf)
+- [🌐 Traduzione automatica](#-traduzione-automatica)
+- [🧠 Riassunto automatico](#-riassunto-automatico)
 - [🛠️ Configurazione](#️-configurazione)
 - [🔒 Privacy](#-privacy)
 - [⚖️ Note legali](#️-note-legali)
@@ -215,7 +222,9 @@ Se scegli **Locale**, un secondo pannello ti fa scegliere il modello ogni volta:
 - ⏱️ **Minutaggi e sezioni**: usa i **capitoli** di YouTube come sezioni del documento
 - 💾 **3 formati base** sempre generati: `.md` (umano), `.txt` (per altri LLM), `.json` (per RAG)
 - 📄 **PDF generato sempre** in automatico, diviso per capitoli
-- 🗂️ **Output organizzato** in `results/<nome video>/` nella sottocartella `trascrizioni/`
+- 🌐 **Traduzione automatica** in italiano (se l'audio non è già in italiano), gratis via Google Translate
+- 🧠 **Riassunto automatico** del testo, **per sezione**: pulisce intercalari, ripetizioni e autocorrezioni (Groq in cloud · Ollama in locale)
+- 🗂️ **Output organizzato** in `results/<nome video>/` nelle sottocartelle `trascrizioni/`, `traduzioni/`, `riassunti/`
 - 🎨 **Interfacce curate**: GUI scura con sfondo animato, oppure CLI Rich con barre e pannelli
 - 🔑 **Gestione chiave sicura**: variabile d'ambiente o file `.env` (mai nel codice)
 - 🧯 **Errori chiari**: la chiave viene validata all'avvio; niente retry inutili su errori di autenticazione
@@ -319,12 +328,21 @@ La chiave serve **solo** se usi il backend **Groq** (cloud). È **gratuita**.
 | `groq` | Client ufficiale dell'API Groq (Whisper) | SDK ufficiale, semplice e veloce |
 | `rich` | Interfaccia da terminale: pannelli, tabelle, barre, colori | Trasforma la CLI in un'esperienza curata (`Panel`, `Progress`, `Columns`) |
 | `faster-whisper` | *(opzionale)* Trascrizione **locale** su CPU | Implementazione ottimizzata di Whisper (CTranslate2), ottima su CPU con `int8` |
+| `deep-translator` | **Traduzione** in italiano | Usa Google Translate (endpoint gratuito): nessuna chiave, nessun credito |
 | `fpdf2` | *(opzionale)* Esportazione in **PDF** | Pure-python, **niente LaTeX di sistema**; supporta font Unicode |
 | `flet` | *(opzionale)* **GUI desktop** (`gui/main.py`) | Interfaccia grafica nativa moderna in Python; la CLI funziona senza |
 
+### Strumento esterno (non pip)
+
+| Strumento | A cosa serve | Note |
+|---|---|---|
+| **[Ollama](https://ollama.com)** | **Riassunto in locale** (100% offline) | Programma separato da installare una volta; ci si parla via HTTP (nessuna libreria pip). Non serve se usi Groq per il riassunto. Modello consigliato: `qwen2.5:7b` |
+
+> Per il riassunto in **cloud** si riusa il client **`groq`** già presente (con un modello di chat, non Whisper): nessuna dipendenza in più.
+
 ### Libreria standard (nessuna installazione)
 
-`os`, `re`, `json`, `sys`, `signal`, `shutil`, `tempfile`, `subprocess`, `datetime`: percorsi/file, regex, JSON, gestione Ctrl+C, chiamate a ffmpeg/ffprobe, date.
+`os`, `re`, `json`, `sys`, `signal`, `shutil`, `tempfile`, `subprocess`, `datetime`, `urllib`: percorsi/file, regex, JSON, gestione Ctrl+C, chiamate a ffmpeg/ffprobe, date e — per Ollama — le chiamate HTTP.
 
 ---
 
@@ -440,18 +458,34 @@ Trascrivi un talk lungo e usa l'**export PDF**: ottieni un PDF pulito, diviso pe
 ```
 results/
 └── <Nome Video o nome file>/
-    └── trascrizioni/
-        ├── <Nome>.md      (sezioni con minutaggio nel titolo, prosa pulita)
-        ├── <Nome>.txt     (testo pulito, per altri LLM)
-        ├── <Nome>.json    (segmenti con timestamp, per RAG)
-        └── <Nome>.pdf     (sempre, generato in automatico)
+    ├── trascrizioni/          (la trascrizione originale)
+    │   ├── <Nome>.md          (sezioni con minutaggio nel titolo, prosa pulita)
+    │   ├── <Nome>.txt         (testo pulito, per altri LLM)
+    │   ├── <Nome>.json        (segmenti con timestamp, per RAG)
+    │   └── <Nome>.pdf         (sempre, generato in automatico)
+    ├── traduzioni/            (se l'audio non era in italiano)
+    │   ├── <Nome>_it.md
+    │   ├── <Nome>_it.txt
+    │   ├── <Nome>_it.json     (sezioni tradotte, riusate da «Solo riassunto»)
+    │   └── <Nome>_it.pdf
+    └── riassunti/             (riassunto pulito, per sezione)
+        ├── <Nome>_riassunto.md
+        ├── <Nome>_riassunto.txt
+        └── <Nome>_riassunto.pdf
 ```
 
-> Per i **file locali** `<Nome>` è il nome del file (senza estensione); per i video YouTube è il titolo. In **batch** ogni file produce la sua cartella `results/<nome file>/`.
+> Per i **file locali** `<Nome>` è il nome del file (senza estensione); per i video YouTube è il titolo. In **batch** ogni file produce la sua cartella `results/<nome file>/`. Le cartelle `traduzioni/` e `riassunti/` compaiono solo quando quei passaggi vengono eseguiti.
 
-- **`.md`**: leggibile dall'uomo: i minutaggi compaiono **solo nei titoli di sezione**, il corpo è prosa scorrevole.
-- **`.txt`**: testo pulito senza timestamp: ideale da **incollare in un altro LLM** (ChatGPT/Claude).
-- **`.json`**: metadati + capitoli + **tutti i segmenti con timestamp**: perfetto per una pipeline **RAG**.
+### Perché tre (anzi quattro) formati e a cosa servono
+
+Non è ridondanza: ogni formato risolve un bisogno diverso, così non sei costretto a riconvertire il testo a mano.
+
+- **`.md` (Markdown)** → **leggere e pubblicare**. I minutaggi compaiono **solo nei titoli di sezione**, il corpo è prosa scorrevole: perfetto da aprire in un editor, su GitHub, Notion o Obsidian, con i capitoli già come intestazioni.
+- **`.txt` (testo puro)** → **darlo in pasto a un altro LLM**. Niente timestamp né formattazione: il modo più pulito per **incollarlo in ChatGPT/Claude** ("fammi domande su questo", "spiegamelo"), per la ricerca full-text o per gli script.
+- **`.json` (strutturato)** → **RAG e uso programmatico**. Contiene metadati + capitoli + **tutti i segmenti con timestamp**: è già pronto per il *chunking*, l'indicizzazione in un vector DB e per ricostruire "a che minuto è stato detto X".
+- **`.pdf`** → **lettura comoda offline**. Impaginato e diviso per capitoli: da leggere sul tablet, annotare o stampare.
+
+> Lo stesso vale per **traduzione** e **riassunto**: vengono salvati negli stessi formati, così puoi leggere il riassunto in PDF, incollarne il `.txt` in un altro modello o indicizzarlo.
 
 ---
 
@@ -460,6 +494,99 @@ results/
 Il **PDF viene generato sempre, in automatico**. EchoScript crea:
 
 - **`.pdf`**: tramite `fpdf2` (pure-python, **niente LaTeX da installare**, font Arial per gli accenti), **diviso per capitoli**.
+
+---
+
+## 🌐 Traduzione automatica
+
+> ℹ️ Al momento traduzione e riassunto girano nella **CLI** (`transcriber.py`). L'integrazione nella GUI è in arrivo.
+
+Dopo la trascrizione, se l'audio **non è già in italiano**, EchoScript lo **traduce in italiano** in automatico (se è già in italiano, salta il passaggio: tradurre `it → it` sarebbe inutile).
+
+- **Gratis e senza chiavi.** La traduzione usa **Google Translate** tramite la libreria `deep-translator`: nessuna API key, **nessun credito Groq speso**. La trascrizione resta intatta; la traduzione finisce in `traduzioni/` come file separati `.md`/`.txt`/`.pdf`, **senza minutaggi** (testo continuo, più leggibile).
+
+### Come viene risolto il problema dei video lunghi (a blocchi)
+
+I servizi di traduzione accettano solo un **numero limitato di caratteri per richiesta** (~5.000 per Google). La trascrizione di un video di 1-2 ore è molto più lunga e supererebbe il limite. La soluzione è il **chunking** (divisione a blocchi):
+
+1. il testo viene **spezzato in blocchi da ~4.500 caratteri**, tagliando **sui confini di frase** (dopo `.`/`?`/`!`) per non spezzare le frasi a metà;
+2. ogni blocco viene tradotto singolarmente;
+3. i blocchi tradotti vengono **ricuciti** nell'ordine originale.
+
+Così un testo di qualsiasi lunghezza passa senza errori. Se una singola frase fosse mostruosamente lunga viene tagliata a forza per stare nel limite, e se un blocco fallisce **non blocca tutto** (per quel pezzo si tiene l'originale come fallback).
+
+---
+
+## 🧠 Riassunto automatico
+
+Dopo la traduzione (o, se l'audio era già in italiano, sulla **trascrizione originale**), EchoScript genera un **riassunto pulito** del testo, salvato in `riassunti/` nei soliti formati `.md`/`.txt`/`.pdf`.
+
+### Perché serve anche un riassunto
+
+Una trascrizione è **parlato grezzo messo per iscritto**: per sua natura contiene "rumore" che rende la lettura faticosa e poco utile da studiare:
+
+- **intercalari e riempitivi** ("ehm", "uhm", "cioè", "tipo", "no?", "allora"…);
+- **ripetizioni** e giri di parole;
+- **frasi interrotte** e **autocorrezioni** dell'oratore ("volevo dire… anzi no…");
+- divagazioni e pause di pensiero.
+
+Il riassunto produce una versione **sintetica e ordinata** che **conserva i concetti, i dati, i nomi e gli esempi importanti** ma elimina il rumore. Soprattutto, è **per sezione**: se il video ha **capitoli**, ottieni **un riassunto per capitolo** (altrimenti un riassunto unico). Risultato: studi un video di un'ora in pochi minuti, mantenendo la trascrizione completa accanto per i dettagli.
+
+### Quali modelli sono stati introdotti e perché
+
+Riassumere non è trascrivere: serve un **LLM** (un modello di linguaggio), perché Whisper sa solo trasformare l'audio in testo, non rielaborarlo. EchoScript usa **due motori**, scelti in base al backend di trascrizione:
+
+| Backend | Motore del riassunto | Modello (default) | Perché |
+|---|---|---|---|
+| ⚡ **Groq (cloud)** | API di chat Groq | `llama-3.3-70b-versatile` | Gira sui server Groq: puoi permetterti un modello **grande da 70B** → riassunti di qualità, **velocissimi**, con la chiave gratuita che usi già per la trascrizione |
+| 🔒 **Locale** | **Ollama** (offline) | `qwen2.5:7b` | Resta **100% offline**. **Qwen 2.5 7B** è leggero (~4,7 GB), **veloce su CPU** e particolarmente bravo **in italiano** e nel seguire istruzioni strutturate (meglio di Llama 3.1 8B di pari taglia) |
+
+> **Ollama** è il *programma* che fa girare il modello in locale (come un "lettore" per i modelli); **Qwen** è il *modello*. In locale serve installare Ollama una volta (https://ollama.com) e scaricare il modello: `ollama pull qwen2.5:7b`. Nessuna dipendenza pip aggiuntiva: EchoScript parla con Ollama via HTTP. Con **Groq** non serve nulla di tutto questo.
+
+### Il problema dei video lunghi: map-reduce + contesto
+
+Come per la traduzione, un testo molto lungo non entra in una sola richiesta (supera il **contesto** del modello). Qui la soluzione è il **map-reduce**:
+
+1. **map** — se una sezione supera `SUMMARY_MAX_CHARS` (12.000 caratteri) viene divisa in blocchi, e **ogni blocco viene riassunto** singolarmente;
+2. **reduce** — i riassunti parziali vengono **uniti e riassunti di nuovo** in un unico riassunto coerente della sezione.
+
+In più, per il motore locale **alziamo la finestra di contesto di Ollama a 8.192 token** (`num_ctx`): di default Ollama ne usa solo 2.048 e **troncherebbe in silenzio** i blocchi lunghi, rovinando i riassunti dei video lunghi.
+
+### Il prompt usato (identico per Groq e Ollama)
+
+La qualità dipende dalle istruzioni date al modello. EchoScript invia sempre questo **prompt di sistema**:
+
+```
+Sei un editor esperto. Ricevi la trascrizione di una sezione di un video parlato
+(testo in italiano). Trasformala in un riassunto chiaro, fedele e scorrevole,
+sempre in italiano, seguendo queste regole:
+- elimina intercalari e riempitivi (ehm, uhm, cioè, tipo, no?, allora, insomma)
+  e le esitazioni;
+- togli ripetizioni, frasi interrotte e autocorrezioni di chi parla, tenendo solo
+  la versione corretta;
+- CONSERVA tutti i concetti, i dati, i nomi propri e gli esempi importanti;
+- NON aggiungere nulla che non sia nel testo e non inventare;
+- struttura: da 3 a 6 punti elenco concisi e, se utile, 1-2 frasi finali di sintesi.
+Rispondi SOLO con il riassunto, senza preamboli né commenti.
+```
+
+Al modello viene poi passato il **titolo della sezione** (se il video ha capitoli) e il testo da riassumere, con `temperature=0.3` per un output fedele e poco "creativo".
+
+### Su un video già trascritto (rigenerare senza rispendere)
+
+Se trascrivi di nuovo un video **già presente** in `results/`, la CLI mostra un pannello con cui scegli **cosa rigenerare**, senza per forza ripartire da zero:
+
+| Opzione | Cosa fa |
+|---|---|
+| 🔁 **Ritrascrivi tutto** | rifà da capo trascrizione + traduzione + riassunto |
+| 🌐 **Traduzione + riassunto** | riusa la trascrizione salvata, la traduce e la riassume (**nessun credito di trascrizione**) |
+| 🧠 **Solo riassunto** | genera **soltanto** il riassunto dal testo già salvato (la **traduzione** se presente, altrimenti l'originale) |
+| 🎙 **Ritrascrivi soltanto** | rifà solo la trascrizione, senza traduzione né riassunto |
+| ⏭ **Salta** | non fa nulla per quel video |
+
+> Per riusare la traduzione, «Solo riassunto» rilegge `traduzioni/<Nome>_it.json` (salvato insieme alla traduzione). Se quel file non c'è (traduzioni vecchie), riassume la trascrizione originale.
+
+> ⏱️ **Tempi.** Con Groq il riassunto è quasi istantaneo. In locale su **CPU** può richiedere qualche minuto per i video lunghi (con **GPU** crolla a pochi secondi: Ollama la usa in automatico se presente). Tutto è configurabile da `.env` (modello, host, contesto, soglia map-reduce).
 
 ---
 
@@ -477,9 +604,15 @@ il file `.env`), senza toccare il codice. Ogni valore ha un default sensato:
 | `ECHOSCRIPT_CHUNK_SECONDS` | `600` | Durata di ogni blocco audio (solo Groq) |
 | `ECHOSCRIPT_DEVICE` | `auto` | Backend locale: `auto` (GPU se c'è) / `cpu` / `cuda` |
 | `ECHOSCRIPT_COMPUTE_TYPE` | *(auto)* | Precisione locale: vuoto = `float16` su GPU, `int8` su CPU |
+| `ECHOSCRIPT_GROQ_SUMMARY_MODEL` | `llama-3.3-70b-versatile` | Modello di **chat Groq** per il riassunto (cloud) |
+| `ECHOSCRIPT_OLLAMA_MODEL` | `qwen2.5:7b` | Modello **Ollama** per il riassunto in locale |
+| `ECHOSCRIPT_OLLAMA_HOST` | `http://localhost:11434` | Indirizzo del server Ollama |
+| `ECHOSCRIPT_OLLAMA_NUM_CTX` | `8192` | Finestra di contesto Ollama (evita il troncamento sui blocchi lunghi) |
+| `ECHOSCRIPT_SUMMARY_MAX_CHARS` | `12000` | Soglia oltre cui una sezione viene riassunta a blocchi (map-reduce) |
 
-> **Nota.** La traduzione è temporaneamente disabilitata: per ora EchoScript fa
-> solo trascrizione. Verrà reintrodotta in futuro.
+> **Riassunto in locale.** Serve [Ollama](https://ollama.com) installato e avviato,
+> con il modello scaricato: `ollama pull qwen2.5:7b`. Con il backend **Groq** il
+> riassunto usa invece la chiave che hai già, senza installare altro.
 
 > **GPU automatica.** Il backend locale usa la GPU (CUDA) se disponibile,
 > altrimenti la CPU. Installa PyTorch con CUDA per l'accelerazione (vedi
@@ -491,7 +624,8 @@ il file `.env`), senza toccare il codice. Ogni valore ha un default sensato:
 
 - **Backend locale (faster-whisper)**: l'**audio non lascia mai il tuo PC**. (Al primo uso scarica solo i *pesi* del modello da HuggingFace.) Massima privacy.
 - **Backend Groq**: l'audio viene **caricato sui server Groq** per la trascrizione. Ottimo per video pubblici, sconsigliato per audio privati/sensibili.
-- **Traduzione**: usa Groq, quindi il testo viene inviato ai loro server (con avviso se hai trascritto in locale).
+- **Traduzione**: usa **Google Translate**, quindi il testo della trascrizione viene inviato ai server di Google.
+- **Riassunto**: con il backend **Groq** il testo va ai server Groq; con il backend **locale** usa **Ollama sul tuo PC**, quindi **resta 100% offline** (niente lascia il computer).
 
 La **API key** non è mai scritta nel codice: si legge da `.env` o da variabile d'ambiente, ed è esclusa dal versionamento tramite `.gitignore`.
 

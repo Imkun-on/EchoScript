@@ -1775,6 +1775,8 @@ class EchoScriptApp:
             "backend": self.backend, "model": self.model_dd.value,
             "api_key": self.loaded_api_key or "", "export": True,
             "source_kind": self.source,
+            # Folder names follow the interface language (en -> English folders).
+            "ui_lang": self.lang,
         }
         self._plan = self._phase_plan(self.backend, self.source)
         self._last_g = 0.0
@@ -1866,6 +1868,8 @@ class EchoScriptApp:
         options = {
             "backend": "local", "model": self.model_dd.value or "small",
             "api_key": "", "export": True, "source_kind": self.source,
+            # Folder names follow the interface language (en -> English folders).
+            "ui_lang": self.lang,
         }
         # Local plan: no Groq "prepare" phase (info -> [download] -> transcribe -> export).
         self._plan = self._phase_plan("local", self.source)
