@@ -560,15 +560,18 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
                  out_root: str, client=None, on_progress=_noop) -> dict:
     """PHASE 2 — write all outputs under 'out_root', creating the subfolders.
 
-    Layout: out_root/<title>/trascrizioni/ (md, txt, json, + pdf if exporting).
-    The chosen 'out_root' lets the user save anywhere (e.g. outside OneDrive).
-    The 'client' argument (the Groq transcription client) is accepted for
-    backward compatibility but unused here. Returns the result dict."""
+    Layout: out_root/<title>/<trascrizioni>/ (md, txt, json, + pdf if exporting).
+    The subfolder name follows the UI language passed in options["ui_lang"]
+    (it -> "trascrizioni", en -> "transcriptions"), so an English user gets
+    English-named folders. The chosen 'out_root' lets the user save anywhere
+    (e.g. outside OneDrive). The 'client' argument (the Groq transcription
+    client) is accepted for backward compatibility but unused here. Returns the
+    result dict."""
     do_export = bool(options.get("export"))
 
     safe_title = tx._safe_filename(meta["title"])
     video_dir = os.path.join(out_root, safe_title)
-    trans_dir = os.path.join(video_dir, "trascrizioni")
+    trans_dir = os.path.join(video_dir, tx.trans_subdir(options.get("ui_lang", "it")))
     base_orig = os.path.join(trans_dir, safe_title)
 
     sections = tx._build_sections(meta, segments)

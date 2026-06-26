@@ -206,6 +206,26 @@ LOCAL_MODELS = {
     "5": ("large-v3-turbo", "quasi 'large', piu' veloce: buon compromesso CPU"),
 }
 
+# --- SUMMARY (riassunto via LLM) ---
+# Dopo la traduzione si genera un riassunto pulito del testo italiano (toglie
+# intercalari "ehm/uhm", ripetizioni, autocorrezioni). Due motori:
+#   • Groq (cloud): usato quando il backend è Groq (chiave già disponibile),
+#     tramite un modello di CHAT (non Whisper). Velocissimo.
+#   • Ollama (locale): usato quando il backend è locale, per restare 100%
+#     offline. Richiede Ollama installato e avviato (https://ollama.com) con un
+#     modello scaricato (es. `ollama pull llama3.1:8b`).
+GROQ_SUMMARY_MODEL = _env_str("ECHOSCRIPT_GROQ_SUMMARY_MODEL", "llama-3.3-70b-versatile")
+OLLAMA_MODEL = _env_str("ECHOSCRIPT_OLLAMA_MODEL", "qwen2.5:7b")
+OLLAMA_HOST = _env_str("ECHOSCRIPT_OLLAMA_HOST", "http://localhost:11434")
+# Finestra di contesto per Ollama. ATTENZIONE: di default Ollama usa solo 2048
+# token e TRONCA in silenzio gli input più lunghi (rovinando i riassunti dei
+# video lunghi). Lo alziamo per far entrare un blocco intero (~SUMMARY_MAX_CHARS)
+# + prompt + risposta. 8192 è un buon compromisso qualità/RAM su 7-8B.
+OLLAMA_NUM_CTX = _env_int("ECHOSCRIPT_OLLAMA_NUM_CTX", 8192)
+# Oltre questa lunghezza (caratteri) una sezione viene riassunta a blocchi e poi
+# i parziali vengono uniti (map-reduce), per non sforare il contesto del modello.
+SUMMARY_MAX_CHARS = _env_int("ECHOSCRIPT_SUMMARY_MAX_CHARS", 12000)
+
 # === GRACEFUL SHUTDOWN ===
 # A flag that becomes True on the first Ctrl+C: the loops check it to stop in an
 # orderly way. On the second Ctrl+C we exit immediately.
@@ -482,21 +502,61 @@ def _trim_audio(audio_path: str, start_seconds: float, workdir: str) -> str:
     return out_path
 
 
+# Subfolder names per interface language: an English user gets English folders
+# (transcriptions/translations) instead of the Italian defaults. The CLI is
+# Italian-only, so it always uses the "it" names; the GUI passes its current UI
+# language down so the folders match what the user sees on screen.
+TRANS_SUBDIRS = {"it": "trascrizioni", "en": "transcriptions"}
+TRANSL_SUBDIRS = {"it": "traduzioni", "en": "translations"}
+SUMMARY_SUBDIRS = {"it": "riassunti", "en": "summaries"}
+# Suffix added to the summary file name, per UI language.
+SUMMARY_SUFFIX = {"it": "riassunto", "en": "summary"}
+
+
+def trans_subdir(lang: str | None = "it") -> str:
+    """Name of the TRANSCRIPTION subfolder for the given UI language."""
+    return TRANS_SUBDIRS.get(lang or "it", TRANS_SUBDIRS["it"])
+
+
+def transl_subdir(lang: str | None = "it") -> str:
+    """Name of the TRANSLATION subfolder for the given UI language."""
+    return TRANSL_SUBDIRS.get(lang or "it", TRANSL_SUBDIRS["it"])
+
+
+def summary_subdir(lang: str | None = "it") -> str:
+    """Name of the SUMMARY subfolder for the given UI language."""
+    return SUMMARY_SUBDIRS.get(lang or "it", SUMMARY_SUBDIRS["it"])
+
+
 def transcription_exists(out_root: str, title: str) -> bool:
-    """True se in out_root/<titolo>/trascrizioni/ ci sono già file trascritti."""
-    d = os.path.join(out_root, _safe_filename(title), "trascrizioni")
-    if not os.path.isdir(d):
-        return False
-    return any(n.lower().endswith((".md", ".txt", ".json", ".pdf")) for n in os.listdir(d))
+    """True se in out_root/<titolo>/<trascrizioni>/ ci sono già file trascritti.
+
+    Controlla TUTTI i possibili nomi cartella (italiano e inglese), così il
+    rilevamento funziona anche se il video era stato trascritto con l'interfaccia
+    in un'altra lingua."""
+    base = os.path.join(out_root, _safe_filename(title))
+    for sub in TRANS_SUBDIRS.values():
+        d = os.path.join(base, sub)
+        if os.path.isdir(d) and any(
+                n.lower().endswith((".md", ".txt", ".json", ".pdf")) for n in os.listdir(d)):
+            return True
+    return False
 
 
 def load_existing_transcript(out_root: str, title: str):
     """Rilegge una trascrizione salvata (dal .json) e ricostruisce
     (meta, segments, engine_label), sufficienti a rigenerare SOLO la traduzione
-    senza ri-trascrivere (e senza rispendere crediti). None se assente/vuota."""
-    p = os.path.join(out_root, _safe_filename(title), "trascrizioni",
-                     _safe_filename(title) + ".json")
-    if not os.path.isfile(p):
+    senza ri-trascrivere (e senza rispendere crediti). None se assente/vuota.
+
+    Cerca il .json in tutti i possibili nomi cartella (italiano e inglese)."""
+    safe = _safe_filename(title)
+    p = None
+    for sub in TRANS_SUBDIRS.values():
+        cand = os.path.join(out_root, safe, sub, safe + ".json")
+        if os.path.isfile(cand):
+            p = cand
+            break
+    if not p:
         return None
     try:
         with open(p, "r", encoding="utf-8") as f:
@@ -515,6 +575,27 @@ def load_existing_transcript(out_root: str, title: str):
         "webpage_url": d.get("url", ""), "source": d.get("source", "youtube"),
     }
     return meta, segments, d.get("engine", "?")
+
+
+def load_existing_translation(out_root: str, title: str, target: str = "it"):
+    """Rilegge le SEZIONI di una traduzione già salvata (dal .json), o None.
+
+    Serve a «Solo riassunto» per riassumere la TRADUZIONE invece dell'originale.
+    Cerca `<titolo>_<target>.json` in tutti i possibili nomi cartella traduzioni
+    (italiano/inglese). Restituisce la lista di sezioni {start,title,text}."""
+    safe = _safe_filename(title)
+    for sub in TRANSL_SUBDIRS.values():
+        p = os.path.join(out_root, safe, sub, f"{safe}_{target}.json")
+        if os.path.isfile(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                continue
+            sections = data.get("sections")
+            if sections:
+                return sections
+    return None
 
 
 # === TRANSCRIPTION BACKEND SELECTION ===
@@ -610,6 +691,55 @@ def choose_local_model() -> str | None:
             return None
         if choice in LOCAL_MODELS:
             return LOCAL_MODELS[choice][0]
+        console.print("[warning]Scelta non valida, riprova.[/warning]")
+
+
+# Actions offered when a video is ALREADY transcribed (numbered panel below).
+# number -> (icon, title, description, action-code)
+_EXISTING_ACTIONS = {
+    "1": ("🔁", "Ritrascrivi tutto",
+          "rifà da capo trascrizione + traduzione + riassunto", "both"),
+    "2": ("🌐", "Traduzione + riassunto",
+          "riusa la trascrizione salvata, la traduce e la riassume (nessun credito di trascrizione)", "translate"),
+    "3": ("🧠", "Solo riassunto",
+          "genera soltanto il riassunto dal testo salvato (la traduzione se c'è, altrimenti l'originale)", "summary"),
+    "4": ("🎙", "Ritrascrivi soltanto",
+          "rifà solo la trascrizione, senza traduzione né riassunto", "retranscribe"),
+    "5": ("⏭", "Salta",
+          "non fare nulla per questo video", "skip"),
+}
+
+
+def choose_existing_action(title: str) -> str:
+    """Pannello a elenco numerato per un video GIÀ trascritto: chiede cosa fare.
+
+    Mostra le opzioni numerate (come gli altri pannelli) ed è più chiaro del
+    vecchio prompt a lettere. Restituisce uno dei codici azione:
+    "both" · "translate" · "summary" · "retranscribe" · "skip"."""
+    table = Table(show_header=True, box=None, expand=False, padding=(0, 2),
+                  header_style="bold dim")
+    table.add_column("#", style="bold bright_white", justify="center")
+    table.add_column("Azione", style="bold bright_yellow", no_wrap=True)
+    table.add_column("Cosa fa", style="info")
+    for key, (icon, name, desc, _code) in _EXISTING_ACTIONS.items():
+        table.add_row(key, f"{icon} {name}", desc)
+
+    console.print()
+    console.print(Panel(
+        table,
+        title=f"[title]♻ «{title}» è già stato trascritto[/title]", title_align="left",
+        subtitle="[dim]è presente in results/ — scegli come procedere[/dim]",
+        border_style="bright_yellow", box=ROUNDED, expand=False, padding=(1, 2),
+    ))
+
+    while True:
+        choice = console.input(
+            "\n[bold bright_yellow]›[/bold bright_yellow] [bold]Scelta[/bold] "
+            "[dim](1-5 · q = salta)[/dim]: ").strip().lower()
+        if choice == "q":
+            return "skip"
+        if choice in _EXISTING_ACTIONS:
+            return _EXISTING_ACTIONS[choice][3]
         console.print("[warning]Scelta non valida, riprova.[/warning]")
 
 
@@ -1824,7 +1954,7 @@ def _save_outputs(meta: dict, segments: list[dict], engine_label: str,
     #       trascrizioni/  -> md, txt, json (+ pdf if exported)
     safe_title = _safe_filename(meta["title"])
     video_dir = os.path.join(out_root, safe_title)
-    trans_dir = os.path.join(video_dir, "trascrizioni")
+    trans_dir = os.path.join(video_dir, trans_subdir())
     os.makedirs(trans_dir, exist_ok=True)
     base_orig = os.path.join(trans_dir, safe_title)  # base path (without extension) of the originals
 
@@ -1876,7 +2006,7 @@ def _save_outputs(meta: dict, segments: list[dict], engine_label: str,
     files_tbl.add_column("Folder", style="bold bright_white", no_wrap=True)
     files_tbl.add_column("Files", style="info")
     for folder, exts in groups.items():
-        icon = "📂" if folder == "trascrizioni" else "🌐"
+        icon = "📂" if folder in TRANS_SUBDIRS.values() else "🌐"
         files_tbl.add_row(f"{icon} {folder}/", "  ".join(exts))
 
     body = Group(
@@ -1893,23 +2023,26 @@ def _save_outputs(meta: dict, segments: list[dict], engine_label: str,
 
 
 def translate_existing(out_root: str, title: str, target: str = "it",
-                       do_export: bool = True) -> bool:
+                       do_export: bool = True, ui_lang: str = "it"):
     """Traduce una trascrizione GIÀ salvata (niente ri-trascrizione, nessun credito).
 
     Rilegge i file da out_root/<title>/, traduce le sezioni verso 'target'
     (default italiano) con Google Translate e salva md/txt (+ pdf) sotto
-    out_root/<title>/traduzioni/ col suffisso della lingua. Restituisce True se
-    la traduzione è stata prodotta, False se non c'era nulla da tradurre."""
+    out_root/<title>/<traduzioni>/ col suffisso della lingua. Il nome della
+    cartella segue la lingua dell'interfaccia ('ui_lang': it -> "traduzioni",
+    en -> "translations"). Restituisce la LISTA delle sezioni tradotte (così il
+    riassunto può riusarle senza ricaricarle), oppure None se non c'era nulla da
+    tradurre o la traduzione è fallita."""
     existing = load_existing_transcript(out_root, title)
     if not existing:
         console.print("[warning]Nessuna trascrizione salvata da tradurre.[/warning]")
-        return False
+        return None
     meta, segments, _ = existing
     sections = _build_sections(meta, segments)
 
     safe_title = _safe_filename(meta["title"])
     video_dir = os.path.join(out_root, safe_title)
-    trad_dir = os.path.join(video_dir, "traduzioni")
+    trad_dir = os.path.join(video_dir, transl_subdir(ui_lang))
     os.makedirs(trad_dir, exist_ok=True)
     base = os.path.join(trad_dir, f"{safe_title}_{target}")
     lang_label = _lang_name(target) or target
@@ -1931,10 +2064,10 @@ def translate_existing(out_root: str, title: str, target: str = "it",
                 on_progress=lambda i, n: progress.update(task_id, completed=i))
     except RuntimeError as e:  # deep_translator mancante
         console.print(f"[error]{e}[/error]")
-        return False
+        return None
     except Exception as e:
         console.print(f"[error]Traduzione fallita: {e}[/error]")
-        return False
+        return None
 
     engine_label = f"Traduzione automatica (Google Translate) → {lang_label}"
     created: list[str] = []
@@ -1947,6 +2080,10 @@ def translate_existing(out_root: str, title: str, target: str = "it",
     # La versione tradotta non porta i timestamp (testo continuo, più leggibile).
     _save(f"{base}.md", build_md(meta["title"], meta, engine_label, translated, with_timestamps=False))
     _save(f"{base}.txt", build_txt(meta["title"], meta, translated))
+    # JSON delle SEZIONI tradotte: serve a «Solo riassunto» per riassumere la
+    # traduzione (non l'originale) anche in una sessione successiva.
+    _save(f"{base}.json",
+          json.dumps({"target": target, "sections": translated}, ensure_ascii=False, indent=2))
     if do_export:
         try:
             with console.status("[info]Creo il PDF (traduzione)...[/info]", spinner="dots"):
@@ -1961,10 +2098,234 @@ def translate_existing(out_root: str, title: str, target: str = "it",
         Group(
             Text.from_markup(f"[bold]Lingua:[/bold] {lang_label}"),
             Text.from_markup(f"[dim]📁 {trad_dir}[/dim]"),
-            Text.from_markup(f"[info]🌐 traduzioni/[/info]  {files}"),
+            Text.from_markup(f"[info]🌐 {os.path.basename(trad_dir)}/[/info]  {files}"),
         ),
         title="[bold bright_blue]✅ Traduzione completata![/bold bright_blue]",
         border_style="bright_blue", box=DOUBLE, expand=False, padding=(1, 3),
+    ))
+    return translated
+
+
+# === RIASSUNTO (via LLM: Groq cloud o Ollama locale) =========================
+# Dal testo italiano (la traduzione, oppure la trascrizione se l'audio era già
+# italiano) produce un riassunto PER SEZIONE: pulisce intercalari, ripetizioni e
+# autocorrezioni e tiene i concetti. Groq usa un modello di chat; in locale ci si
+# appoggia a Ollama (nessuna dipendenza pip aggiuntiva: si parla via HTTP).
+
+# Istruzioni date al modello: sono il cuore della qualità del riassunto.
+_SUMMARY_SYSTEM_PROMPT = (
+    "Sei un editor esperto. Ricevi la trascrizione di una sezione di un video "
+    "parlato (testo in italiano). Trasformala in un riassunto chiaro, fedele e "
+    "scorrevole, sempre in italiano, seguendo queste regole:\n"
+    "- elimina intercalari e riempitivi (ehm, uhm, cioè, tipo, no?, allora, "
+    "insomma) e le esitazioni;\n"
+    "- togli ripetizioni, frasi interrotte e autocorrezioni di chi parla, "
+    "tenendo solo la versione corretta;\n"
+    "- CONSERVA tutti i concetti, i dati, i nomi propri e gli esempi importanti;\n"
+    "- NON aggiungere nulla che non sia nel testo e non inventare;\n"
+    "- struttura: da 3 a 6 punti elenco concisi e, se utile, 1-2 frasi finali "
+    "di sintesi.\n"
+    "Rispondi SOLO con il riassunto, senza preamboli né commenti."
+)
+
+
+def _summary_user_prompt(text: str, section_title: str | None) -> str:
+    """Messaggio utente per il modello: titolo della sezione (se c'è) + testo."""
+    head = f"Titolo della sezione: «{section_title}».\n\n" if section_title else ""
+    return f"{head}Testo da riassumere:\n\n{text}"
+
+
+def _summarize_groq(client, text: str, section_title: str | None) -> str:
+    """Riassume un testo con un modello di CHAT di Groq (non Whisper)."""
+    resp = client.chat.completions.create(
+        model=GROQ_SUMMARY_MODEL,
+        messages=[
+            {"role": "system", "content": _SUMMARY_SYSTEM_PROMPT},
+            {"role": "user", "content": _summary_user_prompt(text, section_title)},
+        ],
+        temperature=0.3,
+    )
+    return (resp.choices[0].message.content or "").strip()
+
+
+def _check_ollama() -> None:
+    """Verifica che Ollama sia raggiungibile; altrimenti spiega come installarlo."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(OLLAMA_HOST + "/api/tags", timeout=5) as r:
+            r.read()
+    except Exception:
+        raise RuntimeError(
+            f"Ollama non raggiungibile su {OLLAMA_HOST}. Per il riassunto in locale "
+            "installa Ollama (https://ollama.com), avvialo e scarica un modello, "
+            f"es:  ollama pull {OLLAMA_MODEL}")
+
+
+def _summarize_ollama(text: str, section_title: str | None) -> str:
+    """Riassume un testo con un modello locale via Ollama (HTTP, niente pip)."""
+    import urllib.request
+    payload = {
+        "model": OLLAMA_MODEL,
+        "messages": [
+            {"role": "system", "content": _SUMMARY_SYSTEM_PROMPT},
+            {"role": "user", "content": _summary_user_prompt(text, section_title)},
+        ],
+        "stream": False,
+        # num_ctx alza la finestra di contesto (default Ollama: solo 2048 token,
+        # che troncherebbe i blocchi lunghi). Senza, i video lunghi perderebbero
+        # gran parte del testo nel riassunto.
+        "options": {"temperature": 0.3, "num_ctx": OLLAMA_NUM_CTX},
+    }
+    req = urllib.request.Request(
+        OLLAMA_HOST + "/api/chat",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=600) as r:
+        data = json.loads(r.read().decode("utf-8"))
+    return (data.get("message", {}).get("content") or "").strip()
+
+
+def _make_summarizer(client=None):
+    """Sceglie il motore del riassunto e restituisce (funzione, etichetta).
+
+    Preferisce Groq se è disponibile un client (backend cloud); altrimenti usa
+    Ollama in locale (100% offline). Solleva RuntimeError se nessuno è utilizzabile."""
+    if client is not None:
+        label = f"Riassunto automatico (Groq · {GROQ_SUMMARY_MODEL})"
+        return (lambda text, title: _summarize_groq(client, text, title)), label
+    _check_ollama()
+    label = f"Riassunto automatico (locale · Ollama {OLLAMA_MODEL})"
+    return (lambda text, title: _summarize_ollama(text, title)), label
+
+
+def _summarize_long(summarize_fn, text: str, section_title: str | None) -> str:
+    """Riassume un testo anche lungo: se supera SUMMARY_MAX_CHARS lo divide in
+    blocchi, li riassume singolarmente e poi unisce i parziali (map-reduce)."""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    if len(text) <= SUMMARY_MAX_CHARS:
+        return summarize_fn(text, section_title)
+    # Map: riassumi a blocchi (riuso lo splitter della traduzione, con cap ampio).
+    saved = globals().get("_TRANSLATE_MAX_CHARS")
+    globals()["_TRANSLATE_MAX_CHARS"] = SUMMARY_MAX_CHARS
+    try:
+        blocks = _split_for_translation(text)
+    finally:
+        globals()["_TRANSLATE_MAX_CHARS"] = saved
+    partials = [summarize_fn(b, section_title) for b in blocks]
+    merged = "\n\n".join(p for p in partials if p)
+    # Reduce: ricompatta i parziali in un unico riassunto coerente.
+    return summarize_fn(merged, section_title)
+
+
+def summarize_sections(sections: list[dict], summarize_fn,
+                       on_progress=None) -> list[dict]:
+    """Riassume ogni sezione (titolo invariato, testo -> riassunto).
+
+    'on_progress(i, n)' (opzionale) è chiamato dopo ogni sezione. Restituisce
+    nuove sezioni senza mutare quelle in ingresso."""
+    out: list[dict] = []
+    n = len(sections)
+    for i, sec in enumerate(sections, 1):
+        summary = _summarize_long(summarize_fn, sec.get("text", ""), sec.get("title"))
+        out.append({"start": sec.get("start"), "title": sec.get("title"), "text": summary})
+        if on_progress:
+            on_progress(i, n)
+    return out
+
+
+def summarize_existing(out_root: str, title: str, client=None,
+                       source_sections: list[dict] | None = None,
+                       do_export: bool = True, ui_lang: str = "it") -> bool:
+    """Crea un RIASSUNTO del testo italiano di un video già trascritto.
+
+    Riassume 'source_sections' se passate (di norma la TRADUZIONE appena
+    prodotta); altrimenti ricostruisce le sezioni dalla trascrizione salvata
+    (caso: audio già in italiano). Salva md/txt (+ pdf) sotto
+    out_root/<title>/<riassunti>/ col nome cartella in base alla lingua UI.
+    Usa Groq se 'client' è disponibile, altrimenti Ollama in locale.
+    Restituisce True se il riassunto è stato prodotto, False altrimenti."""
+    existing = load_existing_transcript(out_root, title)
+    if not existing:
+        console.print("[warning]Nessuna trascrizione salvata da riassumere.[/warning]")
+        return False
+    meta, segments, _ = existing
+    # Quale testo riassumere:
+    #  - se il chiamante passa già le sezioni (di norma la traduzione appena
+    #    prodotta), usa quelle;
+    #  - altrimenti («Solo riassunto») riusa la TRADUZIONE salvata se esiste,
+    #    così il riassunto è del testo italiano; in mancanza, l'originale.
+    if source_sections is not None:
+        sections = source_sections
+    else:
+        sections = load_existing_translation(out_root, title) or _build_sections(meta, segments)
+    if not sections:
+        return False
+
+    try:
+        summarize_fn, engine_label = _make_summarizer(client)
+    except RuntimeError as e:
+        console.print(f"[warning]Riassunto non disponibile: {e}[/warning]")
+        return False
+
+    safe_title = _safe_filename(meta["title"])
+    video_dir = os.path.join(out_root, safe_title)
+    sum_dir = os.path.join(video_dir, summary_subdir(ui_lang))
+    os.makedirs(sum_dir, exist_ok=True)
+    suffix = SUMMARY_SUFFIX.get(ui_lang or "it", SUMMARY_SUFFIX["it"])
+    base = os.path.join(sum_dir, f"{safe_title}_{suffix}")
+
+    console.print()
+    console.rule("[phase]🧠 Riassunto[/phase]", style="bright_magenta")
+    progress = Progress(
+        SpinnerColumn("dots", style="bright_magenta"),
+        TextColumn("[phase]{task.description}"),
+        BarColumn(bar_width=40, style="bar.back", complete_style="bright_magenta", finished_style="bold magenta"),
+        TaskProgressColumn(), console=console, expand=False,
+    )
+    try:
+        with progress:
+            task_id = progress.add_task("Riassumo le sezioni", total=len(sections))
+            summarized = summarize_sections(
+                sections, summarize_fn,
+                on_progress=lambda i, n: progress.update(task_id, completed=i))
+    except Exception as e:
+        if _is_rate_limit(str(e)):
+            console.print("[warning]Crediti Groq esauriti: riassunto saltato "
+                          "(la trascrizione e la traduzione sono già salvate).[/warning]")
+        else:
+            console.print(f"[error]Riassunto fallito: {e}[/error]")
+        return False
+
+    created: list[str] = []
+
+    def _save(path: str, content: str) -> None:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        created.append(os.path.relpath(path, video_dir).replace("\\", "/"))
+
+    # Il riassunto è testo pulito: niente timestamp.
+    _save(f"{base}.md", build_md(meta["title"], meta, engine_label, summarized, with_timestamps=False))
+    _save(f"{base}.txt", build_txt(meta["title"], meta, summarized))
+    if do_export:
+        try:
+            with console.status("[info]Creo il PDF (riassunto)...[/info]", spinner="dots"):
+                build_pdf(meta["title"], meta, summarized, f"{base}.pdf", with_timestamps=False)
+            created.append(os.path.relpath(f"{base}.pdf", video_dir).replace("\\", "/"))
+        except Exception as e:
+            console.print(f"[error]Export PDF riassunto fallito: {e}[/error]")
+
+    files = "  ".join(os.path.splitext(c.split('/')[-1])[1] for c in created)
+    console.print()
+    console.print(Panel(
+        Group(
+            Text.from_markup(f"[bold]Motore:[/bold] {engine_label}"),
+            Text.from_markup(f"[dim]📁 {sum_dir}[/dim]"),
+            Text.from_markup(f"[info]🧠 {os.path.basename(sum_dir)}/[/info]  {files}"),
+        ),
+        title="[bold bright_magenta]✅ Riassunto completato![/bold bright_magenta]",
+        border_style="bright_magenta", box=DOUBLE, expand=False, padding=(1, 3),
     ))
     return True
 
@@ -2129,25 +2490,33 @@ def run() -> None:
         also_translate = True
 
         if transcription_exists(out_root, meta["title"]):
-            console.print(f"[warning]«{meta['title']}» è già stato trascritto in results/.[/warning]")
-            # NB: le parentesi vanno escapate (\[) o rich le interpreta come markup.
-            ch = _prompt("Cosa fai? \\[r]itrascrivi solamente · \\[t]raduci · "
-                         "\\[e]ntrambi (ritrascrivi+traduci) · \\[s]alta",
-                         "(r/t/e/s)", accent="bright_yellow").strip().lower()
-            if ch.startswith("t"):
-                # Solo traduzione: riusa i file salvati, nessuna ri-trascrizione e
-                # nessun credito speso. Poi passa al prossimo job.
-                translate_existing(out_root, meta["title"], target="it", do_export=do_export)
+            action = choose_existing_action(meta["title"])
+            if action == "translate":
+                # Traduzione + riassunto: riusa i file salvati, nessuna
+                # ri-trascrizione e nessun credito di trascrizione. Traduce, poi
+                # riassume la traduzione e passa al prossimo job.
+                translated = translate_existing(out_root, meta["title"], target="it",
+                                                do_export=do_export)
+                if translated:
+                    summarize_existing(out_root, meta["title"], client=client,
+                                       source_sections=translated, do_export=do_export)
                 continue
-            if ch.startswith("e"):
+            if action == "summary":
+                # Solo riassunto: niente ri-trascrizione né traduzione. Riassume la
+                # TRADUZIONE salvata se presente (vedi summarize_existing),
+                # altrimenti la trascrizione originale.
+                summarize_existing(out_root, meta["title"], client=client,
+                                   source_sections=None, do_export=do_export)
+                continue
+            if action == "both":
                 # Ritrascrivi DA CAPO e poi traduci: butta il parziale.
                 _drop_cp()
                 resume_cp = None
-            elif ch.startswith("r"):
+            elif action == "retranscribe":
                 _drop_cp()                 # ritrascrizione completa: butta via ogni parziale
-                also_translate = False     # «solamente»: niente traduzione
+                also_translate = False     # «soltanto»: niente traduzione
                 resume_cp = None
-            else:
+            else:                          # "skip"
                 console.print("[dim]Saltato.[/dim]")
                 continue
         elif resume_cp:
@@ -2182,11 +2551,19 @@ def run() -> None:
         # segmenti, cioè a trascrizione al 100%: i parziali da crediti esauriti
         # tornano None e non passano di qui. Disattivata solo da «ritrascrivi
         # solamente». Saltata anche se l'audio è già in italiano (it -> it inutile).
+        # Dopo la traduzione (o, se audio già italiano, sull'originale) si genera
+        # un RIASSUNTO pulito del testo italiano: Groq se cloud, Ollama se locale.
         if also_translate:
             if _is_italian(meta.get("detected_language")):
-                console.print("  [dim]🇮🇹 Audio già in italiano: traduzione automatica saltata.[/dim]")
+                console.print("  [dim]🇮🇹 Audio già in italiano: traduzione saltata, riassumo l'originale.[/dim]")
+                summarize_existing(out_root, meta["title"], client=client,
+                                   source_sections=None, do_export=do_export)
             else:
-                translate_existing(out_root, meta["title"], target="it", do_export=do_export)
+                translated = translate_existing(out_root, meta["title"], target="it",
+                                                do_export=do_export)
+                if translated:
+                    summarize_existing(out_root, meta["title"], client=client,
+                                       source_sections=translated, do_export=do_export)
 
 
 def _probe_duration(audio_path: str) -> float:
