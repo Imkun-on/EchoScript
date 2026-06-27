@@ -1167,7 +1167,7 @@ def _extract_words(result) -> list[dict]:
 
 def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
                       return_language: bool = False, language=_USE_CONFIG,
-                      want_words: bool | None = None):
+                      want_words: bool | None = None, on_headers=None):
     """Send ONE audio chunk to Groq and return the list of its segments.
 
     Uses response_format='verbose_json' to receive, in addition to the text, the
@@ -1180,6 +1180,10 @@ def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
     sentinel means "use the LANGUAGE config" (None there = auto-detect).
     'want_words' requests per-word timestamps (defaults to the WORD_TIMESTAMPS
     config); when on, each segment also carries a 'words' list (start/end/word).
+
+    'on_headers' (optional): if given, the call uses the raw response and passes
+    its HTTP headers to on_headers(headers) — so the engine can read the
+    x-ratelimit-* budget. None (the CLI default) keeps the plain call unchanged.
 
     If return_language=True, returns (segments, language) where 'language' is the
     ISO code Whisper auto-detected (e.g. 'en'/'it'), otherwise just the segments
@@ -1198,7 +1202,7 @@ def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             with open(chunk_path, "rb") as f:
-                result = client.audio.transcriptions.create(
+                params = dict(
                     file=(os.path.basename(chunk_path), f.read()),
                     model=GROQ_MODEL,
                     response_format="verbose_json",
@@ -1207,6 +1211,27 @@ def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
                     prompt=prompt[-400:],         # last ~400 characters as context
                     temperature=0.0,             # 0 = more deterministic/faithful output
                 )
+                if on_headers is not None:
+                    # Raw response so the caller can read the x-ratelimit-* headers
+                    # (the Groq "credits"); .parse() yields the same parsed object.
+                    # Header reading must NEVER cost us the transcription: on any
+                    # unexpected SDK error (but not rate-limit/auth) we fall back to
+                    # the plain call and simply skip the credit info.
+                    try:
+                        raw = client.audio.transcriptions.with_raw_response.create(**params)
+                    except Exception as raw_err:
+                        rmsg = str(raw_err)
+                        if _is_rate_limit(rmsg) or "401" in rmsg or "403" in rmsg:
+                            raise
+                        result = client.audio.transcriptions.create(**params)
+                    else:
+                        try:
+                            on_headers(raw.headers)
+                        except Exception:
+                            pass
+                        result = raw.parse()
+                else:
+                    result = client.audio.transcriptions.create(**params)
             lang = getattr(result, "language", None)
             # result.segments is a list of objects with .start, .end, .text
             segments = getattr(result, "segments", None)
