@@ -641,6 +641,14 @@ La **API key** non è mai scritta nel codice: si legge da `.env` o da variabile 
 
 ---
 
+## 💬 Feedback
+
+In caso di miglioramenti o suggerimenti, scrivete pure: ogni idea, segnalazione
+di bug o proposta è benvenuta. Aprite una **issue** su GitHub oppure lasciate un
+commento — il progetto cresce anche grazie ai vostri riscontri.
+
+---
+
 ## ⚖️ Note legali
 
 EchoScript scarica l'audio da YouTube per trascriverlo. L'uso potrebbe essere soggetto ai **Termini di Servizio** di YouTube e alle norme sul **diritto d'autore** della tua giurisdizione. È pensato per uso **personale ed educativo** (es. studiare un video leggendolo): usalo in modo responsabile e solo per contenuti di cui hai i diritti o per fini di studio personale.

@@ -622,6 +622,14 @@ The **API key** is never written in the code: it is read from `.env` or an envir
 
 ---
 
+## 💬 Feedback
+
+If you have improvements or suggestions, feel free to reach out: every idea, bug
+report or proposal is welcome. Open an **issue** on GitHub or leave a comment —
+the project grows thanks to your feedback too.
+
+---
+
 ## ⚖️ Legal notice
 
 EchoScript downloads audio from YouTube to transcribe it. Its use may be subject to YouTube's **Terms of Service** and to the **copyright** rules of your jurisdiction. It is intended for **personal and educational** use (e.g. studying a video by reading it): use it responsibly and only for content you have the rights to, or for personal study.
