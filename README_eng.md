@@ -130,7 +130,9 @@ The **GUI** adds a few conveniences:
 - 🌍 **Interface language** Italian/English, with a flag selector
 - ▶️ **Video preview**: loading a URL opens a **confirmation window** with the cover and details (channel, views, likes, subscribers, category, language)
 - 🏷️ **Engine badge** during transcription (Groq cloud or Local CPU), so you always know what you're transcribing with
-- 📊 **Real progress bar** with the phase number (e.g. "Phase 2/5")
+- 📊 **Dedicated progress window**: a real bar, a checklist of steps and a sentence on what's happening
+- 🌐 **Italian translation** and 🧠 **summary** toggled on via two switches (the "Extra outputs" card)
+- 💰 **Groq API credits**: a button shows the **remaining credits** (and when they reset); when done you also see the ones **used**
 - 📄 **PDF always generated** automatically
 
 > Both write the same files to `results/<name>/`. Pick whichever you prefer: the result is identical.
@@ -154,7 +156,9 @@ This section is written for **non-technical users**: we explain every screen, ev
 ### Step 1 — "How do you want to transcribe?"
 Two cards to choose from (they glow green when selected):
 - 🔒 **Local**: transcribes **on your computer**, **offline**, sending nothing. Below you can pick the **model** (more accurate = slower). Best with a GPU; slower on CPU.
-- ⚡ **Groq (cloud)**: **very fast**, but the audio is sent to Groq's servers. Needs a **free key**: click **"Load key from .txt file"** and select your key file; **"Get a key →"** opens the site to create one.
+- ⚡ **Groq (cloud)**: **very fast**, but the audio is sent to Groq's servers. Needs a **free key**: click **"Load key from .txt file"** and select your key file. The **"Show Groq API credits"** button opens a window listing the **remaining credits** for transcription (audio seconds, requests) and **when they reset**; **"Get a key →"** opens the site to create one.
+
+> When transcription finishes, the **"Done!"** window also shows the **Groq credits used** (audio transcribed) and those **left for today**.
 
 ### Step 2 — "What do you want to transcribe?"
 - 📺 **YouTube**: paste the video **link** in the field and click **"Load info"**.
@@ -165,15 +169,22 @@ After **"Load info"** a window opens with the video's **cover** and details (cha
 - **Confirm** → accept the video (a *"✓ Video confirmed"* line appears below).
 - **Cancel** → discard it and paste another one.
 
+### Step 3 — "Extra outputs" (optional)
+Below the two tiles there's a card with **two switches**, both **off** by default (so a plain transcription stays plain):
+- 🌐 **Translate to Italian**: if the audio is **not already Italian**, alongside the transcription it also creates a **translation** (Google Translate, free, no key) in the `traduzioni/` subfolder.
+- 🧠 **Create summary**: generates a **clean per-section summary** of the Italian text in `riassunti/`. Uses **Groq** if you've loaded a key, otherwise local **Ollama** (if installed). If neither is available the transcription is still saved and a notice appears.
+
 ### The "Transcribe" button
 It's the big green button at the bottom. It becomes **active** only when everything is ready. If you press it too early, a **warning window** appears **listing what's missing**, for example:
 - *load the Groq API key* (only if using Groq);
 - *load and confirm the YouTube video*, or *choose an audio file*.
 
 ### During transcription
-A **real progress bar** appears (not a fake animation):
+A **dedicated window** opens with the progress (no fake animations):
 - at the top a **badge** tells you what you're transcribing with: **Groq (cloud)** (green) or **Local CPU** (amber, because it can take minutes);
-- on the right the **phase number** (e.g. *"Phase 2/5"*) and the overall **percentage**.
+- a **real bar** with the **phase number** (e.g. *"Phase 2/5"*) and the overall **percentage**;
+- a **checklist of steps** that ticks off as it goes (Transcription → optional Translation → optional Summary → Saving): it mirrors exactly the options you chose;
+- a **short sentence** narrating what's happening right now, plus the **full plan** of the job.
 
 ### At the end of transcription
 The **PDF is always created**, automatically, and the files are saved with no further prompts.
@@ -478,9 +489,9 @@ The **PDF is always generated, automatically**. EchoScript creates:
 
 ## 🌐 Automatic translation
 
-> ℹ️ Translation and summary currently run in the **CLI** (`transcriber.py`). GUI integration is coming.
+> ℹ️ Translation and summary are available in both the **CLI** (`transcriber.py`) and the **GUI** (the "Extra outputs" card switches), sharing the same engine.
 
-After transcription, if the audio is **not already in Italian**, EchoScript **translates it to Italian** automatically (if it's already Italian it skips the step: translating `it → it` would be pointless).
+After transcription, if the audio is **not already in Italian**, EchoScript **translates it to Italian** (automatically in the CLI; by flipping the switch in the GUI) (if it's already Italian it skips the step: translating `it → it` would be pointless).
 
 - **Free and key-less.** Translation uses **Google Translate** via the `deep-translator` library: no API key, **no Groq credits spent**. The transcription stays intact; the translation goes to `traduzioni/` as separate `.md`/`.txt`/`.pdf` files, **without timings** (continuous text, easier to read).
 

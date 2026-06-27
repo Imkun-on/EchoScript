@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import sys
+import json
 import time
 import subprocess
 import tempfile
@@ -166,6 +167,140 @@ def make_groq_client(api_key: str | None = None):
         raise EngineError(f"Impossibile contattare Groq: {e}")
 
 
+# === GROQ RATE LIMITS / "CREDITS" ============================================
+# Groq does not expose a "balance" endpoint: the free-tier budget is reported
+# only via the x-ratelimit-* HTTP headers attached to every API response. To
+# READ them without doing real work we send a ~1-second silent audio clip to the
+# transcription endpoint (the same one the app uses) and parse the headers from
+# the raw response. Costs ~1 second of the daily audio budget — negligible.
+
+import re as _re
+from datetime import datetime as _datetime, timedelta as _timedelta
+
+_RESET_UNITS = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
+
+
+def _parse_reset_duration(value: str | None) -> float | None:
+    """Parse a Groq reset header (e.g. '2m59.56s', '986ms', '7.66s', '1h0m0s')
+    into seconds. Returns None if the value is empty/unparseable."""
+    if not value:
+        return None
+    total = 0.0
+    found = False
+    for num, unit in _re.findall(r"([0-9.]+)\s*(ms|s|m|h|d)", value):
+        try:
+            total += float(num) * _RESET_UNITS[unit]
+            found = True
+        except ValueError:
+            pass
+    return total if found else None
+
+
+def _reset_clock(seconds: float | None) -> str | None:
+    """Local wall-clock time (HH:MM) at which a limit resets, given a duration
+    in seconds from now. None if 'seconds' is None."""
+    if seconds is None:
+        return None
+    return (_datetime.now() + _timedelta(seconds=seconds)).strftime("%H:%M")
+
+
+def _num(value: str | None) -> float | None:
+    """Best-effort float() of a header value (handles ints, floats, None)."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def _parse_ratelimit_headers(headers) -> list[dict]:
+    """Turn the x-ratelimit-* headers into a tidy list of limit groups.
+
+    Each item: {kind, remaining, limit, reset_seconds, reset_clock}. 'kind' is
+    one of 'audio_seconds' | 'requests' | 'tokens' (the GUI localizes the label).
+    Only groups actually present in the response are returned."""
+    def get(name: str):
+        try:
+            return headers.get(name)
+        except Exception:
+            return None
+
+    items: list[dict] = []
+    # Order: audio-seconds first (it's what gates transcription), then requests/tokens.
+    for kind, suffix in (("audio_seconds", "audio-seconds"),
+                         ("requests", "requests"),
+                         ("tokens", "tokens")):
+        remaining = _num(get(f"x-ratelimit-remaining-{suffix}"))
+        limit = _num(get(f"x-ratelimit-limit-{suffix}"))
+        reset_s = _parse_reset_duration(get(f"x-ratelimit-reset-{suffix}"))
+        if remaining is None and limit is None and reset_s is None:
+            continue
+        items.append({
+            "kind": kind,
+            "remaining": remaining,
+            "limit": limit,
+            "reset_seconds": reset_s,
+            "reset_clock": _reset_clock(reset_s),
+        })
+    return items
+
+
+def _silent_probe_audio(workdir: str) -> str:
+    """Generate a ~1s silent 16 kHz mono mp3 used only to read rate-limit headers."""
+    out_path = os.path.join(workdir, "probe.mp3")
+    cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i",
+           f"anullsrc=r={tx.AUDIO_SAMPLE_RATE}:cl=mono", "-t", "1",
+           "-b:a", tx.AUDIO_BITRATE, out_path]
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+    return out_path
+
+
+def fetch_groq_limits(api_key: str | None = None) -> dict:
+    """Read the current Groq rate limits ("credits") for the transcription model.
+
+    Sends a ~1-second silent clip to the audio endpoint and parses the
+    x-ratelimit-* headers of the raw response. Returns
+    {checked_at: 'HH:MM', items: [...], raw: {header: value}}. Raises EngineError
+    on a missing/invalid key or a network failure (message ready to show)."""
+    client = make_groq_client(api_key)  # validates the key, clear errors
+    with tempfile.TemporaryDirectory(prefix="echoscript_lim_", ignore_cleanup_errors=True) as workdir:
+        try:
+            probe = _silent_probe_audio(workdir)
+        except Exception as e:
+            raise EngineError(f"Impossibile creare l'audio di test (serve ffmpeg): {e}")
+        try:
+            with open(probe, "rb") as f:
+                raw = client.audio.transcriptions.with_raw_response.create(
+                    file=(os.path.basename(probe), f.read()),
+                    model=tx.GROQ_MODEL,
+                    response_format="json",
+                    temperature=0.0,
+                )
+            headers = raw.headers
+        except Exception as e:
+            msg = str(e)
+            if tx._is_rate_limit(msg):
+                # Già a zero: prova comunque a leggere gli header dell'errore 429.
+                headers = getattr(getattr(e, "response", None), "headers", {})
+            elif "401" in msg or "invalid_api_key" in msg:
+                raise EngineError("Chiave Groq non valida (401).")
+            else:
+                raise EngineError(f"Impossibile leggere i limiti Groq: {e}")
+
+    items = _parse_ratelimit_headers(headers)
+    # Tutti gli header x-ratelimit-* grezzi (per debug / vista \"completa\").
+    raw_map = {}
+    try:
+        for k, v in headers.items():
+            if str(k).lower().startswith("x-ratelimit"):
+                raw_map[str(k).lower()] = v
+    except Exception:
+        pass
+    return {"checked_at": _datetime.now().strftime("%H:%M"),
+            "items": items, "raw": raw_map}
+
+
 # === AUDIO DOWNLOAD ===
 
 def download_audio(url: str, workdir: str, on_progress=_noop) -> str:
@@ -235,27 +370,34 @@ def split_audio(audio_path: str, duration: float, workdir: str, on_progress=_noo
 
 def transcribe_groq(client, chunks: list[tuple[float, str]], on_progress=_noop,
                     start_index: int = 0, prior_segments: list | None = None,
-                    prior_lang=None, language=None):
+                    prior_lang=None, language=None, usage_out: dict | None = None):
     """Transcribe chunks via Groq, con RIPRESA da 'start_index' (riusando
     'prior_segments' già fatti). Shifta i timestamp di ogni blocco (e le parole).
 
-    'language' forza la lingua audio (None = autorileva). Returns (segments,
-    detected_language). Se Groq rifiuta per limite, solleva
+    'language' forza la lingua audio (None = autorileva). Se 'usage_out' è un
+    dict, viene riempito con i limiti Groq letti dagli header dell'ULTIMO blocco
+    (usage_out['items'] = lista di gruppi limite) per mostrare i crediti residui.
+    Returns (segments, detected_language). Se Groq rifiuta per limite, solleva
     tx.TranscriptionInterrupted col parziale (per il checkpoint)."""
     all_segments: list[dict] = list(prior_segments or [])
     context = " ".join(s["text"] for s in all_segments[-6:]) if all_segments else ""
     detected = prior_lang
     n = len(chunks)
+    # Cattura header dell'ultimo blocco (solo se al chiamante interessano i crediti).
+    _hdr: dict = {}
+    sink = (lambda h: _hdr.__setitem__("headers", h)) if usage_out is not None else None
     for i in range(start_index, n):
         offset, path = chunks[i]
         on_progress("transcribe", i, n, f"Invio blocco {i + 1}/{n} a Groq")
         try:
             if i == start_index:
                 segments, lang = tx._transcribe_chunk(
-                    client, path, prompt=context, return_language=True, language=language)
+                    client, path, prompt=context, return_language=True,
+                    language=language, on_headers=sink)
                 detected = detected or lang
             else:
-                segments = tx._transcribe_chunk(client, path, prompt=context, language=language)
+                segments = tx._transcribe_chunk(
+                    client, path, prompt=context, language=language, on_headers=sink)
         except tx.GroqRateLimit:
             # I blocchi 0..i-1 sono completati: passali a chi orchestra.
             raise tx.TranscriptionInterrupted(all_segments, i, n, detected)
@@ -269,6 +411,9 @@ def transcribe_groq(client, chunks: list[tuple[float, str]], on_progress=_noop,
         if segments:
             context = " ".join(s["text"] for s in segments)
         on_progress("transcribe", i + 1, n, f"Blocco {i + 1}/{n} completato")
+    # Crediti residui letti dall'ultimo blocco trascritto (best effort).
+    if usage_out is not None and _hdr.get("headers") is not None:
+        usage_out["items"] = _parse_ratelimit_headers(_hdr["headers"])
     return all_segments, detected
 
 
@@ -448,10 +593,11 @@ def transcribe_only(source: str, options: dict, on_progress=_noop, resume: bool 
                 start_index = int(cp.get("done_chunks", 0))
                 prior = cp.get("segments")
                 prior_lang = cp.get("detected_language")
+            groq_usage: dict = {}
             try:
                 segments, detected_lang = transcribe_groq(
                     client, chunks, on_progress, start_index, prior, prior_lang,
-                    language=audio_lang)
+                    language=audio_lang, usage_out=groq_usage)
             except tx.TranscriptionInterrupted as ti:
                 # Limite raggiunto: salva/aggiorna il checkpoint e segnala.
                 tx.save_checkpoint(meta, {
@@ -473,6 +619,10 @@ def transcribe_only(source: str, options: dict, on_progress=_noop, resume: bool 
                 raise RateLimitReached(ti.done, ti.total, done_s, duration or 0.0)
             # Trascrizione completa: niente più parziale da conservare.
             tx.delete_checkpoint(meta)
+            # Crediti Groq residui letti durante la trascrizione (per il riepilogo).
+            # Chiave con underscore: i builder dei file non la serializzano.
+            if groq_usage.get("items"):
+                meta["_groq_limits"] = groq_usage["items"]
         else:
             segments, detected_lang = transcribe_local(
                 model, audio_path, duration, on_progress, language=audio_lang,
@@ -556,6 +706,140 @@ def continue_local_from_groq(source: str, options: dict, on_progress=_noop):
     return meta, segments, engine_label, None
 
 
+# === TRANSLATION & SUMMARY (post-transcription, UI-agnostic) =================
+# These mirror the CLI's translate_existing()/summarize_existing() but are
+# headless: they write through _write() and report through on_progress() instead
+# of printing to the rich console. Failures are turned into warnings (the
+# transcription is already saved), never into a hard error.
+
+def _translate_outputs(meta: dict, sections: list[dict], options: dict,
+                       video_dir: str, created: list[str], warnings: list[str],
+                       on_progress=_noop) -> list[dict] | None:
+    """Translate the transcription sections to Italian and write md/txt/json(+pdf).
+
+    Returns the translated sections (so the summary can reuse them) or None if
+    translation was skipped/failed. Writes under <video_dir>/<traduzioni>/ with
+    the folder name following the UI language. A None return never aborts the
+    run: a clear warning is appended instead."""
+    target = "it"
+    safe_title = tx._safe_filename(meta["title"])
+    trad_dir = os.path.join(video_dir, tx.transl_subdir(options.get("ui_lang", "it")))
+    base = os.path.join(trad_dir, f"{safe_title}_{target}")
+    lang_label = tx._lang_name(target) or target
+
+    n = len(sections)
+    on_progress("translate", 0, n, f"Traduco in {lang_label}")
+    try:
+        translated = tx.translate_sections(
+            sections, target,
+            on_progress=lambda i, tot: on_progress("translate", i, tot,
+                                                   f"Sezione {i}/{tot} tradotta"))
+    except RuntimeError as e:        # deep_translator non installato
+        warnings.append(f"Traduzione non disponibile: {e}")
+        return None
+    except Exception as e:
+        warnings.append(f"Traduzione fallita: {e}")
+        return None
+
+    engine_label = f"Traduzione automatica (Google Translate) → {lang_label}"
+    # La versione tradotta è testo continuo, senza timestamp (più leggibile).
+    _write(f"{base}.md", tx.build_md(meta["title"], meta, engine_label, translated, with_timestamps=False), created, video_dir)
+    _write(f"{base}.txt", tx.build_txt(meta["title"], meta, translated), created, video_dir)
+    # JSON delle sezioni tradotte: utile per ririassumere la traduzione dopo.
+    _write(f"{base}.json",
+           json.dumps({"target": target, "sections": translated}, ensure_ascii=False, indent=2),
+           created, video_dir)
+    if options.get("export"):
+        for attempt in (1, 2):
+            try:
+                _ensure_dir(f"{base}.pdf")
+                tx.build_pdf(meta["title"], meta, translated, f"{base}.pdf", with_timestamps=False)
+                created.append(os.path.relpath(f"{base}.pdf", video_dir).replace("\\", "/"))
+                break
+            except OSError:
+                if attempt == 2:
+                    warnings.append("PDF della traduzione non creato (errore filesystem).")
+                else:
+                    time.sleep(0.4)
+            except Exception as e:
+                warnings.append(f"PDF della traduzione non creato: {e}")
+                break
+    return translated
+
+
+def _resolve_summary_client(options: dict, client):
+    """Pick the chat client for the summary: the Groq transcription client if we
+    have one, otherwise build one from the loaded key, otherwise None (-> Ollama).
+
+    Reusing/recreating a Groq client lets a LOCAL-backend user with a Groq key
+    still get a cloud summary instead of needing Ollama installed."""
+    if client is not None:
+        return client
+    key = (options.get("api_key") or "").strip()
+    if key:
+        try:
+            return make_groq_client(key)
+        except EngineError:
+            return None
+    return None
+
+
+def _summarize_outputs(meta: dict, sections: list[dict], options: dict,
+                       video_dir: str, created: list[str], warnings: list[str],
+                       client=None, on_progress=_noop) -> None:
+    """Summarize the (Italian) sections per-section and write md/txt(+pdf).
+
+    'sections' should already be Italian (the translation when available, else
+    the original). Uses Groq when a client/key is available, else Ollama. Any
+    failure becomes a warning — the transcription/translation stay saved."""
+    sum_client = _resolve_summary_client(options, client)
+    try:
+        summarize_fn, engine_label = tx._make_summarizer(sum_client)
+    except RuntimeError as e:        # né Groq né Ollama disponibili
+        warnings.append(f"Riassunto non disponibile: {e}")
+        return
+
+    safe_title = tx._safe_filename(meta["title"])
+    ui_lang = options.get("ui_lang", "it")
+    sum_dir = os.path.join(video_dir, tx.summary_subdir(ui_lang))
+    suffix = tx.SUMMARY_SUFFIX.get(ui_lang or "it", tx.SUMMARY_SUFFIX["it"])
+    base = os.path.join(sum_dir, f"{safe_title}_{suffix}")
+
+    n = len(sections)
+    on_progress("summarize", 0, n, "Riassumo le sezioni")
+    try:
+        summarized = tx.summarize_sections(
+            sections, summarize_fn,
+            on_progress=lambda i, tot: on_progress("summarize", i, tot,
+                                                   f"Sezione {i}/{tot} riassunta"))
+    except Exception as e:
+        if tx._is_rate_limit(str(e)):
+            warnings.append("Crediti Groq esauriti: riassunto saltato "
+                            "(trascrizione e traduzione sono salvate).")
+        else:
+            warnings.append(f"Riassunto fallito: {e}")
+        return
+
+    # Il riassunto è testo pulito: niente timestamp.
+    _write(f"{base}.md", tx.build_md(meta["title"], meta, engine_label, summarized, with_timestamps=False), created, video_dir)
+    _write(f"{base}.txt", tx.build_txt(meta["title"], meta, summarized), created, video_dir)
+    if options.get("export"):
+        for attempt in (1, 2):
+            try:
+                _ensure_dir(f"{base}.pdf")
+                tx.build_pdf(meta["title"], meta, summarized, f"{base}.pdf", with_timestamps=False)
+                created.append(os.path.relpath(f"{base}.pdf", video_dir).replace("\\", "/"))
+                break
+            except OSError:
+                if attempt == 2:
+                    warnings.append("PDF del riassunto non creato (errore filesystem).")
+                else:
+                    time.sleep(0.4)
+            except Exception as e:
+                warnings.append(f"PDF del riassunto non creato: {e}")
+                break
+
+
 def save_results(meta: dict, segments: list[dict], engine_label: str, options: dict,
                  out_root: str, client=None, on_progress=_noop) -> dict:
     """PHASE 2 — write all outputs under 'out_root', creating the subfolders.
@@ -596,7 +880,32 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
                     raise
                 time.sleep(0.4)
 
+    # --- Optional translation (to Italian) and per-section summary ---
+    # The transcription is already on disk, so any failure here is a warning, not
+    # a fatal error. The summary works on the ITALIAN text: the translation when
+    # produced, otherwise the original (already Italian, or accepted as-is).
+    translated_sections = None
+    audio_lang = meta.get("detected_language")
+    if options.get("translate"):
+        if tx._is_italian(audio_lang):
+            warnings.append("Audio già in italiano: traduzione non necessaria.")
+        else:
+            translated_sections = _translate_outputs(
+                meta, sections, options, video_dir, created, warnings, on_progress)
+    if options.get("summarize"):
+        _summarize_outputs(
+            meta, translated_sections or sections, options, video_dir,
+            created, warnings, client, on_progress)
+
     n_words = sum(len(s["text"].split()) for s in segments)
+    # Crediti Groq: secondi audio consumati da QUESTA trascrizione (≈ durata) e i
+    # limiti residui letti durante il run. Solo per i run Groq cloud.
+    credits = None
+    if options.get("backend") == "groq":
+        credits = {
+            "audio_seconds_used": meta.get("duration") or 0.0,
+            "limits": meta.get("_groq_limits") or [],
+        }
     return {
         "title": meta["title"],
         "video_dir": video_dir,
@@ -606,6 +915,7 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
         "sections": len(meta["chapters"]) or 0,
         "engine_label": engine_label,
         "warnings": warnings,
+        "credits": credits,
     }
 
 

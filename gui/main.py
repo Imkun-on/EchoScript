@@ -91,7 +91,7 @@ T = {
         "model_turbo": "large-v3-turbo — quasi large, più rapido",
         "key_field_label": "Chiave API Groq",
         "load_key": "Carica chiave da file .txt",
-        "limits_btn": "Controlla limiti API",
+        "limits_btn": "Mostra crediti API Groq",
         "limits_checking": "Controllo…",
         "get_key": "Ottieni una chiave →",
         "key_loaded": "✓ Chiave caricata da “{name}”",
@@ -147,8 +147,34 @@ T = {
         "phase_prepare": "Preparazione audio",
         "phase_transcribe": "Trascrizione",
         "phase_translate": "Traduzione in italiano",
+        "phase_summarize": "Riassunto",
         "phase_export": "Esportazione / salvataggio",
         "saving_files": "Salvataggio dei file",
+        # Output options card (translation / summary toggles)
+        "opts_title": "Output aggiuntivi",
+        "opt_translate_name": "Traduci in italiano",
+        "opt_translate_desc": "Se l'audio non è già in italiano, crea anche una "
+                              "traduzione (Google Translate, gratis) in /traduzioni.",
+        "opt_summary_name": "Crea riassunto",
+        "opt_summary_desc": "Riassunto per sezione del testo italiano in /riassunti "
+                            "(usa Groq se hai la chiave, altrimenti Ollama locale).",
+        # Progress dialog (dedicated window)
+        "prog_title": "Elaborazione in corso",
+        "prog_steps_title": "Passaggi",
+        "prog_plan_label": "Piano:",
+        "ov_base": "trascrivo l'audio",
+        "ov_translate": "lo traduco in italiano",
+        "ov_summary": "creo il riassunto",
+        "ov_save": "salvo i file (PDF incluso)",
+        "ov_join": " e ",
+        "narr_info": "Leggo le informazioni della sorgente e preparo l'elaborazione…",
+        "narr_download": "Scarico la traccia audio dal video…",
+        "narr_prepare": "Preparo l'audio e lo divido in blocchi per Groq…",
+        "narr_transcribe": "Converto il parlato in testo, blocco per blocco…",
+        "narr_export": "Salvo la trascrizione e genero il PDF…",
+        "narr_translate": "Traduco il testo in italiano, sezione per sezione…",
+        "narr_summarize": "Creo un riassunto pulito per ogni sezione…",
+        "narr_done": "Quasi finito: completo gli ultimi salvataggi…",
         # Options dialog
         "opt_title": "Trascrizione completata",
         "opt_desc": "Il PDF verrà creato automaticamente. Poi indica dove salvare: "
@@ -197,16 +223,24 @@ T = {
         "res_root": "(radice)",
         "btn_open_folder": "Apri cartella risultati",
         "btn_close": "Chiudi",
-        # Limits dialog
-        "lim_title": "Limiti API Groq",
-        "lim_model": "Modello: {m}",
-        "lim_desc": "Valori del momento per il modello di traduzione (è il suo "
-                    "limite giornaliero di token a bloccare la traduzione).",
-        "lim_tokens": "Token rimanenti",
-        "lim_requests": "Richieste rimanenti",
-        "lim_reset": "si azzera tra {v}",
-        "lim_no_window": "finestra non indicata",
-        "lim_retry": "⚠ Limite raggiunto: riprova tra {v} s.",
+        # Credits / limits dialog
+        "lim_title": "Crediti API Groq",
+        "lim_desc": "Crediti residui per la trascrizione (modello {m}). Letti dagli "
+                    "header di una piccola richiesta di test all'API Groq.",
+        "lim_checked_at": "Controllato alle {v}",
+        "lim_kind_audio_seconds": "Audio (trascrizione)",
+        "lim_kind_requests": "Richieste",
+        "lim_kind_tokens": "Token (riassunto)",
+        "lim_remaining": "{rem} / {lim} rimasti",
+        "lim_remaining_only": "{rem} rimasti",
+        "lim_reset_at": "si azzera alle {clock} (tra {dur})",
+        "lim_reset_in": "si azzera tra {dur}",
+        "lim_none": "Nessun dato sui limiti restituito da Groq.",
+        "lim_unit_seconds": "secondi audio",
+        # Credits in the result summary
+        "res_credits": "Crediti Groq",
+        "res_credits_used": "Audio trascritto",
+        "res_credits_remaining_audio": "Audio residuo oggi",
         # Errors
         "err_title": "Errore",
         "err_unknown": "Errore sconosciuto.",
@@ -236,7 +270,7 @@ T = {
         "model_turbo": "large-v3-turbo — near large, faster",
         "key_field_label": "Groq API key",
         "load_key": "Load key from .txt file",
-        "limits_btn": "Check API limits",
+        "limits_btn": "Show Groq API credits",
         "limits_checking": "Checking…",
         "get_key": "Get a key →",
         "key_loaded": "✓ Key loaded from “{name}”",
@@ -288,8 +322,34 @@ T = {
         "phase_prepare": "Preparing audio",
         "phase_transcribe": "Transcribing",
         "phase_translate": "Translating to Italian",
+        "phase_summarize": "Summarizing",
         "phase_export": "Exporting / saving",
         "saving_files": "Saving files",
+        # Output options card (translation / summary toggles)
+        "opts_title": "Extra outputs",
+        "opt_translate_name": "Translate to Italian",
+        "opt_translate_desc": "If the audio isn't already Italian, also create an "
+                              "Italian translation (Google Translate, free) in /translations.",
+        "opt_summary_name": "Create summary",
+        "opt_summary_desc": "Per-section summary of the Italian text in /summaries "
+                            "(uses Groq if you have a key, otherwise local Ollama).",
+        # Progress dialog (dedicated window)
+        "prog_title": "Processing",
+        "prog_steps_title": "Steps",
+        "prog_plan_label": "Plan:",
+        "ov_base": "transcribe the audio",
+        "ov_translate": "translate it to Italian",
+        "ov_summary": "create the summary",
+        "ov_save": "save the files (PDF included)",
+        "ov_join": " and ",
+        "narr_info": "Reading the source info and getting ready…",
+        "narr_download": "Downloading the audio track from the video…",
+        "narr_prepare": "Preparing the audio and splitting it into chunks for Groq…",
+        "narr_transcribe": "Turning speech into text, chunk by chunk…",
+        "narr_export": "Saving the transcription and generating the PDF…",
+        "narr_translate": "Translating the text to Italian, section by section…",
+        "narr_summarize": "Creating a clean summary for each section…",
+        "narr_done": "Almost there: finishing the last saves…",
         "opt_title": "Transcription complete",
         "opt_desc": "The PDF will be created automatically. Then choose where to save: "
                     "the app will create the subfolders (transcriptions, translations).",
@@ -333,15 +393,22 @@ T = {
         "res_root": "(root)",
         "btn_open_folder": "Open results folder",
         "btn_close": "Close",
-        "lim_title": "Groq API limits",
-        "lim_model": "Model: {m}",
-        "lim_desc": "Current values for the translation model (its daily token "
-                    "limit is what blocks translation).",
-        "lim_tokens": "Tokens remaining",
-        "lim_requests": "Requests remaining",
-        "lim_reset": "resets in {v}",
-        "lim_no_window": "window not specified",
-        "lim_retry": "⚠ Limit reached: retry in {v}s.",
+        "lim_title": "Groq API credits",
+        "lim_desc": "Remaining credits for transcription (model {m}). Read from the "
+                    "headers of a small test request to the Groq API.",
+        "lim_checked_at": "Checked at {v}",
+        "lim_kind_audio_seconds": "Audio (transcription)",
+        "lim_kind_requests": "Requests",
+        "lim_kind_tokens": "Tokens (summary)",
+        "lim_remaining": "{rem} / {lim} left",
+        "lim_remaining_only": "{rem} left",
+        "lim_reset_at": "resets at {clock} (in {dur})",
+        "lim_reset_in": "resets in {dur}",
+        "lim_none": "Groq returned no limit data.",
+        "lim_unit_seconds": "audio seconds",
+        "res_credits": "Groq credits",
+        "res_credits_used": "Audio transcribed",
+        "res_credits_remaining_audio": "Audio left today",
         "err_title": "Error",
         "err_unknown": "Unknown error.",
         "err_paste_url": "Paste the video URL first.",
@@ -502,16 +569,19 @@ class EchoScriptApp:
         content = ft.Column(
             spacing=16,
             tight=True,
+            # Scrollable so the extra options card never clips on a short window.
+            scroll=ft.ScrollMode.AUTO,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             controls=[
                 self._header(),
                 self._steps_row,
+                self._options_card(),
                 self._cta_button(),
-                self._progress_card(),
             ],
         )
 
         # Modal windows built separately (up front, then reused).
+        self._build_progress_dialog()   # progress now lives in its own window
         self._build_error_dialog()
         self._build_warn_dialog()
 
@@ -937,10 +1007,20 @@ class EchoScriptApp:
             style=ft.ButtonStyle(color=GREEN_HI))
         self._reg(get_btn, "text", "get_key")
 
+        # "Mostra crediti API Groq": reads the remaining transcription budget from
+        # the Groq rate-limit headers (a tiny test request) and lists it in a dialog.
+        self.credits_btn = ft.OutlinedButton(
+            icon=ft.Icons.SAVINGS_OUTLINED, on_click=lambda e: self._show_credits(),
+            style=ft.ButtonStyle(
+                color=GREEN_HI, side=ft.BorderSide(1, BORDER_HI),
+                shape=ft.RoundedRectangleBorder(radius=10),
+                padding=ft.padding.symmetric(horizontal=14, vertical=14)))
+        self._reg(self.credits_btn, "text", "limits_btn")
+
         return ft.Column(
             spacing=8,
             controls=[
-                ft.Row([load_btn, get_btn], spacing=10, wrap=True),
+                ft.Row([load_btn, get_btn, self.credits_btn], spacing=10, wrap=True),
                 status,
             ],
         )
@@ -956,6 +1036,139 @@ class EchoScriptApp:
         for lbl in self._key_status_labels:
             lbl.value = self._key_status_text()
             lbl.color = GREEN_HI if self.loaded_api_key else MUTED
+
+    # --- Groq credits / rate limits --------------------------------------
+    @staticmethod
+    def _fmt_duration_short(seconds: float) -> str:
+        """Compact human duration: '2h 5m', '3m 20s', '45s'."""
+        s = int(round(seconds or 0))
+        h, m, sec = s // 3600, (s % 3600) // 60, s % 60
+        parts = []
+        if h:
+            parts.append(f"{h}h")
+        if m:
+            parts.append(f"{m}m")
+        if sec or not parts:
+            parts.append(f"{sec}s")
+        return " ".join(parts)
+
+    def _fmt_reset(self, item: dict) -> str:
+        """Localized 'resets at HH:MM (in …)' line for one limit group."""
+        sec = item.get("reset_seconds")
+        if sec is None:
+            return ""
+        dur = self._fmt_duration_short(sec)
+        clock = item.get("reset_clock")
+        if clock:
+            return self.t("lim_reset_at").format(clock=clock, dur=dur)
+        return self.t("lim_reset_in").format(dur=dur)
+
+    def _fmt_limit_value(self, item: dict) -> str:
+        """Localized 'remaining / limit' line; audio is shown as mm:ss durations."""
+        rem, lim, kind = item.get("remaining"), item.get("limit"), item.get("kind")
+        def one(v):
+            if v is None:
+                return "?"
+            if kind == "audio_seconds":
+                return tx._format_timestamp(v)
+            return f"{int(v):,}".replace(",", ".")
+        if lim is not None:
+            return self.t("lim_remaining").format(rem=one(rem), lim=one(lim))
+        return self.t("lim_remaining_only").format(rem=one(rem))
+
+    def _show_credits(self) -> None:
+        """Read the remaining Groq credits (rate-limit headers) off-thread and show them.
+
+        Needs a Groq key (loaded or in .env); the engine raises a clear EngineError
+        otherwise, which we surface in the error dialog."""
+        self._hide_error()
+        btn = self.credits_btn
+        btn.disabled = True
+        btn.text = self.t("limits_checking")
+        self.page.update()
+
+        def restore():
+            btn.disabled = False
+            btn.text = self.t("limits_btn")
+            self.page.update()
+
+        def work():
+            try:
+                data = engine.fetch_groq_limits(self.loaded_api_key or "")
+                restore()
+                self._open_credits_dialog(data)
+            except engine.EngineError as ex:
+                restore()
+                self._show_error(str(ex))
+            except Exception as ex:
+                restore()
+                self._show_error(self.t("err_limits").format(e=ex))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _open_credits_dialog(self, data: dict) -> None:
+        """Build and open the credits dialog: one card per Groq limit group."""
+        rows: list[ft.Control] = [
+            self._T_one(self.t("lim_desc").format(m=tx.GROQ_MODEL), size=12, color=MUTED),
+            ft.Text(self.t("lim_checked_at").format(v=data.get("checked_at", "—")),
+                    size=11, color=MUTED),
+            ft.Divider(height=1, color=BORDER),
+        ]
+        items = data.get("items") or []
+        if not items:
+            rows.append(ft.Text(self.t("lim_none"), size=13, color=WARN))
+        for it in items:
+            kind = it.get("kind", "")
+            rows.append(ft.Container(
+                border_radius=12, padding=14, bgcolor=SURFACE2,
+                border=ft.border.all(1, BORDER),
+                content=ft.Row(
+                    spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Container(
+                            width=38, height=38, border_radius=10,
+                            alignment=ft.alignment.center,
+                            bgcolor=ft.Colors.with_opacity(0.12, GREEN),
+                            content=ft.Icon(self._credit_icon(kind), color=GREEN_HI, size=20)),
+                        ft.Column(spacing=2, tight=True, expand=True, controls=[
+                            ft.Text(self.t(f"lim_kind_{kind}") if f"lim_kind_{kind}" in T[self.lang] else kind,
+                                    size=14, weight=ft.FontWeight.W_600, color=TEXT),
+                            ft.Text(self._fmt_limit_value(it), size=13, color=GREEN_HI,
+                                    weight=ft.FontWeight.W_600),
+                            ft.Text(self._fmt_reset(it), size=11, color=MUTED) if self._fmt_reset(it)
+                            else ft.Container(height=0),
+                        ]),
+                    ])))
+        close = ft.FilledButton(
+            self.t("btn_close"), icon=ft.Icons.CHECK,
+            on_click=lambda e: self.page.close(self.credits_dialog),
+            style=ft.ButtonStyle(bgcolor=GREEN, color="#06140C",
+                                 shape=ft.RoundedRectangleBorder(radius=10),
+                                 padding=ft.padding.symmetric(horizontal=18, vertical=16)))
+        self.credits_dialog = ft.AlertDialog(
+            modal=True, bgcolor=SURFACE, shape=ft.RoundedRectangleBorder(radius=16),
+            title=ft.Row([ft.Icon(ft.Icons.SAVINGS_OUTLINED, color=GREEN_HI, size=22),
+                          ft.Text(self.t("lim_title"), size=18,
+                                  weight=ft.FontWeight.W_600, color=TEXT)], spacing=10),
+            content=ft.Container(
+                width=440,
+                content=ft.Column(rows, spacing=12, tight=True, scroll=ft.ScrollMode.AUTO)),
+            actions=[close], actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self.page.update()
+        self.page.open(self.credits_dialog)
+
+    @staticmethod
+    def _credit_icon(kind: str) -> str:
+        """Icon per limit group."""
+        return {"audio_seconds": ft.Icons.GRAPHIC_EQ,
+                "requests": ft.Icons.SWAP_VERT,
+                "tokens": ft.Icons.TOKEN_OUTLINED}.get(kind, ft.Icons.SPEED)
+
+    def _T_one(self, text: str, **kw) -> ft.Text:
+        """A plain ft.Text (NOT registered for i18n): used for already-localized,
+        formatted strings that are rebuilt each time the dialog opens."""
+        return ft.Text(text, **kw)
 
     def _pick_key(self) -> None:
         """Open the file picker to choose the .txt holding the Groq key."""
@@ -1006,6 +1219,44 @@ class EchoScriptApp:
             if line:
                 return line
         return ""
+
+    def _toggle_row(self, icon: str, name_key: str, desc_key: str,
+                    switch: ft.Switch) -> ft.Control:
+        """One option row: icon + localized name/description + a trailing switch."""
+        return ft.Row(
+            spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Container(
+                    width=40, height=40, border_radius=10,
+                    bgcolor=ft.Colors.with_opacity(0.10, GREEN),
+                    alignment=ft.alignment.center,
+                    content=ft.Icon(icon, color=GREEN_HI, size=22)),
+                ft.Column(spacing=2, tight=True, expand=True, controls=[
+                    self._T(name_key, size=15, weight=ft.FontWeight.W_600, color=TEXT),
+                    self._T(desc_key, size=12, color=MUTED),
+                ]),
+                switch,
+            ])
+
+    def _options_card(self) -> ft.Control:
+        """Extra-output card: toggles for the Italian translation and the summary.
+
+        Both default OFF so a plain transcription run is unchanged. Their value is
+        read straight off the switches when a run starts (see _start_transcription)."""
+        self.sw_translate = ft.Switch(
+            value=False, active_color=GREEN, scale=0.9,
+            on_change=lambda e: self.page.update())
+        self.sw_summary = ft.Switch(
+            value=False, active_color=GREEN, scale=0.9,
+            on_change=lambda e: self.page.update())
+        return self._card(
+            self._card_title("3", "opts_title"),
+            self._toggle_row(ft.Icons.TRANSLATE, "opt_translate_name",
+                             "opt_translate_desc", self.sw_translate),
+            ft.Divider(height=1, color=BORDER),
+            self._toggle_row(ft.Icons.AUTO_STORIES, "opt_summary_name",
+                             "opt_summary_desc", self.sw_summary),
+        )
 
     def _step_source(self) -> ft.Control:
         """Step 2 card: choose the source (YouTube URL vs local file) + its inputs.
@@ -1282,13 +1533,25 @@ class EchoScriptApp:
         )
         return self.cta
 
-    def _progress_card(self) -> ft.Control:
-        """Build the progress card (hidden until a run starts).
+    # Phases that can appear in the progress checklist, each with its icon.
+    _PHASE_ICONS = {
+        "info": ft.Icons.INFO_OUTLINE,
+        "download": ft.Icons.DOWNLOADING,
+        "prepare": ft.Icons.GRAPHIC_EQ,
+        "transcribe": ft.Icons.RECORD_VOICE_OVER,
+        "export": ft.Icons.SAVE_OUTLINED,
+        "translate": ft.Icons.TRANSLATE,
+        "summarize": ft.Icons.AUTO_STORIES,
+    }
 
-        It occupies the SAME layout slot as the CTA button (see _show_progress):
-        only one of the two is visible at any time, which keeps the column height
-        stable. Holds the engine badge, phase label, phase counter, percentage,
-        bar and a detail line."""
+    def _build_progress_dialog(self) -> None:
+        """Build (once) the dedicated, elegant progress WINDOW (a modal dialog).
+
+        It shows: the engine badge, the current phase with a spinner + percentage,
+        the global bar, a live detail line, a step-by-step CHECKLIST (built per run
+        from the phase plan, so it mirrors the chosen options), and a short
+        narration of what is happening / what comes next. The worker thread opens
+        it via _show_progress(True) and closes it when done."""
         self.prog_phase = ft.Text(self.t("phase_default"), size=15,
                                   weight=ft.FontWeight.W_600, color=TEXT)
         # Phase counter on the right (e.g. "Phase 2/5"), in a green pill.
@@ -1301,9 +1564,8 @@ class EchoScriptApp:
         self.prog_pct = ft.Text("", size=14, color=GREEN_HI, weight=ft.FontWeight.BOLD)
         self.prog_bar = ft.ProgressBar(
             value=0, color=GREEN, bgcolor=SURFACE2, border_radius=8, height=8)
-        self.prog_detail = ft.Text("", size=12, color=MUTED)
-        # "Engine in use" badge (Groq cloud / Local CPU): so it is always clear
-        # what is doing the transcribing (local on CPU is slow).
+        self.prog_detail = ft.Text("", size=12, color=MUTED, no_wrap=False)
+        # "Engine in use" badge (Groq cloud / Local CPU).
         self.prog_engine_icon = ft.Icon(ft.Icons.MEMORY, size=16, color=GREEN_HI)
         self.prog_engine_text = ft.Text("", size=12, weight=ft.FontWeight.W_700, color=GREEN_HI)
         self.prog_engine = ft.Container(
@@ -1311,28 +1573,122 @@ class EchoScriptApp:
             content=ft.Row([self.prog_engine_icon, self.prog_engine_text], spacing=8,
                            tight=True))
         self.prog_engine_hint = ft.Text("", size=11, color=WARN, visible=False, no_wrap=False)
-        self.progress = ft.Container(
-            visible=False,
-            bgcolor=SURFACE, border=ft.border.all(1, BORDER),
-            border_radius=16, padding=22,
-            content=ft.Column(
-                spacing=12,
-                controls=[
-                    ft.Row([self.prog_engine], tight=True),
-                    self.prog_engine_hint,
-                    ft.Row([
-                        ft.ProgressRing(width=18, height=18, stroke_width=2.5, color=GREEN),
-                        self.prog_phase,
-                        ft.Container(expand=True),
-                        self.prog_step,
-                        self.prog_pct,
-                    ], vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=12),
-                    self.prog_bar,
-                    self.prog_detail,
-                ],
+
+        # Step checklist + narration (filled per run by _init_progress).
+        self.prog_steps_col = ft.Column(spacing=8, tight=True)
+        self._step_ctrls = {}        # phase -> {"icon": ft.Icon, "label": ft.Text}
+        self.prog_plan = ft.Text("", size=12, color=MUTED, no_wrap=False)
+        self.prog_narration = ft.Text("", size=13, color=TEXT, no_wrap=False,
+                                      weight=ft.FontWeight.W_500)
+        narration_box = ft.Container(
+            border_radius=12, padding=14,
+            bgcolor=ft.Colors.with_opacity(0.05, GREEN),
+            border=ft.border.all(1, ft.Colors.with_opacity(0.18, GREEN)),
+            content=ft.Row(spacing=10, vertical_alignment=ft.CrossAxisAlignment.START,
+                           controls=[
+                               ft.Icon(ft.Icons.AUTO_AWESOME, size=16, color=GREEN_HI),
+                               ft.Column([self.prog_narration, self.prog_plan],
+                                         spacing=4, tight=True, expand=True),
+                           ]))
+
+        self.progress_dialog = ft.AlertDialog(
+            modal=True, bgcolor=SURFACE, shape=ft.RoundedRectangleBorder(radius=16),
+            title=ft.Row([ft.Icon(ft.Icons.GRAPHIC_EQ, color=GREEN_HI, size=22),
+                          self._T("prog_title", size=18, weight=ft.FontWeight.W_600,
+                                  color=TEXT)], spacing=10),
+            content=ft.Container(
+                width=480,
+                content=ft.Column(
+                    spacing=14, tight=True, scroll=ft.ScrollMode.AUTO,
+                    controls=[
+                        ft.Row([self.prog_engine], tight=True),
+                        self.prog_engine_hint,
+                        ft.Row([
+                            ft.ProgressRing(width=18, height=18, stroke_width=2.5, color=GREEN),
+                            self.prog_phase,
+                            ft.Container(expand=True),
+                            self.prog_step,
+                            self.prog_pct,
+                        ], vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=12),
+                        self.prog_bar,
+                        self.prog_detail,
+                        ft.Divider(height=1, color=BORDER),
+                        self._T("prog_steps_title", size=12, color=MUTED,
+                                weight=ft.FontWeight.W_600),
+                        self.prog_steps_col,
+                        narration_box,
+                    ],
+                ),
             ),
         )
-        return self.progress
+
+    def _join_human(self, items: list[str]) -> str:
+        """Join phrases as 'a, b <join> c' using the localized final conjunction."""
+        items = [s for s in items if s]
+        if not items:
+            return ""
+        if len(items) == 1:
+            return items[0]
+        return ", ".join(items[:-1]) + self.t("ov_join") + items[-1]
+
+    def _init_progress(self, options: dict) -> None:
+        """Prepare the progress window for a fresh run: build the step checklist
+        from self._plan and compose the localized 'plan' sentence from the options.
+
+        Called right before the dialog opens so the checklist mirrors exactly the
+        phases (and optional translate/summary steps) that will actually run."""
+        # Reset bar/labels.
+        self.prog_bar.value = 0
+        self.prog_pct.value = ""
+        self.prog_detail.value = ""
+        self.prog_narration.value = self.t("narr_info")
+
+        # Build one checklist row per planned phase.
+        self._step_ctrls = {}
+        rows = []
+        for ph in self._plan:
+            icon = ft.Icon(ft.Icons.RADIO_BUTTON_UNCHECKED, size=18, color=MUTED)
+            label = ft.Text(self.t("phase_" + ph) if ("phase_" + ph) in T[self.lang]
+                            else ph, size=13, color=MUTED)
+            self._step_ctrls[ph] = {"icon": icon, "label": label}
+            rows.append(ft.Row([icon, label], spacing=10,
+                               vertical_alignment=ft.CrossAxisAlignment.CENTER))
+        self.prog_steps_col.controls = rows
+
+        # Compose the 'plan' sentence from the chosen options.
+        parts = [self.t("ov_base")]
+        if options.get("translate"):
+            parts.append(self.t("ov_translate"))
+        if options.get("summarize"):
+            parts.append(self.t("ov_summary"))
+        parts.append(self.t("ov_save"))
+        sentence = self._join_human(parts)
+        sentence = sentence[:1].upper() + sentence[1:] + "."
+        self.prog_plan.value = f"{self.t('prog_plan_label')} {sentence}"
+
+    def _update_steps(self, current_phase: str) -> None:
+        """Refresh the checklist icons/colors: done = ✓, current = ●, pending = ○."""
+        plan = self._plan
+        cur_i = plan.index(current_phase) if current_phase in plan else -1
+        for idx, ph in enumerate(plan):
+            ctrl = self._step_ctrls.get(ph)
+            if not ctrl:
+                continue
+            if cur_i >= 0 and idx < cur_i:
+                ctrl["icon"].name = ft.Icons.CHECK_CIRCLE
+                ctrl["icon"].color = GREEN
+                ctrl["label"].color = MUTED
+                ctrl["label"].weight = ft.FontWeight.W_400
+            elif idx == cur_i:
+                ctrl["icon"].name = ft.Icons.RADIO_BUTTON_CHECKED
+                ctrl["icon"].color = GREEN_HI
+                ctrl["label"].color = TEXT
+                ctrl["label"].weight = ft.FontWeight.W_700
+            else:
+                ctrl["icon"].name = ft.Icons.RADIO_BUTTON_UNCHECKED
+                ctrl["icon"].color = MUTED
+                ctrl["label"].color = MUTED
+                ctrl["label"].weight = ft.FontWeight.W_400
 
     def _set_engine_badge(self) -> None:
         """Update the engine badge to reflect the chosen backend.
@@ -1777,12 +2133,16 @@ class EchoScriptApp:
             "source_kind": self.source,
             # Folder names follow the interface language (en -> English folders).
             "ui_lang": self.lang,
+            # Extra outputs (off by default): Italian translation + per-section summary.
+            "translate": self.sw_translate.value,
+            "summarize": self.sw_summary.value,
         }
-        self._plan = self._phase_plan(self.backend, self.source)
+        self._plan = self._phase_plan(self.backend, self.source, options)
         self._last_g = 0.0
         self._hide_error()
         self._set_busy(True)
         self._set_engine_badge()
+        self._init_progress(options)
         self._set_phase("info", None, None, "")
         self._show_progress(True)
         self.page.update()
@@ -1867,16 +2227,21 @@ class EchoScriptApp:
 
         options = {
             "backend": "local", "model": self.model_dd.value or "small",
-            "api_key": "", "export": True, "source_kind": self.source,
+            "api_key": self.loaded_api_key or "", "export": True,
+            "source_kind": self.source,
             # Folder names follow the interface language (en -> English folders).
             "ui_lang": self.lang,
+            # Keep the extra-output choices when finishing locally after a rate limit.
+            "translate": self.sw_translate.value,
+            "summarize": self.sw_summary.value,
         }
         # Local plan: no Groq "prepare" phase (info -> [download] -> transcribe -> export).
-        self._plan = self._phase_plan("local", self.source)
+        self._plan = self._phase_plan("local", self.source, options)
         self._last_g = 0.0
         self._hide_error()
         self._set_busy(True)
         self._set_engine_badge()
+        self._init_progress(options)
         self._set_phase("info", None, None, "")
         self._show_progress(True)
         self.page.update()
@@ -1913,11 +2278,12 @@ class EchoScriptApp:
         self.page.update()
 
     @staticmethod
-    def _phase_plan(backend: str, source_kind: str) -> list:
+    def _phase_plan(backend: str, source_kind: str, options: dict | None = None) -> list:
         """Ordered sequence of run phases, used to number 'Phase i/n'.
 
         Context-dependent: local files skip the download, only Groq does the
-        splitting ('prepare'). A FIXED plan is what lets the global progress bar
+        splitting ('prepare'); the optional translation/summary phases are added
+        only when requested. A FIXED plan is what lets the global progress bar
         advance monotonically (see _set_phase)."""
         plan = ["info"]
         if source_kind != "local":
@@ -1926,6 +2292,12 @@ class EchoScriptApp:
             plan.append("prepare")
         plan.append("transcribe")
         plan.append("export")
+        # The engine runs translation/summary inside save_results, AFTER writing
+        # the transcription, so they come last in the plan.
+        if options and options.get("translate"):
+            plan.append("translate")
+        if options and options.get("summarize"):
+            plan.append("summarize")
         return plan
 
     def _set_phase(self, phase, current, total, detail) -> None:
@@ -1939,6 +2311,13 @@ class EchoScriptApp:
         self.prog_phase.value = label
 
         self.prog_detail.value = detail or ""
+
+        # Live narration + checklist (only when a plan/dialog is active).
+        narr_key = "narr_" + phase
+        if narr_key in T[self.lang]:
+            self.prog_narration.value = self.t(narr_key)
+        if getattr(self, "_step_ctrls", None):
+            self._update_steps(phase)
 
         # REAL global progress: each phase occupies a slice [i/n, (i+1)/n] of the
         # total; within the phase we interpolate with the actual progress (bytes,
@@ -2046,6 +2425,28 @@ class EchoScriptApp:
                     ], spacing=8)))
         body.append(ft.Column(file_rows, spacing=4, tight=True))
 
+        # --- Groq credits used by this run (only for Groq cloud transcriptions) ---
+        credits = res.get("credits")
+        if credits:
+            used = credits.get("audio_seconds_used") or 0
+            # Crediti audio residui oggi, se Groq li ha riportati negli header.
+            remaining_audio = None
+            for it in (credits.get("limits") or []):
+                if it.get("kind") == "audio_seconds" and it.get("remaining") is not None:
+                    remaining_audio = it["remaining"]
+                    break
+            credit_chips = [chip(ft.Icons.GRAPHIC_EQ, self.t("res_credits_used"),
+                                 tx._format_timestamp(used))]
+            if remaining_audio is not None:
+                credit_chips.append(chip(ft.Icons.SAVINGS_OUTLINED,
+                                         self.t("res_credits_remaining_audio"),
+                                         tx._format_timestamp(remaining_audio)))
+            body.append(ft.Divider(height=1, color=BORDER))
+            body.append(ft.Row([ft.Icon(ft.Icons.SAVINGS_OUTLINED, size=15, color=GREEN_HI),
+                                 ft.Text(self.t("res_credits"), size=13,
+                                         weight=ft.FontWeight.W_600, color=GREEN_HI)], spacing=8))
+            body.append(ft.Row(wrap=True, spacing=20, run_spacing=8, controls=credit_chips))
+
         open_btn = ft.OutlinedButton(
             self.t("btn_open_folder"), icon=ft.Icons.FOLDER_OPEN,
             on_click=lambda e: self._open_folder(),
@@ -2082,9 +2483,14 @@ class EchoScriptApp:
 
     # ---------------------------------------------------------------- UTILITIES
     def _show_progress(self, on: bool) -> None:
-        """Show the progress bar in place of the button (same layout slot)."""
-        self.progress.visible = on
-        self.cta.visible = not on
+        """Open or close the dedicated progress window (modal dialog).
+
+        The CTA button stays in place (shown busy) behind the modal; opening a
+        separate window keeps the run's status front-and-center and uncluttered."""
+        if on:
+            self.page.open(self.progress_dialog)
+        else:
+            self._close_dialog(self.progress_dialog)
 
     def _set_busy(self, busy: bool) -> None:
         """Set the busy flag and reflect it on the CTA (label, icon, opacity).

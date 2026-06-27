@@ -128,8 +128,9 @@ La **GUI** aggiunge alcune comodità:
 - 🌍 **Lingua dell'interfaccia** italiano/inglese, con selettore a bandiere
 - ▶️ **Anteprima del video**: caricando un URL si apre una **finestra di conferma** con copertina e dati (canale, views, mi piace, iscritti, categoria, lingua)
 - 🏷️ **Badge del motore** durante la trascrizione (Groq cloud o Locale CPU), così sai sempre con cosa stai trascrivendo
-- 📊 **Barra di avanzamento reale** con il numero di fase (es. "Fase 2/5")
-- 🌐 **Traduzione proposta in automatico** solo se l'audio non è già in italiano
+- 📊 **Finestra di avanzamento dedicata**: barra reale, checklist dei passaggi e una frase su cosa sta avvenendo
+- 🌐 **Traduzione in italiano** e 🧠 **riassunto** attivabili con due interruttori (card "Output aggiuntivi")
+- 💰 **Crediti API Groq**: un pulsante mostra i **crediti residui** (e quando si azzerano); a fine lavoro vedi anche quelli **usati**
 - 📄 **PDF generato sempre** in automatico
 
 > Entrambe scrivono gli stessi file in `results/<nome>/`. Scegli quella che preferisci: il risultato è identico.
@@ -153,7 +154,9 @@ Questa sezione è pensata per chi **non è tecnico**: spieghiamo ogni schermata,
 ### Passo 1 — "Come vuoi trascrivere?"
 Due riquadri da scegliere (si illuminano di verde quando selezionati):
 - 🔒 **Locale**: trascrive **sul tuo computer**, **senza internet** e senza inviare nulla. Sotto puoi scegliere il **modello** (più accurato = più lento). Consigliato se hai una GPU; su CPU è più lento.
-- ⚡ **Groq (cloud)**: **velocissimo**, ma l'audio viene inviato ai server Groq. Richiede una **chiave gratuita**: clicca **"Carica chiave da file .txt"** e seleziona il file con la tua chiave. Il pulsante **"Controlla limiti API"** mostra quanti **crediti gratuiti** ti restano oggi; **"Ottieni una chiave →"** apre il sito dove crearla.
+- ⚡ **Groq (cloud)**: **velocissimo**, ma l'audio viene inviato ai server Groq. Richiede una **chiave gratuita**: clicca **"Carica chiave da file .txt"** e seleziona il file con la tua chiave. Il pulsante **"Mostra crediti API Groq"** apre una finestra con l'elenco dei **crediti residui** per la trascrizione (secondi audio, richieste) e **a che ora si azzerano**; **"Ottieni una chiave →"** apre il sito dove crearla.
+
+> A fine trascrizione, nella finestra **"Completato!"** compaiono anche i **crediti Groq usati** (audio trascritto) e quelli **residui per oggi**.
 
 ### Passo 2 — "Cosa vuoi trascrivere?"
 - 📺 **YouTube**: incolla il **link** del video nel campo e clicca **"Carica info"**.
@@ -164,15 +167,22 @@ Dopo **"Carica info"** si apre una finestra con la **copertina** del video e i s
 - **Conferma** → accetti il video (sotto compare *"✓ Video confermato"*).
 - **Annulla** → lo scarti e puoi incollarne un altro.
 
+### Passo 3 — "Output aggiuntivi" (opzionale)
+Sotto i due riquadri c'è una card con **due interruttori**, entrambi **spenti** di default (così una trascrizione semplice resta tale):
+- 🌐 **Traduci in italiano**: se l'audio **non è già in italiano**, oltre alla trascrizione crea anche una **traduzione** (Google Translate, gratis, nessuna chiave) nella sottocartella `traduzioni/`.
+- 🧠 **Crea riassunto**: genera un **riassunto pulito per sezione** del testo italiano in `riassunti/`. Usa **Groq** se hai caricato la chiave, altrimenti **Ollama** in locale (se installato). Se nessuno dei due è disponibile, la trascrizione viene comunque salvata e compare un avviso.
+
 ### Il pulsante "Trascrivi"
 È il grande pulsante verde in basso. Si **attiva** solo quando è tutto pronto. Se lo premi prima, compare una **finestra d'avviso** che ti **elenca cosa manca**, ad esempio:
 - *caricare la chiave API Groq* (solo se usi Groq);
 - *caricare e confermare il video YouTube*, oppure *scegliere un file audio*.
 
 ### Durante la trascrizione
-Compare una **barra di avanzamento reale** (non un'animazione finta):
+Si apre una **finestra dedicata** con l'avanzamento (niente animazioni finte):
 - in alto un **badge** dice con cosa stai trascrivendo: **Groq (cloud)** (verde) o **Locale CPU** (arancione, perché può richiedere minuti);
-- a destra il **numero di fase** (es. *"Fase 2/5"*) e la **percentuale** complessiva.
+- una **barra reale** con il **numero di fase** (es. *"Fase 2/5"*) e la **percentuale** complessiva;
+- un **elenco dei passaggi** che si spunta man mano (Trascrizione → eventuale Traduzione → eventuale Riassunto → Salvataggio): rispecchia esattamente le opzioni che hai scelto;
+- una **breve frase** che racconta cosa sta avvenendo in quel momento e il **piano completo** del lavoro.
 
 ### A fine trascrizione
 Il **PDF viene creato sempre**, in automatico, e i file vengono salvati senza ulteriori domande.
@@ -499,9 +509,9 @@ Il **PDF viene generato sempre, in automatico**. EchoScript crea:
 
 ## 🌐 Traduzione automatica
 
-> ℹ️ Al momento traduzione e riassunto girano nella **CLI** (`transcriber.py`). L'integrazione nella GUI è in arrivo.
+> ℹ️ Traduzione e riassunto sono disponibili sia nella **CLI** (`transcriber.py`) sia nella **GUI** (gli interruttori della card "Output aggiuntivi"), con lo stesso motore condiviso.
 
-Dopo la trascrizione, se l'audio **non è già in italiano**, EchoScript lo **traduce in italiano** in automatico (se è già in italiano, salta il passaggio: tradurre `it → it` sarebbe inutile).
+Dopo la trascrizione, se l'audio **non è già in italiano**, EchoScript lo **traduce in italiano** (in automatico nella CLI; attivando l'interruttore nella GUI) (se è già in italiano, salta il passaggio: tradurre `it → it` sarebbe inutile).
 
 - **Gratis e senza chiavi.** La traduzione usa **Google Translate** tramite la libreria `deep-translator`: nessuna API key, **nessun credito Groq speso**. La trascrizione resta intatta; la traduzione finisce in `traduzioni/` come file separati `.md`/`.txt`/`.pdf`, **senza minutaggi** (testo continuo, più leggibile).
 
