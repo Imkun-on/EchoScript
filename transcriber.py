@@ -1686,10 +1686,12 @@ def build_pdf(title: str, meta: dict, sections: list[dict], out_path: str,
     pdf.output(out_path)
 
 
-# === TRADUZIONE (gratuita, via Google Translate) ============================
+# === TRADUZIONE (Google Translate in cloud · Ollama in locale) ==============
 # Riusa una trascrizione GIÀ salvata e ne produce una versione tradotta, senza
-# ri-trascrivere (quindi senza spendere crediti Groq) e senza alcuna API key:
-# si appoggia a deep_translator.GoogleTranslator (endpoint pubblico gratuito).
+# ri-trascrivere (quindi senza spendere crediti di trascrizione). Due motori,
+# scelti come per il riassunto: con una chiave Groq si usa Google Translate
+# (deep_translator, endpoint gratuito, nessuna API key dedicata); senza chiave,
+# in locale, si traduce con Ollama per restare 100% offline.
 
 # Google Translate accetta ~5000 caratteri per richiesta: spezziamo il testo in
 # blocchi più piccoli sui confini di frase, per stare comodi sotto il limite.
@@ -2568,8 +2570,10 @@ def run() -> None:
     # Il PDF viene SEMPRE generato (come nella GUI): niente più domanda.
     do_export = True
     console.print(f"  {SYM_OK} Il PDF verrà generato automaticamente.")
+    _tr_engine = (f"Google Translate" if client is not None
+                  else f"Ollama in locale, offline")
     console.print(f"  {SYM_OK} A trascrizione completata, la traduzione in italiano "
-                  "verrà generata in automatico.")
+                  f"verrà generata in automatico ({_tr_engine}).")
 
     out_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
 
