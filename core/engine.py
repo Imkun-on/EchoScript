@@ -714,13 +714,15 @@ def continue_local_from_groq(source: str, options: dict, on_progress=_noop):
 
 def _translate_outputs(meta: dict, sections: list[dict], options: dict,
                        video_dir: str, created: list[str], warnings: list[str],
-                       on_progress=_noop) -> list[dict] | None:
+                       on_progress=_noop, local: bool = False) -> list[dict] | None:
     """Translate the transcription sections to Italian and write md/txt/json(+pdf).
 
-    Returns the translated sections (so the summary can reuse them) or None if
-    translation was skipped/failed. Writes under <video_dir>/<traduzioni>/ with
-    the folder name following the UI language. A None return never aborts the
-    run: a clear warning is appended instead."""
+    With 'local=True' the translation runs offline via Ollama (no Google
+    Translate); otherwise it uses Google Translate. Returns the translated
+    sections (so the summary can reuse them) or None if translation was
+    skipped/failed. Writes under <video_dir>/<traduzioni>/ with the folder name
+    following the UI language. A None return never aborts the run: a clear
+    warning is appended instead."""
     target = "it"
     safe_title = tx._safe_filename(meta["title"])
     trad_dir = os.path.join(video_dir, tx.transl_subdir(options.get("ui_lang", "it")))
@@ -731,17 +733,17 @@ def _translate_outputs(meta: dict, sections: list[dict], options: dict,
     on_progress("translate", 0, n, f"Traduco in {lang_label}")
     try:
         translated = tx.translate_sections(
-            sections, target,
+            sections, target, local=local,
             on_progress=lambda i, tot: on_progress("translate", i, tot,
                                                    f"Sezione {i}/{tot} tradotta"))
-    except RuntimeError as e:        # deep_translator non installato
+    except RuntimeError as e:        # deep_translator non installato o Ollama giù
         warnings.append(f"Traduzione non disponibile: {e}")
         return None
     except Exception as e:
         warnings.append(f"Traduzione fallita: {e}")
         return None
 
-    engine_label = f"Traduzione automatica (Google Translate) → {lang_label}"
+    engine_label = tx._translate_engine_label(target, local)
     # La versione tradotta è testo continuo, senza timestamp (più leggibile).
     _write(f"{base}.md", tx.build_md(meta["title"], meta, engine_label, translated, with_timestamps=False), created, video_dir)
     _write(f"{base}.txt", tx.build_txt(meta["title"], meta, translated), created, video_dir)
@@ -822,12 +824,12 @@ def _summarize_outputs(meta: dict, sections: list[dict], options: dict,
 
     # Il riassunto è testo pulito: niente timestamp.
     _write(f"{base}.md", tx.build_md(meta["title"], meta, engine_label, summarized, with_timestamps=False), created, video_dir)
-    _write(f"{base}.txt", tx.build_txt(meta["title"], meta, summarized), created, video_dir)
+    _write(f"{base}.txt", tx.build_txt(meta["title"], meta, summarized, markdown=True), created, video_dir)
     if options.get("export"):
         for attempt in (1, 2):
             try:
                 _ensure_dir(f"{base}.pdf")
-                tx.build_pdf(meta["title"], meta, summarized, f"{base}.pdf", with_timestamps=False)
+                tx.build_pdf(meta["title"], meta, summarized, f"{base}.pdf", with_timestamps=False, markdown=True)
                 created.append(os.path.relpath(f"{base}.pdf", video_dir).replace("\\", "/"))
                 break
             except OSError:
@@ -886,16 +888,22 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
     # produced, otherwise the original (already Italian, or accepted as-is).
     translated_sections = None
     audio_lang = meta.get("detected_language")
+    # Un solo client chat per tutto il post-processing: se è None siamo offline,
+    # quindi anche la TRADUZIONE va in locale (Ollama), non solo il riassunto.
+    # Risolto solo se serve (evita una validazione Groq di rete a vuoto).
+    chat_client = (_resolve_summary_client(options, client)
+                   if options.get("translate") or options.get("summarize") else None)
     if options.get("translate"):
         if tx._is_italian(audio_lang):
             warnings.append("Audio già in italiano: traduzione non necessaria.")
         else:
             translated_sections = _translate_outputs(
-                meta, sections, options, video_dir, created, warnings, on_progress)
+                meta, sections, options, video_dir, created, warnings,
+                on_progress, local=chat_client is None)
     if options.get("summarize"):
         _summarize_outputs(
             meta, translated_sections or sections, options, video_dir,
-            created, warnings, client, on_progress)
+            created, warnings, chat_client, on_progress)
 
     n_words = sum(len(s["text"].split()) for s in segments)
     # Crediti Groq: secondi audio consumati da QUESTA trascrizione (≈ durata) e i

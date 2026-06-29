@@ -169,7 +169,7 @@ Dopo **"Carica info"** si apre una finestra con la **copertina** del video e i s
 
 ### Passo 3 — "Output aggiuntivi" (opzionale)
 Sotto i due riquadri c'è una card con **due interruttori**, entrambi **spenti** di default (così una trascrizione semplice resta tale):
-- 🌐 **Traduci in italiano**: se l'audio **non è già in italiano**, oltre alla trascrizione crea anche una **traduzione** (Google Translate, gratis, nessuna chiave) nella sottocartella `traduzioni/`.
+- 🌐 **Traduci in italiano**: se l'audio **non è già in italiano**, oltre alla trascrizione crea anche una **traduzione** nella sottocartella `traduzioni/` (Google Translate se hai la chiave Groq, altrimenti **Ollama** in locale e 100% offline).
 - 🧠 **Crea riassunto**: genera un **riassunto pulito per sezione** del testo italiano in `riassunti/`. Usa **Groq** se hai caricato la chiave, altrimenti **Ollama** in locale (se installato). Se nessuno dei due è disponibile, la trascrizione viene comunque salvata e compare un avviso.
 
 ### Il pulsante "Trascrivi"
@@ -232,7 +232,7 @@ Se scegli **Locale**, un secondo pannello ti fa scegliere il modello ogni volta:
 - ⏱️ **Minutaggi e sezioni**: usa i **capitoli** di YouTube come sezioni del documento
 - 💾 **3 formati base** sempre generati: `.md` (umano), `.txt` (per altri LLM), `.json` (per RAG)
 - 📄 **PDF generato sempre** in automatico, diviso per capitoli
-- 🌐 **Traduzione automatica** in italiano (se l'audio non è già in italiano), gratis via Google Translate
+- 🌐 **Traduzione automatica** in italiano (se l'audio non è già in italiano): Google Translate in cloud · Ollama in locale (offline)
 - 🧠 **Riassunto automatico** del testo, **per sezione**: pulisce intercalari, ripetizioni e autocorrezioni (Groq in cloud · Ollama in locale)
 - 🗂️ **Output organizzato** in `results/<nome video>/` nelle sottocartelle `trascrizioni/`, `traduzioni/`, `riassunti/`
 - 🎨 **Interfacce curate**: GUI scura con sfondo animato, oppure CLI Rich con barre e pannelli
@@ -338,7 +338,7 @@ La chiave serve **solo** se usi il backend **Groq** (cloud). È **gratuita**.
 | `groq` | Client ufficiale dell'API Groq (Whisper) | SDK ufficiale, semplice e veloce |
 | `rich` | Interfaccia da terminale: pannelli, tabelle, barre, colori | Trasforma la CLI in un'esperienza curata (`Panel`, `Progress`, `Columns`) |
 | `faster-whisper` | *(opzionale)* Trascrizione **locale** su CPU | Implementazione ottimizzata di Whisper (CTranslate2), ottima su CPU con `int8` |
-| `deep-translator` | **Traduzione** in italiano | Usa Google Translate (endpoint gratuito): nessuna chiave, nessun credito |
+| `deep-translator` | **Traduzione** in italiano (cloud) | Usa Google Translate (endpoint gratuito): nessuna chiave, nessun credito. In locale senza chiave la traduzione passa invece a **Ollama** (offline) |
 | `fpdf2` | *(opzionale)* Esportazione in **PDF** | Pure-python, **niente LaTeX di sistema**; supporta font Unicode |
 | `flet` | *(opzionale)* **GUI desktop** (`gui/main.py`) | Interfaccia grafica nativa moderna in Python; la CLI funziona senza |
 
@@ -513,7 +513,8 @@ Il **PDF viene generato sempre, in automatico**. EchoScript crea:
 
 Dopo la trascrizione, se l'audio **non è già in italiano**, EchoScript lo **traduce in italiano** (in automatico nella CLI; attivando l'interruttore nella GUI) (se è già in italiano, salta il passaggio: tradurre `it → it` sarebbe inutile).
 
-- **Gratis e senza chiavi.** La traduzione usa **Google Translate** tramite la libreria `deep-translator`: nessuna API key, **nessun credito Groq speso**. La trascrizione resta intatta; la traduzione finisce in `traduzioni/` come file separati `.md`/`.txt`/`.pdf`, **senza minutaggi** (testo continuo, più leggibile).
+- **Due motori, scelti in automatico.** Se hai una **chiave Groq** la traduzione usa **Google Translate** (libreria `deep-translator`): gratis, nessuna API key dedicata, **nessun credito Groq speso**. **Senza chiave**, in locale, traduce con **Ollama sul tuo PC** così resta **100% offline** (serve Ollama avviato col modello scaricato, lo stesso del riassunto). La scelta segue quella del riassunto: niente chiave → tutto in locale.
+- La trascrizione resta intatta; la traduzione finisce in `traduzioni/` come file separati `.md`/`.txt`/`.pdf`, **senza minutaggi** (testo continuo, più leggibile).
 
 ### Come viene risolto il problema dei video lunghi (a blocchi)
 
@@ -530,6 +531,8 @@ Così un testo di qualsiasi lunghezza passa senza errori. Se una singola frase f
 ## 🧠 Riassunto automatico
 
 Dopo la traduzione (o, se l'audio era già in italiano, sulla **trascrizione originale**), EchoScript genera un **riassunto pulito** del testo, salvato in `riassunti/` nei soliti formati `.md`/`.txt`/`.pdf`.
+
+> ✨ **Parole chiave in grassetto.** Il riassunto evidenzia in **grassetto** i concetti centrali, i termini tecnici, i nomi e le cifre rilevanti (con parsimonia, mai intere frasi), per aiutare la lettura. Il grassetto si vede in `.md` e nel **PDF**; nel `.txt` (pensato per altri strumenti/LLM) i marcatori vengono rimossi per restare testo piano.
 
 ### Perché serve anche un riassunto
 
@@ -616,13 +619,16 @@ il file `.env`), senza toccare il codice. Ogni valore ha un default sensato:
 | `ECHOSCRIPT_COMPUTE_TYPE` | *(auto)* | Precisione locale: vuoto = `float16` su GPU, `int8` su CPU |
 | `ECHOSCRIPT_GROQ_SUMMARY_MODEL` | `llama-3.3-70b-versatile` | Modello di **chat Groq** per il riassunto (cloud) |
 | `ECHOSCRIPT_OLLAMA_MODEL` | `qwen2.5:7b` | Modello **Ollama** per il riassunto in locale |
+| `ECHOSCRIPT_OLLAMA_TRANSLATE_MODEL` | *(= `OLLAMA_MODEL`)* | Modello **Ollama** per la **traduzione** in locale (di default lo stesso del riassunto) |
 | `ECHOSCRIPT_OLLAMA_HOST` | `http://localhost:11434` | Indirizzo del server Ollama |
 | `ECHOSCRIPT_OLLAMA_NUM_CTX` | `8192` | Finestra di contesto Ollama (evita il troncamento sui blocchi lunghi) |
 | `ECHOSCRIPT_SUMMARY_MAX_CHARS` | `12000` | Soglia oltre cui una sezione viene riassunta a blocchi (map-reduce) |
 
-> **Riassunto in locale.** Serve [Ollama](https://ollama.com) installato e avviato,
-> con il modello scaricato: `ollama pull qwen2.5:7b`. Con il backend **Groq** il
-> riassunto usa invece la chiave che hai già, senza installare altro.
+> **Traduzione e riassunto in locale.** Senza chiave Groq, **sia la traduzione sia
+> il riassunto** girano in locale: serve [Ollama](https://ollama.com) installato e
+> avviato, con il modello scaricato (`ollama pull qwen2.5:7b`). Con il backend
+> **Groq** usano invece la chiave che hai già (Google Translate + Groq), senza
+> installare altro.
 
 > **GPU automatica.** Il backend locale usa la GPU (CUDA) se disponibile,
 > altrimenti la CPU. Installa PyTorch con CUDA per l'accelerazione (vedi
@@ -634,8 +640,10 @@ il file `.env`), senza toccare il codice. Ogni valore ha un default sensato:
 
 - **Backend locale (faster-whisper)**: l'**audio non lascia mai il tuo PC**. (Al primo uso scarica solo i *pesi* del modello da HuggingFace.) Massima privacy.
 - **Backend Groq**: l'audio viene **caricato sui server Groq** per la trascrizione. Ottimo per video pubblici, sconsigliato per audio privati/sensibili.
-- **Traduzione**: usa **Google Translate**, quindi il testo della trascrizione viene inviato ai server di Google.
+- **Traduzione**: con una **chiave Groq** usa **Google Translate** (il testo va ai server di Google); **senza chiave**, in locale, traduce con **Ollama sul tuo PC** → **100% offline**.
 - **Riassunto**: con il backend **Groq** il testo va ai server Groq; con il backend **locale** usa **Ollama sul tuo PC**, quindi **resta 100% offline** (niente lascia il computer).
+
+> 🔒 **Offline totale.** Con il **backend locale e senza chiave Groq** l'intera pipeline — trascrizione, traduzione e riassunto — gira **sul tuo PC**: nessun dato lascia il computer. Servono [Ollama](https://ollama.com) installato e avviato e il modello scaricato (`ollama pull qwen2.5:7b`), usati sia per la traduzione sia per il riassunto.
 
 La **API key** non è mai scritta nel codice: si legge da `.env` o da variabile d'ambiente, ed è esclusa dal versionamento tramite `.gitignore`.
 

@@ -216,6 +216,9 @@ LOCAL_MODELS = {
 #     modello scaricato (es. `ollama pull llama3.1:8b`).
 GROQ_SUMMARY_MODEL = _env_str("ECHOSCRIPT_GROQ_SUMMARY_MODEL", "llama-3.3-70b-versatile")
 OLLAMA_MODEL = _env_str("ECHOSCRIPT_OLLAMA_MODEL", "qwen2.5:7b")
+# Modello Ollama per la TRADUZIONE locale (vedi più sotto). Di default riusa lo
+# stesso del riassunto, così basta scaricarne uno solo per restare 100% offline.
+OLLAMA_TRANSLATE_MODEL = _env_str("ECHOSCRIPT_OLLAMA_TRANSLATE_MODEL", OLLAMA_MODEL)
 OLLAMA_HOST = _env_str("ECHOSCRIPT_OLLAMA_HOST", "http://localhost:11434")
 # Finestra di contesto per Ollama. ATTENZIONE: di default Ollama usa solo 2048
 # token e TRONCA in silenzio gli input più lunghi (rovinando i riassunti dei
@@ -1556,8 +1559,22 @@ def build_md(title: str, meta: dict, engine_label: str, sections: list[dict],
     return "\n".join(lines)
 
 
-def build_txt(title: str, meta: dict, sections: list[dict]) -> str:
-    """Clean TXT version (for other LLMs): no timings, sections as [Title]."""
+def _strip_md_bold(text: str) -> str:
+    """Toglie i marcatori **grassetto** del Markdown, lasciando il testo nudo.
+
+    Serve al .txt del riassunto: il grassetto è utile a video/PDF, ma nel testo
+    semplice gli asterischi sarebbero solo rumore."""
+    return re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+
+
+def build_txt(title: str, meta: dict, sections: list[dict],
+              markdown: bool = False) -> str:
+    """Clean TXT version (for other LLMs): no timings, sections as [Title].
+
+    Con 'markdown=True' (riassunto) il testo può contenere **grassetto**: viene
+    ripulito dai marcatori per restare testo piano."""
+    def _plain(s: str) -> str:
+        return _strip_md_bold(s) if (markdown and s) else s
     if _is_local(meta):
         lines = [
             title,
@@ -1573,9 +1590,9 @@ def build_txt(title: str, meta: dict, sections: list[dict]) -> str:
         ]
     for sec in sections:
         if sec["title"]:
-            lines.append(f"[{sec['title']}]")
+            lines.append(f"[{_plain(sec['title'])}]")
         if sec["text"]:
-            lines.append(sec["text"])
+            lines.append(_plain(sec["text"]))
         lines.append("")
     return "\n".join(lines)
 
@@ -1617,12 +1634,13 @@ def _section_heading(sec: dict, with_timestamps: bool) -> str:
 
 
 def build_pdf(title: str, meta: dict, sections: list[dict], out_path: str,
-              with_timestamps: bool = True) -> None:
+              with_timestamps: bool = True, markdown: bool = False) -> None:
     """Create a readable PDF, divided by chapters, with fpdf2 (no LaTeX).
 
     Uses Windows' Arial font (TrueType) to support accents and Unicode
     characters. Large title, metadata in italics, section titles in bold and the
-    body text in paragraphs."""
+    body text in paragraphs. Con 'markdown=True' (riassunto) il corpo interpreta
+    il **grassetto** Markdown, così le parole chiave risaltano anche nel PDF."""
     from fpdf import FPDF                  # lazy import: needed only when exporting
     from fpdf.enums import XPos, YPos       # to bring the cursor back to the left after each cell
 
@@ -1638,8 +1656,8 @@ def build_pdf(title: str, meta: dict, sections: list[dict], out_path: str,
 
     # Helper: writes a full-width paragraph and brings the cursor back to the left
     # margin (otherwise the next multi_cell would have no space).
-    def cell(h: float, txt: str) -> None:
-        pdf.multi_cell(0, h, txt, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    def cell(h: float, txt: str, md: bool = False) -> None:
+        pdf.multi_cell(0, h, txt, new_x=XPos.LMARGIN, new_y=YPos.NEXT, markdown=md)
 
     # Title
     pdf.set_font("Doc", "B", 18)
@@ -1662,7 +1680,7 @@ def build_pdf(title: str, meta: dict, sections: list[dict], out_path: str,
         pdf.ln(1)
         if sec["text"]:
             pdf.set_font("Doc", "", 11)
-            cell(6, sec["text"])
+            cell(6, sec["text"], md=markdown)
         pdf.ln(3)
 
     pdf.output(out_path)
@@ -1678,16 +1696,61 @@ def build_pdf(title: str, meta: dict, sections: list[dict], out_path: str,
 _TRANSLATE_MAX_CHARS = 4500
 
 
-def _make_translator(target: str = "it"):
-    """Crea un traduttore Google (sorgente autorilevata) verso 'target'.
+def _translate_ollama(text: str, target: str) -> str:
+    """Traduce un testo verso 'target' con un modello locale via Ollama (HTTP).
 
-    Solleva un errore chiaro se deep_translator non è installato."""
+    Usato in modalità locale per restare 100% offline (nessun passaggio da
+    Google Translate). temperature=0 per una resa fedele e deterministica."""
+    import urllib.request
+    lang = _lang_name(target) or target
+    system = (
+        f"Sei un traduttore professionista. Traduci il testo dell'utente in "
+        f"{lang} in modo fedele e naturale. Conserva integralmente il "
+        f"significato, i nomi propri, le cifre e la punteggiatura. Non "
+        f"aggiungere e non omettere nulla. Rispondi esclusivamente con la "
+        f"traduzione, senza preamboli, note, virgolette o commenti.")
+    payload = {
+        "model": OLLAMA_TRANSLATE_MODEL,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": text},
+        ],
+        "stream": False,
+        "options": {"temperature": 0.0, "num_ctx": OLLAMA_NUM_CTX},
+    }
+    req = urllib.request.Request(
+        OLLAMA_HOST + "/api/chat",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=600) as r:
+        data = json.loads(r.read().decode("utf-8"))
+    return (data.get("message", {}).get("content") or "").strip()
+
+
+def _translate_engine_label(target: str = "it", local: bool = False) -> str:
+    """Etichetta del motore di traduzione, mostrata in testa ai file salvati."""
+    lang = _lang_name(target) or target
+    if local:
+        return f"Traduzione automatica (locale · Ollama {OLLAMA_TRANSLATE_MODEL}) → {lang}"
+    return f"Traduzione automatica (Google Translate) → {lang}"
+
+
+def _make_translator(target: str = "it", local: bool = False):
+    """Sceglie il motore di traduzione e restituisce una funzione (testo -> testo).
+
+    In modalità locale traduce con Ollama (100% offline); altrimenti usa Google
+    Translate (cloud, gratuito, sorgente autorilevata). Solleva un RuntimeError
+    chiaro se il motore scelto non è disponibile (Ollama non raggiungibile o
+    deep_translator non installato)."""
+    if local:
+        _check_ollama()
+        return lambda text: _translate_ollama(text, target)
     try:
         from deep_translator import GoogleTranslator
     except ImportError:
         raise RuntimeError("deep_translator non installato. Esegui:  "
                            "pip install deep-translator")
-    return GoogleTranslator(source="auto", target=target)
+    return GoogleTranslator(source="auto", target=target).translate
 
 
 def _split_for_translation(text: str) -> list[str]:
@@ -1718,12 +1781,15 @@ def _split_for_translation(text: str) -> list[str]:
     return chunks
 
 
-def _translate_text(translator, text: str) -> str:
-    """Traduce un testo (anche lungo) unendo i blocchi tradotti."""
+def _translate_text(translate_fn, text: str) -> str:
+    """Traduce un testo (anche lungo) unendo i blocchi tradotti.
+
+    'translate_fn' è la funzione restituita da _make_translator (testo -> testo):
+    Google Translate (cloud) oppure Ollama (locale)."""
     out = []
     for chunk in _split_for_translation(text):
         try:
-            out.append(translator.translate(chunk) or "")
+            out.append(translate_fn(chunk) or "")
         except Exception:
             # Un blocco fallito non deve far saltare l'intera traduzione:
             # si tiene l'originale come fallback per quel pezzo.
@@ -1732,19 +1798,20 @@ def _translate_text(translator, text: str) -> str:
 
 
 def translate_sections(sections: list[dict], target: str = "it",
-                       on_progress=None) -> list[dict]:
+                       local: bool = False, on_progress=None) -> list[dict]:
     """Traduce titolo e testo di ogni sezione verso 'target' (default italiano).
 
-    'on_progress(i, n)' (opzionale) viene chiamato dopo ogni sezione tradotta,
-    per aggiornare una barra/spinner. Restituisce nuove sezioni (non muta quelle
-    in ingresso)."""
-    translator = _make_translator(target)
+    Con 'local=True' la traduzione avviene in locale via Ollama (100% offline);
+    altrimenti via Google Translate. 'on_progress(i, n)' (opzionale) viene
+    chiamato dopo ogni sezione tradotta, per aggiornare una barra/spinner.
+    Restituisce nuove sezioni (non muta quelle in ingresso)."""
+    translate_fn = _make_translator(target, local)
     out: list[dict] = []
     n = len(sections)
     for i, sec in enumerate(sections, 1):
         title = sec.get("title")
-        new_title = (_translate_text(translator, title) if title else title)
-        new_text = _translate_text(translator, sec.get("text", ""))
+        new_title = (_translate_text(translate_fn, title) if title else title)
+        new_text = _translate_text(translate_fn, sec.get("text", ""))
         out.append({"start": sec.get("start"), "title": new_title, "text": new_text})
         if on_progress:
             on_progress(i, n)
@@ -2048,11 +2115,13 @@ def _save_outputs(meta: dict, segments: list[dict], engine_label: str,
 
 
 def translate_existing(out_root: str, title: str, target: str = "it",
-                       do_export: bool = True, ui_lang: str = "it"):
+                       do_export: bool = True, ui_lang: str = "it",
+                       local: bool = False):
     """Traduce una trascrizione GIÀ salvata (niente ri-trascrizione, nessun credito).
 
     Rilegge i file da out_root/<title>/, traduce le sezioni verso 'target'
-    (default italiano) con Google Translate e salva md/txt (+ pdf) sotto
+    (default italiano) con Google Translate — o in locale via Ollama se
+    'local=True' — e salva md/txt (+ pdf) sotto
     out_root/<title>/<traduzioni>/ col suffisso della lingua. Il nome della
     cartella segue la lingua dell'interfaccia ('ui_lang': it -> "traduzioni",
     en -> "translations"). Restituisce la LISTA delle sezioni tradotte (così il
@@ -2085,16 +2154,16 @@ def translate_existing(out_root: str, title: str, target: str = "it",
         with progress:
             task_id = progress.add_task("Traduco le sezioni", total=len(sections))
             translated = translate_sections(
-                sections, target,
+                sections, target, local=local,
                 on_progress=lambda i, n: progress.update(task_id, completed=i))
-    except RuntimeError as e:  # deep_translator mancante
+    except RuntimeError as e:  # deep_translator mancante o Ollama non raggiungibile
         console.print(f"[error]{e}[/error]")
         return None
     except Exception as e:
         console.print(f"[error]Traduzione fallita: {e}[/error]")
         return None
 
-    engine_label = f"Traduzione automatica (Google Translate) → {lang_label}"
+    engine_label = _translate_engine_label(target, local)
     created: list[str] = []
 
     def _save(path: str, content: str) -> None:
@@ -2155,6 +2224,10 @@ _SUMMARY_SYSTEM_PROMPT = (
     "privilegiando un testo discorsivo che ricostruisca con ricchezza il filo "
     "del discorso e ne approfondisca i passaggi anziché comprimerli. Punta a un "
     "riassunto esteso e particolareggiato, non a una sintesi telegrafica. "
+    "Per facilitare la lettura, evidenzia in grassetto Markdown (**testo**) "
+    "soltanto le parole o le brevissime locuzioni chiave — concetti centrali, "
+    "termini tecnici, nomi propri e cifre rilevanti — usando il grassetto con "
+    "parsimonia e mai su intere frasi (deve risaltare, non saturare il testo). "
     "Ricorri agli elenchi puntati solo quando indispensabili (ad esempio per "
     "enumerazioni di voci eterogenee presenti nell'originale) e mai come "
     "struttura predefinita. Mantieni un registro professionale, chiaro e coeso, "
@@ -2344,11 +2417,11 @@ def summarize_existing(out_root: str, title: str, client=None,
 
     # Il riassunto è testo pulito: niente timestamp.
     _save(f"{base}.md", build_md(meta["title"], meta, engine_label, summarized, with_timestamps=False))
-    _save(f"{base}.txt", build_txt(meta["title"], meta, summarized))
+    _save(f"{base}.txt", build_txt(meta["title"], meta, summarized, markdown=True))
     if do_export:
         try:
             with console.status("[info]Creo il PDF (riassunto)...[/info]", spinner="dots"):
-                build_pdf(meta["title"], meta, summarized, f"{base}.pdf", with_timestamps=False)
+                build_pdf(meta["title"], meta, summarized, f"{base}.pdf", with_timestamps=False, markdown=True)
             created.append(os.path.relpath(f"{base}.pdf", video_dir).replace("\\", "/"))
         except Exception as e:
             console.print(f"[error]Export PDF riassunto fallito: {e}[/error]")
@@ -2533,7 +2606,7 @@ def run() -> None:
                 # ri-trascrizione e nessun credito di trascrizione. Traduce, poi
                 # riassume la traduzione e passa al prossimo job.
                 translated = translate_existing(out_root, meta["title"], target="it",
-                                                do_export=do_export)
+                                                do_export=do_export, local=client is None)
                 if translated:
                     summarize_existing(out_root, meta["title"], client=client,
                                        source_sections=translated, do_export=do_export)
@@ -2597,7 +2670,7 @@ def run() -> None:
                                    source_sections=None, do_export=do_export)
             else:
                 translated = translate_existing(out_root, meta["title"], target="it",
-                                                do_export=do_export)
+                                                do_export=do_export, local=client is None)
                 if translated:
                     summarize_existing(out_root, meta["title"], client=client,
                                        source_sections=translated, do_export=do_export)

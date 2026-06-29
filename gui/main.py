@@ -24,7 +24,7 @@ import os
 import sys
 import math
 import random
-import threading
+import threading2
 import time
 import webbrowser
 
@@ -154,7 +154,8 @@ T = {
         "opts_title": "Output aggiuntivi",
         "opt_translate_name": "Traduci in italiano",
         "opt_translate_desc": "Se l'audio non è già in italiano, crea anche una "
-                              "traduzione (Google Translate, gratis) in /traduzioni.",
+                              "traduzione in /traduzioni (Google Translate se hai la "
+                              "chiave Groq, altrimenti Ollama in locale e 100% offline).",
         "opt_summary_name": "Crea riassunto",
         "opt_summary_desc": "Riassunto per sezione del testo italiano in /riassunti "
                             "(usa Groq se hai la chiave, altrimenti Ollama locale).",
@@ -329,7 +330,8 @@ T = {
         "opts_title": "Extra outputs",
         "opt_translate_name": "Translate to Italian",
         "opt_translate_desc": "If the audio isn't already Italian, also create an "
-                              "Italian translation (Google Translate, free) in /translations.",
+                              "Italian translation in /translations (Google Translate if "
+                              "you have a Groq key, otherwise local Ollama, 100% offline).",
         "opt_summary_name": "Create summary",
         "opt_summary_desc": "Per-section summary of the Italian text in /summaries "
                             "(uses Groq if you have a key, otherwise local Ollama).",

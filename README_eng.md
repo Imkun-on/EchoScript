@@ -171,7 +171,7 @@ After **"Load info"** a window opens with the video's **cover** and details (cha
 
 ### Step 3 — "Extra outputs" (optional)
 Below the two tiles there's a card with **two switches**, both **off** by default (so a plain transcription stays plain):
-- 🌐 **Translate to Italian**: if the audio is **not already Italian**, alongside the transcription it also creates a **translation** (Google Translate, free, no key) in the `traduzioni/` subfolder.
+- 🌐 **Translate to Italian**: if the audio is **not already Italian**, alongside the transcription it also creates a **translation** in the `traduzioni/` subfolder (Google Translate if you have a Groq key, otherwise **Ollama** locally, 100% offline).
 - 🧠 **Create summary**: generates a **clean per-section summary** of the Italian text in `riassunti/`. Uses **Groq** if you've loaded a key, otherwise local **Ollama** (if installed). If neither is available the transcription is still saved and a notice appears.
 
 ### The "Transcribe" button
@@ -234,7 +234,7 @@ If you choose **Local**, a second panel lets you pick the model each time:
 - ⏱️ **Timings & sections**: uses YouTube **chapters** as document sections
 - 💾 **3 base formats** always generated: `.md` (human), `.txt` (for other LLMs), `.json` (for RAG)
 - 📄 **PDF always generated** automatically, split by chapter
-- 🌐 **Automatic translation** to Italian (when the audio isn't already Italian), free via Google Translate
+- 🌐 **Automatic translation** to Italian (when the audio isn't already Italian): Google Translate in the cloud · Ollama locally (offline)
 - 🧠 **Automatic summary** of the text, **per section**: strips fillers, repetitions and self-corrections (Groq in the cloud · Ollama locally)
 - 🗂️ **Organized output** in `results/<video name>/` under the `trascrizioni/`, `traduzioni/`, `riassunti/` subfolders
 - 🎨 **Polished interfaces**: dark GUI with animated background, or Rich CLI with bars and panels
@@ -339,7 +339,7 @@ The key is needed **only** if you use the **Groq** (cloud) backend. It is **free
 | `yt-dlp` | Downloads audio and metadata (title, chapters, duration) from YouTube | The de-facto standard: handles streams, resume, and metadata extraction |
 | `groq` | Official Groq API client (Whisper) | Official SDK, simple and fast |
 | `faster-whisper` | *(optional)* **Local** transcription on CPU | Optimized Whisper implementation (CTranslate2), great on CPU with `int8` |
-| `deep-translator` | **Translation** to Italian | Uses Google Translate (free endpoint): no key, no credits |
+| `deep-translator` | **Translation** to Italian (cloud) | Uses Google Translate (free endpoint): no key, no credits. Locally, with no key, translation switches to **Ollama** (offline) instead |
 | `fpdf2` | *(optional)* **PDF** export | Pure-python, **no system LaTeX needed**; supports Unicode fonts |
 | `flet` | *(optional)* **desktop GUI** (`gui/main.py`) | Modern native graphical interface in Python; the CLI works without it |
 
@@ -493,7 +493,8 @@ The **PDF is always generated, automatically**. EchoScript creates:
 
 After transcription, if the audio is **not already in Italian**, EchoScript **translates it to Italian** (automatically in the CLI; by flipping the switch in the GUI) (if it's already Italian it skips the step: translating `it → it` would be pointless).
 
-- **Free and key-less.** Translation uses **Google Translate** via the `deep-translator` library: no API key, **no Groq credits spent**. The transcription stays intact; the translation goes to `traduzioni/` as separate `.md`/`.txt`/`.pdf` files, **without timings** (continuous text, easier to read).
+- **Two engines, picked automatically.** If you have a **Groq key**, translation uses **Google Translate** (the `deep-translator` library): free, no dedicated API key, **no Groq credits spent**. **Without a key**, locally, it translates with **Ollama on your PC** so it stays **100% offline** (needs Ollama running with the model pulled — the same one used for the summary). The choice mirrors the summary: no key → everything local.
+- The transcription stays intact; the translation goes to `traduzioni/` as separate `.md`/`.txt`/`.pdf` files, **without timings** (continuous text, easier to read).
 
 ### How long videos are handled (in blocks)
 
@@ -510,6 +511,8 @@ This way text of any length goes through without errors. If a single sentence we
 ## 🧠 Automatic summary
 
 After translation (or, if the audio was already Italian, on the **original transcription**), EchoScript generates a **clean summary** of the text, saved to `riassunti/` in the usual `.md`/`.txt`/`.pdf` formats.
+
+> ✨ **Key words in bold.** The summary highlights the central concepts, technical terms, names and relevant figures in **bold** (sparingly, never whole sentences) to aid reading. Bold shows in `.md` and the **PDF**; in the `.txt` (meant for other tools/LLMs) the markers are stripped so it stays plain text.
 
 ### Why a summary is needed too
 
@@ -598,13 +601,16 @@ the `.env` file), no code editing needed. Each value has a sensible default:
 | `ECHOSCRIPT_COMPUTE_TYPE` | *(auto)* | Local precision: empty = `float16` on GPU, `int8` on CPU |
 | `ECHOSCRIPT_GROQ_SUMMARY_MODEL` | `llama-3.3-70b-versatile` | **Groq chat** model used for the summary (cloud) |
 | `ECHOSCRIPT_OLLAMA_MODEL` | `qwen2.5:7b` | **Ollama** model for the local summary |
+| `ECHOSCRIPT_OLLAMA_TRANSLATE_MODEL` | *(= `OLLAMA_MODEL`)* | **Ollama** model for the local **translation** (defaults to the summary one) |
 | `ECHOSCRIPT_OLLAMA_HOST` | `http://localhost:11434` | Ollama server address |
 | `ECHOSCRIPT_OLLAMA_NUM_CTX` | `8192` | Ollama context window (avoids truncating long blocks) |
 | `ECHOSCRIPT_SUMMARY_MAX_CHARS` | `12000` | Threshold above which a section is summarized in blocks (map-reduce) |
 
-> **Local summary.** Requires [Ollama](https://ollama.com) installed and running,
-> with the model pulled: `ollama pull qwen2.5:7b`. With the **Groq** backend the
-> summary uses the key you already have, with nothing else to install.
+> **Local translation and summary.** Without a Groq key, **both translation and
+> summary** run locally: requires [Ollama](https://ollama.com) installed and
+> running, with the model pulled (`ollama pull qwen2.5:7b`). With the **Groq**
+> backend they use the key you already have (Google Translate + Groq), with
+> nothing else to install.
 
 > **Automatic GPU.** The local backend uses the GPU (CUDA) when available, else
 > the CPU. Install PyTorch with CUDA for acceleration (see `requirements.txt`).
@@ -615,8 +621,10 @@ the `.env` file), no code editing needed. Each value has a sensible default:
 
 - **Local backend (faster-whisper)**: the **audio never leaves your PC**. (On first use it only downloads the model *weights* from HuggingFace.) Maximum privacy.
 - **Groq backend**: the audio is **uploaded to Groq's servers** for transcription. Great for public videos, not advised for private/sensitive audio.
-- **Translation**: uses **Google Translate**, so the transcription text is sent to Google's servers.
+- **Translation**: with a **Groq key** it uses **Google Translate** (text is sent to Google's servers); **without a key**, locally, it translates with **Ollama on your PC** → **100% offline**.
 - **Summary**: with the **Groq** backend the text goes to Groq's servers; with the **local** backend it uses **Ollama on your PC**, so it **stays 100% offline** (nothing leaves the computer).
+
+> 🔒 **Fully offline.** With the **local backend and no Groq key** the whole pipeline — transcription, translation and summary — runs **on your PC**: no data leaves the computer. It needs [Ollama](https://ollama.com) installed and running with the model pulled (`ollama pull qwen2.5:7b`), used for both translation and summary.
 
 The **API key** is never written in the code: it is read from `.env` or an environment variable, and excluded from version control via `.gitignore`.
 
