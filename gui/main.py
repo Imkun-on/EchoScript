@@ -24,7 +24,7 @@ import os
 import sys
 import math
 import random
-import threading2
+import threading
 import time
 import webbrowser
 
