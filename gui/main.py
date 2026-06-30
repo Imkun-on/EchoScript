@@ -59,8 +59,9 @@ WARN      = "#FBBF24"
 # Height shared by the two configuration cards so they always stay identical
 # regardless of content (see _build_ui). Sized for the tallest case (Groq
 # backend with the key loader). A fixed shared height is the workaround for
-# Flet 0.27 lacking IntrinsicHeight.
-CARD_HEIGHT = 360
+# Flet 0.27 lacking IntrinsicHeight. Kept compact so the WHOLE home fits on one
+# screen without a vertical scrollbar (the inner card column scrolls if needed).
+CARD_HEIGHT = 284
 
 # Local models offered in the dropdown (whisper model key -> i18n key).
 _LOCAL_MODELS = [
@@ -148,17 +149,21 @@ T = {
         "phase_transcribe": "Trascrizione",
         "phase_translate": "Traduzione in italiano",
         "phase_summarize": "Riassunto",
+        "phase_visual": "Analisi visiva",
         "phase_export": "Esportazione / salvataggio",
         "saving_files": "Salvataggio dei file",
         # Output options card (translation / summary toggles)
         "opts_title": "Output aggiuntivi",
         "opt_translate_name": "Traduci in italiano",
-        "opt_translate_desc": "Se l'audio non è già in italiano, crea anche una "
-                              "traduzione in /traduzioni (Google Translate se hai la "
-                              "chiave Groq, altrimenti Ollama in locale e 100% offline).",
+        "opt_translate_desc": "Traduzione italiana in /traduzioni (Groq se hai la "
+                              "chiave, altrimenti Ollama offline).",
         "opt_summary_name": "Crea riassunto",
-        "opt_summary_desc": "Riassunto per sezione del testo italiano in /riassunti "
-                            "(usa Groq se hai la chiave, altrimenti Ollama locale).",
+        "opt_summary_desc": "Riassunto pulito per sezione in /riassunti "
+                            "(Groq se hai la chiave, altrimenti Ollama locale).",
+        "opt_visual_name": "Analisi visiva del video",
+        "opt_visual_desc": "«Guarda» i fotogrammi ed estrae codice, formule e grafici a "
+                           "schermo, nel riassunto + un documento con i frame. Più lento; "
+                           "richiede Groq (più crediti) o un modello vision Ollama.",
         # Progress dialog (dedicated window)
         "prog_title": "Elaborazione in corso",
         "prog_steps_title": "Passaggi",
@@ -166,6 +171,7 @@ T = {
         "ov_base": "trascrivo l'audio",
         "ov_translate": "lo traduco in italiano",
         "ov_summary": "creo il riassunto",
+        "ov_visual": "analizzo i fotogrammi del video",
         "ov_save": "salvo i file (PDF incluso)",
         "ov_join": " e ",
         "narr_info": "Leggo le informazioni della sorgente e preparo l'elaborazione…",
@@ -175,6 +181,7 @@ T = {
         "narr_export": "Salvo la trascrizione e genero il PDF…",
         "narr_translate": "Traduco il testo in italiano, sezione per sezione…",
         "narr_summarize": "Creo un riassunto pulito per ogni sezione…",
+        "narr_visual": "Guardo i fotogrammi ed estraggo codice, formule e grafici…",
         "narr_done": "Quasi finito: completo gli ultimi salvataggi…",
         # Options dialog
         "opt_title": "Trascrizione completata",
@@ -242,6 +249,10 @@ T = {
         "res_credits": "Crediti Groq",
         "res_credits_used": "Audio trascritto",
         "res_credits_remaining_audio": "Audio residuo oggi",
+        # Visual analysis in the result summary
+        "res_visual": "Analisi visiva",
+        "res_visual_count": "{n} fotogrammi con contenuto estratto",
+        "btn_open_visual": "Apri analisi visiva",
         # Errors
         "err_title": "Errore",
         "err_unknown": "Errore sconosciuto.",
@@ -324,17 +335,21 @@ T = {
         "phase_transcribe": "Transcribing",
         "phase_translate": "Translating to Italian",
         "phase_summarize": "Summarizing",
+        "phase_visual": "Visual analysis",
         "phase_export": "Exporting / saving",
         "saving_files": "Saving files",
         # Output options card (translation / summary toggles)
         "opts_title": "Extra outputs",
         "opt_translate_name": "Translate to Italian",
-        "opt_translate_desc": "If the audio isn't already Italian, also create an "
-                              "Italian translation in /translations (Google Translate if "
-                              "you have a Groq key, otherwise local Ollama, 100% offline).",
+        "opt_translate_desc": "Italian translation in /translations (Groq if you have a "
+                              "key, otherwise offline Ollama).",
         "opt_summary_name": "Create summary",
-        "opt_summary_desc": "Per-section summary of the Italian text in /summaries "
-                            "(uses Groq if you have a key, otherwise local Ollama).",
+        "opt_summary_desc": "Clean per-section summary in /summaries "
+                            "(Groq if you have a key, otherwise local Ollama).",
+        "opt_visual_name": "Visual analysis of the video",
+        "opt_visual_desc": "«Looks» at the frames and extracts on-screen code, formulas "
+                           "and charts, into the summary + a document with the frames. "
+                           "Slower; needs Groq (more credits) or an Ollama vision model.",
         # Progress dialog (dedicated window)
         "prog_title": "Processing",
         "prog_steps_title": "Steps",
@@ -342,6 +357,7 @@ T = {
         "ov_base": "transcribe the audio",
         "ov_translate": "translate it to Italian",
         "ov_summary": "create the summary",
+        "ov_visual": "analyze the video frames",
         "ov_save": "save the files (PDF included)",
         "ov_join": " and ",
         "narr_info": "Reading the source info and getting ready…",
@@ -351,6 +367,7 @@ T = {
         "narr_export": "Saving the transcription and generating the PDF…",
         "narr_translate": "Translating the text to Italian, section by section…",
         "narr_summarize": "Creating a clean summary for each section…",
+        "narr_visual": "Looking at the frames and extracting code, formulas and charts…",
         "narr_done": "Almost there: finishing the last saves…",
         "opt_title": "Transcription complete",
         "opt_desc": "The PDF will be created automatically. Then choose where to save: "
@@ -411,6 +428,9 @@ T = {
         "res_credits": "Groq credits",
         "res_credits_used": "Audio transcribed",
         "res_credits_remaining_audio": "Audio left today",
+        "res_visual": "Visual analysis",
+        "res_visual_count": "{n} frames with extracted content",
+        "btn_open_visual": "Open visual analysis",
         "err_title": "Error",
         "err_unknown": "Unknown error.",
         "err_paste_url": "Paste the video URL first.",
@@ -569,9 +589,10 @@ class EchoScriptApp:
             vertical_alignment=ft.CrossAxisAlignment.START,
         )
         content = ft.Column(
-            spacing=16,
+            spacing=10,
             tight=True,
-            # Scrollable so the extra options card never clips on a short window.
+            # Scrollable as a safety net on very short windows, but the layout is
+            # sized so the whole home fits on one screen without scrolling.
             scroll=ft.ScrollMode.AUTO,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             controls=[
@@ -592,7 +613,7 @@ class EchoScriptApp:
         pad = self._side_pad()
         self.content_holder = ft.Container(
             expand=True, alignment=ft.alignment.center, content=content,
-            padding=ft.padding.only(left=pad, right=pad, top=18, bottom=22),
+            padding=ft.padding.only(left=pad, right=pad, top=12, bottom=14),
         )
 
         root = ft.Stack(
@@ -873,8 +894,8 @@ class EchoScriptApp:
         when the card holds many fields (Groq + DeepL keys), content never clips."""
         return ft.Container(
             bgcolor=SURFACE, border=ft.border.all(1, BORDER), border_radius=16,
-            padding=22,
-            content=ft.Column(list(controls), spacing=14, tight=True,
+            padding=18,
+            content=ft.Column(list(controls), spacing=11, tight=True,
                               scroll=ft.ScrollMode.AUTO),
             **kwargs,
         )
@@ -900,35 +921,35 @@ class EchoScriptApp:
         'group'/'key' are stashed in the control's data along with its check
         icon so a single handler (_on_select_card) can identify which option was
         picked and _sync_select_visuals can toggle the selected styling."""
-        name_row = [self._T(name_key, size=15, weight=ft.FontWeight.W_600, color=TEXT)]
+        name_row = [self._T(name_key, size=14, weight=ft.FontWeight.W_600, color=TEXT)]
         if tag:
             name_row.append(ft.Container(
                 bgcolor=ft.Colors.with_opacity(0.18, GREEN),
                 border_radius=6, padding=ft.padding.symmetric(horizontal=7, vertical=1),
                 content=ft.Text(tag, size=10, weight=ft.FontWeight.BOLD, color=GREEN_HI)))
-        check = ft.Icon(ft.Icons.CHECK_CIRCLE, color=GREEN_HI, size=20, visible=False)
+        check = ft.Icon(ft.Icons.CHECK_CIRCLE, color=GREEN_HI, size=18, visible=False)
 
         return ft.Container(
             data={"group": group, "key": key, "check": check},
             on_click=self._on_select_card,
-            border_radius=14, padding=16, bgcolor=SURFACE2,
+            border_radius=14, padding=13, bgcolor=SURFACE2,
             border=ft.border.all(1, BORDER),
             animate=ft.Animation(160, ft.AnimationCurve.EASE_OUT),
             ink=True, expand=True,
             content=ft.Column(
-                spacing=6,
+                spacing=4,
                 controls=[
                     ft.Row([
                         ft.Container(
-                            width=40, height=40, border_radius=10,
+                            width=34, height=34, border_radius=9,
                             bgcolor=ft.Colors.with_opacity(0.10, GREEN),
                             alignment=ft.alignment.center,
-                            content=ft.Icon(icon, color=GREEN_HI, size=22)),
+                            content=ft.Icon(icon, color=GREEN_HI, size=19)),
                         ft.Container(expand=True),
                         check,
                     ]),
                     ft.Row(name_row, spacing=8),
-                    self._T(desc_key, size=12, color=MUTED),
+                    self._T(desc_key, size=11, color=MUTED),
                 ],
             ),
         )
@@ -1226,16 +1247,16 @@ class EchoScriptApp:
                     switch: ft.Switch) -> ft.Control:
         """One option row: icon + localized name/description + a trailing switch."""
         return ft.Row(
-            spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
                 ft.Container(
-                    width=40, height=40, border_radius=10,
+                    width=34, height=34, border_radius=9,
                     bgcolor=ft.Colors.with_opacity(0.10, GREEN),
                     alignment=ft.alignment.center,
-                    content=ft.Icon(icon, color=GREEN_HI, size=22)),
-                ft.Column(spacing=2, tight=True, expand=True, controls=[
-                    self._T(name_key, size=15, weight=ft.FontWeight.W_600, color=TEXT),
-                    self._T(desc_key, size=12, color=MUTED),
+                    content=ft.Icon(icon, color=GREEN_HI, size=19)),
+                ft.Column(spacing=1, tight=True, expand=True, controls=[
+                    self._T(name_key, size=14, weight=ft.FontWeight.W_600, color=TEXT),
+                    self._T(desc_key, size=11, color=MUTED),
                 ]),
                 switch,
             ])
@@ -1251,6 +1272,9 @@ class EchoScriptApp:
         self.sw_summary = ft.Switch(
             value=False, active_color=GREEN, scale=0.9,
             on_change=lambda e: self.page.update())
+        self.sw_visual = ft.Switch(
+            value=False, active_color=GREEN, scale=0.9,
+            on_change=lambda e: self.page.update())
         return self._card(
             self._card_title("3", "opts_title"),
             self._toggle_row(ft.Icons.TRANSLATE, "opt_translate_name",
@@ -1258,6 +1282,9 @@ class EchoScriptApp:
             ft.Divider(height=1, color=BORDER),
             self._toggle_row(ft.Icons.AUTO_STORIES, "opt_summary_name",
                              "opt_summary_desc", self.sw_summary),
+            ft.Divider(height=1, color=BORDER),
+            self._toggle_row(ft.Icons.VISIBILITY, "opt_visual_name",
+                             "opt_visual_desc", self.sw_visual),
         )
 
     def _step_source(self) -> ft.Control:
@@ -1659,6 +1686,8 @@ class EchoScriptApp:
 
         # Compose the 'plan' sentence from the chosen options.
         parts = [self.t("ov_base")]
+        if options.get("visual"):
+            parts.append(self.t("ov_visual"))
         if options.get("translate"):
             parts.append(self.t("ov_translate"))
         if options.get("summarize"):
@@ -1817,17 +1846,21 @@ class EchoScriptApp:
             pass
 
     def _open_folder(self) -> None:
-        """Open the last results folder in the OS file manager.
+        """Open the last results folder in the OS file manager."""
+        self._open_path(self.last_dir)
+
+    def _open_path(self, path: str | None) -> None:
+        """Open any file/folder in the OS (best effort).
 
         Uses os.startfile on Windows and a file:// URL elsewhere; failures are
         ignored since this is a convenience action, not part of the pipeline."""
-        if not self.last_dir:
+        if not path:
             return
         try:
             if os.name == "nt":
-                os.startfile(self.last_dir)  # type: ignore[attr-defined]
+                os.startfile(path)  # type: ignore[attr-defined]
             else:
-                webbrowser.open("file://" + self.last_dir)
+                webbrowser.open("file://" + path)
         except Exception:
             pass
 
@@ -2138,6 +2171,7 @@ class EchoScriptApp:
             # Extra outputs (off by default): Italian translation + per-section summary.
             "translate": self.sw_translate.value,
             "summarize": self.sw_summary.value,
+            "visual": self.sw_visual.value,
         }
         self._plan = self._phase_plan(self.backend, self.source, options)
         self._last_g = 0.0
@@ -2236,6 +2270,7 @@ class EchoScriptApp:
             # Keep the extra-output choices when finishing locally after a rate limit.
             "translate": self.sw_translate.value,
             "summarize": self.sw_summary.value,
+            "visual": self.sw_visual.value,
         }
         # Local plan: no Groq "prepare" phase (info -> [download] -> transcribe -> export).
         self._plan = self._phase_plan("local", self.source, options)
@@ -2294,8 +2329,11 @@ class EchoScriptApp:
             plan.append("prepare")
         plan.append("transcribe")
         plan.append("export")
-        # The engine runs translation/summary inside save_results, AFTER writing
-        # the transcription, so they come last in the plan.
+        # The engine runs visual analysis, then translation/summary inside
+        # save_results, AFTER writing the transcription, so they come last (in the
+        # same order they execute: visual -> translate -> summarize).
+        if options and options.get("visual"):
+            plan.append("visual")
         if options and options.get("translate"):
             plan.append("translate")
         if options and options.get("summarize"):
@@ -2448,6 +2486,37 @@ class EchoScriptApp:
                                  ft.Text(self.t("res_credits"), size=13,
                                          weight=ft.FontWeight.W_600, color=GREEN_HI)], spacing=8))
             body.append(ft.Row(wrap=True, spacing=20, run_spacing=8, controls=credit_chips))
+
+        # --- Analisi visiva: conteggio + pulsante per aprire il documento dedicato ---
+        visual = res.get("visual")
+        if visual and visual.get("count"):
+            self.last_visual_dir = visual.get("dir")
+            body.append(ft.Divider(height=1, color=BORDER))
+            body.append(ft.Container(
+                bgcolor=ft.Colors.with_opacity(0.06, GREEN),
+                border=ft.border.all(1, ft.Colors.with_opacity(0.25, GREEN)),
+                border_radius=10, padding=12,
+                content=ft.Row(
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Row(spacing=10, tight=True, controls=[
+                            ft.Icon(ft.Icons.VISIBILITY, size=20, color=GREEN_HI),
+                            ft.Column(spacing=1, tight=True, controls=[
+                                ft.Text(self.t("res_visual"), size=13,
+                                        weight=ft.FontWeight.W_600, color=TEXT),
+                                ft.Text(self.t("res_visual_count").format(n=visual.get("count")),
+                                        size=12, color=MUTED),
+                            ]),
+                        ]),
+                        ft.OutlinedButton(
+                            self.t("btn_open_visual"), icon=ft.Icons.IMAGE_OUTLINED,
+                            on_click=lambda e: self._open_path(self.last_visual_dir),
+                            style=ft.ButtonStyle(
+                                color=GREEN_HI, side=ft.BorderSide(1, BORDER_HI),
+                                shape=ft.RoundedRectangleBorder(radius=10),
+                                padding=ft.padding.symmetric(horizontal=14, vertical=14))),
+                    ])))
 
         open_btn = ft.OutlinedButton(
             self.t("btn_open_folder"), icon=ft.Icons.FOLDER_OPEN,

@@ -20,6 +20,25 @@ deep-translator>=1.11
 # GUI (gui/main.py); la CLI funziona senza. Avvio: python gui/main.py
 flet>=0.27,<0.29
 
+# ANALISI VISIVA (opzionale): "legge" i fotogrammi di un video (codice, formule,
+# grafici, diagrammi) e li integra nel riassunto. NON richiede pacchetti pip in
+# piu' (i frame li estrae ffmpeg; il client Groq gia' presente gestisce le
+# immagini). Usa gli stessi due motori del resto del programma:
+#   - Groq (cloud): modello multimodale, default qwen/qwen3.6-27b. Niente da
+#     installare oltre alla chiave Groq.
+#   - Ollama (locale, offline): scarica un modello VISION, es:
+#         ollama pull llama3.2-vision
+# Variabili .env utili: ECHOSCRIPT_GROQ_VISION_MODEL, ECHOSCRIPT_OLLAMA_VISION_MODEL,
+# ECHOSCRIPT_VISION_SCENE (soglia stacco scena), ECHOSCRIPT_VISION_MAX_FRAMES.
+
+# PDF "RICCO" del riassunto (formule LaTeX + mappe Mermaid DISEGNATE): NON
+# richiede pacchetti pip ne' LaTeX di sistema. Genera un HTML (MathJax + Mermaid)
+# e lo stampa con un browser Chromium GIA' presente sul sistema (Edge su Windows
+# 11 e' sempre installato; va bene anche Chrome). Le due librerie JS vengono
+# scaricate UNA volta in cache locale (.pdfassets/), poi funziona anche offline.
+# Se manca il browser o la rete la prima volta, ripiega sul PDF base (fpdf2).
+# Disattivabile con ECHOSCRIPT_RICH_PDF=0; browser specifico con ECHOSCRIPT_BROWSER.
+
 # (OPZIONALE) Accelerazione GPU del backend locale: installa PyTorch con CUDA
 # per far girare faster-whisper su GPU (5-20x piu' veloce). Senza, gira su CPU.
 # Vedi https://pytorch.org per il comando giusto per la tua CUDA. Es.:

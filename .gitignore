@@ -5,6 +5,9 @@
 # --- Output generato ---
 results/
 
+# --- Cache librerie JS per il PDF "ricco" (MathJax/Mermaid, scaricate al volo) ---
+.pdfassets/
+
 # --- Build PyInstaller (.exe) ---
 build/
 dist/
