@@ -302,6 +302,52 @@ def fetch_groq_limits(api_key: str | None = None) -> dict:
             "items": items, "raw": raw_map}
 
 
+def get_cached_credits() -> list[dict]:
+    """Crediti Groq residui PER MODELLO, letti dalla cache che le richieste reali
+    (trascrizione/riassunto/analisi visiva) hanno già popolato — quindi a COSTO
+    ZERO: questa funzione NON contatta Groq, non consuma alcun credito.
+
+    Restituisce una lista (vuota finché non è stata fatta almeno una chiamata
+    Groq in questa sessione) ordinata trascrizione → riassunto → visiva, ognuna:
+    {model, role, checked_at, items: [{kind, remaining, limit, reset_seconds,
+    reset_at_iso}]}. 'reset_seconds' è ricalcolato ADESSO dal momento assoluto di
+    azzeramento salvato in cache, così resta corretto anche a distanza di ore."""
+    now = _datetime.now()
+    role_by_model = {
+        tx.GROQ_MODEL: ("transcription", 0),
+        tx.GROQ_SUMMARY_MODEL: ("summary", 1),
+        tx.GROQ_VISION_MODEL: ("vision", 2),
+    }
+    out: list[dict] = []
+    for snap in tx.cached_rate_limits():
+        model = snap.get("model", "")
+        role, order = role_by_model.get(model, ("other", 9))
+        try:
+            checked = _datetime.fromisoformat(snap["checked_at_iso"]).strftime("%H:%M")
+        except Exception:
+            checked = now.strftime("%H:%M")
+        items: list[dict] = []
+        for it in snap.get("items", []):
+            rem_s = None
+            if it.get("reset_at_iso"):
+                try:
+                    reset_at = _datetime.fromisoformat(it["reset_at_iso"])
+                    rem_s = max(0.0, (reset_at - now).total_seconds())
+                except Exception:
+                    rem_s = None
+            items.append({
+                "kind": it.get("kind"),
+                "remaining": it.get("remaining"),
+                "limit": it.get("limit"),
+                "reset_seconds": rem_s,
+                "reset_at_iso": it.get("reset_at_iso"),
+            })
+        out.append({"model": model, "role": role, "_order": order,
+                    "checked_at": checked, "items": items})
+    out.sort(key=lambda d: d.get("_order", 9))
+    return out
+
+
 # === AUDIO DOWNLOAD ===
 
 def download_audio(url: str, workdir: str, on_progress=_noop) -> str:
@@ -924,6 +970,29 @@ def _summarize_outputs(meta: dict, sections: list[dict], options: dict,
             warnings.append(f"PDF del riassunto non creato: {e}")
 
 
+def _visual_failure_reason(stats: dict, is_groq: bool) -> str:
+    """Frase (per i 'warnings' mostrati in GUI) che spiega perché l'analisi visiva
+    non ha prodotto note, partendo dall'esito raccolto in 'stats'. Prima questo
+    caso era SILENZIOSO: restava solo una cartella 'frames' vuota."""
+    if stats.get("unavailable"):
+        return f"Analisi visiva non disponibile: {stats['unavailable']}"
+    if stats.get("rate_limited"):
+        engine = "Groq (qwen vision)" if is_groq else "del modello vision"
+        return ("Analisi visiva interrotta: crediti " + engine + " esauriti. "
+                "I crediti del modello vision sono SEPARATI da quelli di "
+                "trascrizione/riassunto. Riprova quando si azzerano (vedi «crediti») "
+                "o usa un modello vision locale via Ollama.")
+    frames = stats.get("frames", 0)
+    if frames == 0:
+        return "Analisi visiva: nessun fotogramma significativo individuato nel video."
+    if stats.get("errors"):
+        err = stats.get("last_error") or "errore sconosciuto"
+        return (f"Analisi visiva non riuscita: il modello vision ha restituito "
+                f"errore su tutti i {frames} fotogrammi ({err}).")
+    return ("Analisi visiva: nessun contenuto tecnico (codice/formule/grafici) "
+            f"rilevato nei {frames} fotogrammi analizzati.")
+
+
 def save_results(meta: dict, segments: list[dict], engine_label: str, options: dict,
                  out_root: str, client=None, on_progress=_noop) -> dict:
     """PHASE 2 — write all outputs under 'out_root', creating the subfolders.
@@ -978,7 +1047,13 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
     # documento dedicato e fornisce le note per arricchire il riassunto ---
     visual_notes: list[dict] = []
     visual_info = None
-    if options.get("visual") and meta.get("_video_path"):
+    if options.get("visual") and not meta.get("_video_path"):
+        # Richiesta ma impossibile: il video non c'era (solo audio / download
+        # video fallito). Va detto, altrimenti l'utente non sa perché manca.
+        warnings.append("Analisi visiva saltata: il video non era disponibile "
+                        "(sorgente solo-audio o download video non riuscito).")
+    elif options.get("visual") and meta.get("_video_path"):
+        vstats: dict = {}
         try:
             vis_label = (f"Groq · {tx.GROQ_VISION_MODEL}" if chat_client is not None
                          else f"Ollama · {tx.OLLAMA_VISION_MODEL}")
@@ -986,7 +1061,8 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
             with tempfile.TemporaryDirectory(prefix="echoscript_vis_", ignore_cleanup_errors=True) as vwork:
                 visual_notes = tx.analyze_video_visuals(
                     meta["_video_path"], meta.get("duration") or 0.0, vwork,
-                    client=chat_client, frames_out_dir=frames_out, on_progress=on_progress)
+                    client=chat_client, frames_out_dir=frames_out,
+                    on_progress=on_progress, stats=vstats)
             if visual_notes:
                 tx.save_visual_notes(out_root, meta, visual_notes, vis_label,
                                      do_export, options.get("ui_lang", "it"), quiet=True)
@@ -995,6 +1071,10 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
                     "with_image": sum(1 for n in visual_notes if n.get("image")),
                     "dir": os.path.join(video_dir, tx.visual_subdir(options.get("ui_lang", "it"))),
                 }
+            else:
+                # Nessuna nota: spiega il MOTIVO (prima era silenzioso — cartella
+                # 'frames' vuota e basta) leggendo l'esito riportato in 'vstats'.
+                warnings.append(_visual_failure_reason(vstats, chat_client is not None))
         except Exception as e:
             warnings.append(f"Analisi visiva non completata: {e}")
         finally:
