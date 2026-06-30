@@ -13,6 +13,7 @@
   <img src="https://img.shields.io/badge/Google_Translate-translation-4285F4?logo=googletranslate&logoColor=white" alt="deep-translator">
   <img src="https://img.shields.io/badge/Ollama-local_summary-000000?logo=ollama&logoColor=white" alt="Ollama">
   <img src="https://img.shields.io/badge/Llama_3.3_·_Qwen_2.5-LLM-7C3AED" alt="LLM">
+  <img src="https://img.shields.io/badge/Qwen3.6_·_Llama_Vision-visual_analysis-C026D3" alt="Vision">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="MIT License">
 </p>
 
