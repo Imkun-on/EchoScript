@@ -233,16 +233,27 @@ T = {
         "btn_close": "Chiudi",
         # Credits / limits dialog
         "lim_title": "Crediti API Groq",
-        "lim_desc": "Crediti residui per la trascrizione (modello {m}). Letti dagli "
-                    "header di una piccola richiesta di test all'API Groq.",
-        "lim_checked_at": "Controllato alle {v}",
-        "lim_kind_audio_seconds": "Audio (trascrizione)",
+        "lim_free_note": "Letti dalle richieste già fatte (trascrizione, riassunto, "
+                         "analisi visiva): aprire questa finestra NON contatta Groq "
+                         "e non consuma alcun credito.",
+        "lim_no_data": "Ancora nessun dato. Esegui una trascrizione, un riassunto o "
+                       "un'analisi visiva: i crediti residui di ciascun modello "
+                       "compariranno qui (senza spendere nulla per controllare).",
+        "lim_role_transcription": "Trascrizione",
+        "lim_role_summary": "Riassunto",
+        "lim_role_vision": "Analisi visiva",
+        "lim_role_other": "Altro",
+        "lim_checked_at": "aggiornato alle {v}",
+        "lim_kind_audio_seconds": "Audio (secondi)",
         "lim_kind_requests": "Richieste",
-        "lim_kind_tokens": "Token (riassunto)",
+        "lim_kind_tokens": "Token",
         "lim_remaining": "{rem} / {lim} rimasti",
         "lim_remaining_only": "{rem} rimasti",
-        "lim_reset_at": "si azzera alle {clock} (tra {dur})",
+        "lim_reset_at": "si azzera {clock} (tra {dur})",
         "lim_reset_in": "si azzera tra {dur}",
+        "lim_reset_today": "alle {hm}",
+        "lim_reset_tomorrow": "domani alle {hm}",
+        "lim_reset_date": "il {dm} alle {hm}",
         "lim_none": "Nessun dato sui limiti restituito da Groq.",
         "lim_unit_seconds": "secondi audio",
         # Credits in the result summary
@@ -413,16 +424,27 @@ T = {
         "btn_open_folder": "Open results folder",
         "btn_close": "Close",
         "lim_title": "Groq API credits",
-        "lim_desc": "Remaining credits for transcription (model {m}). Read from the "
-                    "headers of a small test request to the Groq API.",
-        "lim_checked_at": "Checked at {v}",
-        "lim_kind_audio_seconds": "Audio (transcription)",
+        "lim_free_note": "Read from requests you already made (transcription, summary, "
+                         "visual analysis): opening this window does NOT contact Groq "
+                         "and spends no credits.",
+        "lim_no_data": "No data yet. Run a transcription, a summary or a visual "
+                       "analysis: each model's remaining credits will show up here "
+                       "(without spending anything to check).",
+        "lim_role_transcription": "Transcription",
+        "lim_role_summary": "Summary",
+        "lim_role_vision": "Visual analysis",
+        "lim_role_other": "Other",
+        "lim_checked_at": "updated at {v}",
+        "lim_kind_audio_seconds": "Audio (seconds)",
         "lim_kind_requests": "Requests",
-        "lim_kind_tokens": "Tokens (summary)",
+        "lim_kind_tokens": "Tokens",
         "lim_remaining": "{rem} / {lim} left",
         "lim_remaining_only": "{rem} left",
-        "lim_reset_at": "resets at {clock} (in {dur})",
+        "lim_reset_at": "resets {clock} (in {dur})",
         "lim_reset_in": "resets in {dur}",
+        "lim_reset_today": "at {hm}",
+        "lim_reset_tomorrow": "tomorrow at {hm}",
+        "lim_reset_date": "on {dm} at {hm}",
         "lim_none": "Groq returned no limit data.",
         "lim_unit_seconds": "audio seconds",
         "res_credits": "Groq credits",
@@ -1075,13 +1097,33 @@ class EchoScriptApp:
             parts.append(f"{sec}s")
         return " ".join(parts)
 
+    def _reset_clock_label(self, iso: str | None) -> str:
+        """Localized absolute reset instant from an ISO timestamp: 'alle HH:MM' if
+        today, 'domani alle HH:MM' if tomorrow, otherwise 'il dd/mm alle HH:MM'.
+        Empty string if 'iso' is missing/unparseable."""
+        if not iso:
+            return ""
+        import datetime as _dt
+        try:
+            when = _dt.datetime.fromisoformat(iso)
+        except Exception:
+            return ""
+        today = _dt.date.today()
+        hm = when.strftime("%H:%M")
+        if when.date() == today:
+            return self.t("lim_reset_today").format(hm=hm)
+        if when.date() == today + _dt.timedelta(days=1):
+            return self.t("lim_reset_tomorrow").format(hm=hm)
+        return self.t("lim_reset_date").format(dm=when.strftime("%d/%m"), hm=hm)
+
     def _fmt_reset(self, item: dict) -> str:
-        """Localized 'resets at HH:MM (in …)' line for one limit group."""
+        """Localized 'resets <when> (in …)' line for one limit group, where <when>
+        is the exact wall-clock instant (with the day when not today)."""
         sec = item.get("reset_seconds")
         if sec is None:
             return ""
         dur = self._fmt_duration_short(sec)
-        clock = item.get("reset_clock")
+        clock = self._reset_clock_label(item.get("reset_at_iso"))
         if clock:
             return self.t("lim_reset_at").format(clock=clock, dur=dur)
         return self.t("lim_reset_in").format(dur=dur)
@@ -1100,68 +1142,61 @@ class EchoScriptApp:
         return self.t("lim_remaining_only").format(rem=one(rem))
 
     def _show_credits(self) -> None:
-        """Read the remaining Groq credits (rate-limit headers) off-thread and show them.
+        """Mostra i crediti Groq residui PER MODELLO.
 
-        Needs a Groq key (loaded or in .env); the engine raises a clear EngineError
-        otherwise, which we surface in the error dialog."""
+        Letti dalla cache che le richieste reali (trascrizione, riassunto, analisi
+        visiva) hanno già popolato: NON contatta Groq e NON consuma alcun credito,
+        quindi è istantaneo (niente thread/rete) e cliccabile quanto si vuole. Se
+        non è ancora stata fatta alcuna chiamata Groq, la cache è vuota e la
+        finestra lo spiega."""
         self._hide_error()
-        btn = self.credits_btn
-        btn.disabled = True
-        btn.text = self.t("limits_checking")
-        self.page.update()
+        self._open_credits_dialog(engine.get_cached_credits())
 
-        def restore():
-            btn.disabled = False
-            btn.text = self.t("limits_btn")
-            self.page.update()
-
-        def work():
-            try:
-                data = engine.fetch_groq_limits(self.loaded_api_key or "")
-                restore()
-                self._open_credits_dialog(data)
-            except engine.EngineError as ex:
-                restore()
-                self._show_error(str(ex))
-            except Exception as ex:
-                restore()
-                self._show_error(self.t("err_limits").format(e=ex))
-
-        threading.Thread(target=work, daemon=True).start()
-
-    def _open_credits_dialog(self, data: dict) -> None:
-        """Build and open the credits dialog: one card per Groq limit group."""
+    def _open_credits_dialog(self, models: list[dict]) -> None:
+        """Build and open the credits dialog: a SECTION per Groq model (transcription,
+        summary, vision), each with one card per limit group. Data comes from the
+        passive cache — no API call, no credit spent (see _show_credits)."""
         rows: list[ft.Control] = [
-            self._T_one(self.t("lim_desc").format(m=tx.GROQ_MODEL), size=12, color=MUTED),
-            ft.Text(self.t("lim_checked_at").format(v=data.get("checked_at", "—")),
-                    size=11, color=MUTED),
+            self._T_one(self.t("lim_free_note"), size=12, color=MUTED),
             ft.Divider(height=1, color=BORDER),
         ]
-        items = data.get("items") or []
-        if not items:
-            rows.append(ft.Text(self.t("lim_none"), size=13, color=WARN))
-        for it in items:
-            kind = it.get("kind", "")
-            rows.append(ft.Container(
-                border_radius=12, padding=14, bgcolor=SURFACE2,
-                border=ft.border.all(1, BORDER),
-                content=ft.Row(
-                    spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        ft.Container(
-                            width=38, height=38, border_radius=10,
-                            alignment=ft.alignment.center,
-                            bgcolor=ft.Colors.with_opacity(0.12, GREEN),
-                            content=ft.Icon(self._credit_icon(kind), color=GREEN_HI, size=20)),
-                        ft.Column(spacing=2, tight=True, expand=True, controls=[
-                            ft.Text(self.t(f"lim_kind_{kind}") if f"lim_kind_{kind}" in T[self.lang] else kind,
-                                    size=14, weight=ft.FontWeight.W_600, color=TEXT),
-                            ft.Text(self._fmt_limit_value(it), size=13, color=GREEN_HI,
-                                    weight=ft.FontWeight.W_600),
-                            ft.Text(self._fmt_reset(it), size=11, color=MUTED) if self._fmt_reset(it)
-                            else ft.Container(height=0),
-                        ]),
-                    ])))
+        if not models:
+            # Cache ancora vuota: nessuna richiesta Groq fatta in questa sessione.
+            rows.append(ft.Text(self.t("lim_no_data"), size=13, color=WARN, no_wrap=False))
+        for m in models:
+            role = m.get("role", "other")
+            role_label = self.t(f"lim_role_{role}") if f"lim_role_{role}" in T[self.lang] else role
+            # Intestazione del modello: ruolo + id modello + ora di aggiornamento.
+            rows.append(ft.Column(spacing=1, tight=True, controls=[
+                ft.Text(role_label, size=14, weight=ft.FontWeight.W_700, color=TEXT),
+                ft.Text(f"{m.get('model', '')} · {self.t('lim_checked_at').format(v=m.get('checked_at', '—'))}",
+                        size=11, color=MUTED),
+            ]))
+            items = m.get("items") or []
+            if not items:
+                rows.append(ft.Text(self.t("lim_none"), size=12, color=MUTED))
+            for it in items:
+                kind = it.get("kind", "")
+                rows.append(ft.Container(
+                    border_radius=12, padding=14, bgcolor=SURFACE2,
+                    border=ft.border.all(1, BORDER),
+                    content=ft.Row(
+                        spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Container(
+                                width=38, height=38, border_radius=10,
+                                alignment=ft.alignment.center,
+                                bgcolor=ft.Colors.with_opacity(0.12, GREEN),
+                                content=ft.Icon(self._credit_icon(kind), color=GREEN_HI, size=20)),
+                            ft.Column(spacing=2, tight=True, expand=True, controls=[
+                                ft.Text(self.t(f"lim_kind_{kind}") if f"lim_kind_{kind}" in T[self.lang] else kind,
+                                        size=14, weight=ft.FontWeight.W_600, color=TEXT),
+                                ft.Text(self._fmt_limit_value(it), size=13, color=GREEN_HI,
+                                        weight=ft.FontWeight.W_600),
+                                ft.Text(self._fmt_reset(it), size=11, color=MUTED) if self._fmt_reset(it)
+                                else ft.Container(height=0),
+                            ]),
+                        ])))
         close = ft.FilledButton(
             self.t("btn_close"), icon=ft.Icons.CHECK,
             on_click=lambda e: self.page.close(self.credits_dialog),

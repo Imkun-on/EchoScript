@@ -423,6 +423,101 @@ def _is_rate_limit(msg: str) -> bool:
             or "tokens per" in m or "requests per" in m or "too many requests" in m)
 
 
+# === CREDITI GROQ: CACHE DEI RATE-LIMIT PER MODELLO ==========================
+# Groq non espone un endpoint "saldo": il budget del piano free arriva SOLO
+# negli header x-ratelimit-* di ogni risposta, e sono PER MODELLO (whisper per
+# la trascrizione, llama per il riassunto, qwen per la visiva). Invece di
+# sprecare una chiamata vera — e quindi un credito — ad ogni clic sul pulsante
+# "crediti", registriamo qui gli header che le richieste REALI già producono:
+# il pulsante legge questa cache, a costo zero. La cache vive per la sessione.
+_RATE_LIMIT_UNITS = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
+_RATE_LIMIT_CACHE: dict[str, dict] = {}  # model -> {model, items, checked_at_iso}
+
+
+def _rate_limit_reset_seconds(value: str | None) -> float | None:
+    """Header di reset Groq ('2m59.56s', '986ms', '1h0m0s') -> secondi. None se vuoto."""
+    if not value:
+        return None
+    total, found = 0.0, False
+    for num, unit in re.findall(r"([0-9.]+)\s*(ms|s|m|h|d)", value):
+        try:
+            total += float(num) * _RATE_LIMIT_UNITS[unit]
+            found = True
+        except (ValueError, KeyError):
+            pass
+    return total if found else None
+
+
+def _rate_limit_num(value) -> float | None:
+    """float() tollerante di un valore header (int/float/None)."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def parse_ratelimit_headers(headers) -> list[dict]:
+    """Header x-ratelimit-* -> lista di gruppi limite, già con il MOMENTO ASSOLUTO
+    di azzeramento (così la cache resta valida anche letta molto dopo).
+
+    Ogni voce: {kind, remaining, limit, reset_at_iso}. 'kind' ∈
+    'audio_seconds' | 'requests' | 'tokens'. Solo i gruppi presenti vengono resi."""
+    def get(name: str):
+        try:
+            return headers.get(name)
+        except Exception:
+            return None
+
+    now = datetime.now()
+    items: list[dict] = []
+    for kind, suffix in (("audio_seconds", "audio-seconds"),
+                         ("requests", "requests"),
+                         ("tokens", "tokens")):
+        remaining = _rate_limit_num(get(f"x-ratelimit-remaining-{suffix}"))
+        limit = _rate_limit_num(get(f"x-ratelimit-limit-{suffix}"))
+        reset_s = _rate_limit_reset_seconds(get(f"x-ratelimit-reset-{suffix}"))
+        if remaining is None and limit is None and reset_s is None:
+            continue
+        from datetime import timedelta
+        reset_at = (now + timedelta(seconds=reset_s)) if reset_s is not None else None
+        items.append({
+            "kind": kind,
+            "remaining": remaining,
+            "limit": limit,
+            "reset_at_iso": reset_at.isoformat() if reset_at else None,
+        })
+    return items
+
+
+def record_rate_limits(model: str, headers) -> list[dict]:
+    """Registra in cache i limiti letti dagli header di una risposta Groq REALE.
+
+    A costo zero: gli header viaggiano con richieste che faremmo comunque. Va
+    chiamata accanto a ogni chiamata Groq andata a buon fine (trascrizione,
+    riassunto, visiva). Best-effort: non solleva mai."""
+    try:
+        items = parse_ratelimit_headers(headers)
+    except Exception:
+        return []
+    if items:
+        _RATE_LIMIT_CACHE[model] = {
+            "model": model,
+            "items": items,
+            "checked_at_iso": datetime.now().isoformat(),
+        }
+    return items
+
+
+def cached_rate_limits() -> list[dict]:
+    """Snapshot per-modello dei limiti registrati finora (per il pulsante crediti).
+
+    Lista (eventualmente vuota) di {model, items, checked_at_iso}. Vuota finché
+    non è stata fatta almeno una chiamata Groq reale in questa sessione."""
+    return list(_RATE_LIMIT_CACHE.values())
+
+
 def _checkpoints_dir() -> str:
     """Cartella dedicata ai checkpoint dei video parziali."""
     root = os.path.dirname(os.path.abspath(__file__))
@@ -1291,6 +1386,9 @@ def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
                             on_headers(raw.headers)
                         except Exception:
                             pass
+                        # Crediti: registra i limiti del modello di trascrizione
+                        # (a costo zero, dalla risposta che stiamo già leggendo).
+                        record_rate_limits(GROQ_MODEL, raw.headers)
                         result = raw.parse()
                 else:
                     result = client.audio.transcriptions.create(**params)
@@ -2228,15 +2326,15 @@ def _vision_groq(client, b64: str) -> str:
         ]},
     ]
     try:
-        resp = client.chat.completions.create(
-            model=GROQ_VISION_MODEL, messages=messages, temperature=0.2,
+        resp = _groq_chat_capture(
+            client, GROQ_VISION_MODEL, messages=messages, temperature=0.2,
             reasoning_effort="none")
     except Exception as e:
         if _is_rate_limit(str(e)):
             raise
         # Il modello non accetta 'reasoning_effort': riprova senza il parametro.
-        resp = client.chat.completions.create(
-            model=GROQ_VISION_MODEL, messages=messages, temperature=0.2)
+        resp = _groq_chat_capture(
+            client, GROQ_VISION_MODEL, messages=messages, temperature=0.2)
     return _strip_think(resp.choices[0].message.content or "")
 
 
@@ -2302,7 +2400,8 @@ def _is_empty_visual(text: str) -> bool:
 
 def analyze_video_visuals(video_path: str, duration: float, workdir: str,
                           client=None, frames_out_dir: str | None = None,
-                          on_progress=None, quiet: bool = False) -> list[dict]:
+                          on_progress=None, quiet: bool = False,
+                          stats: dict | None = None) -> list[dict]:
     """Estrae i fotogrammi chiave del video e li "legge" con un modello vision.
 
     Restituisce una lista di NOTE VISIVE {'start': sec, 'text': str, 'image': str},
@@ -2313,8 +2412,23 @@ def analyze_video_visuals(video_path: str, duration: float, workdir: str,
     Doppia modalità di output, così è riusabile sia dalla CLI sia dal motore/GUI:
     con 'on_progress(phase,cur,total,detail)' riporta tramite callback (niente
     console rich); senza, usa la console rich (CLI). 'quiet' silenzia comunque la
-    console. Lista vuota se non c'è nulla o se il motore vision non è disponibile."""
+    console. Lista vuota se non c'è nulla o se il motore vision non è disponibile.
+
+    'stats' (opzionale): dict che la funzione riempie con l'esito, così il
+    chiamante (engine/GUI) può spiegare PERCHÉ non ci sono note invece di
+    lasciare tutto in silenzio. Chiavi: 'frames', 'notes', 'errors',
+    'rate_limited' (bool), 'last_error', 'unavailable'."""
     use_rich = on_progress is None and not quiet
+
+    def _stat(key, value):
+        if stats is not None:
+            stats[key] = value
+
+    _stat("frames", 0)
+    _stat("notes", 0)
+    _stat("errors", 0)
+    _stat("rate_limited", False)
+    _stat("last_error", None)
 
     def _report(cur, total, detail):
         if on_progress:
@@ -2326,6 +2440,7 @@ def analyze_video_visuals(video_path: str, duration: float, workdir: str,
         if use_rich:
             console.print(f"[warning]Analisi visiva non disponibile: {e}[/warning]")
         _report(None, None, f"Analisi visiva non disponibile: {e}")
+        _stat("unavailable", str(e))
         return []
 
     _report(None, None, "Individuo i fotogrammi chiave (cambi scena)…")
@@ -2334,6 +2449,7 @@ def analyze_video_visuals(video_path: str, duration: float, workdir: str,
             frames = extract_keyframes(video_path, duration, workdir)
     else:
         frames = extract_keyframes(video_path, duration, workdir)
+    _stat("frames", len(frames))
     if not frames:
         if use_rich:
             console.print("[warning]Nessun fotogramma significativo individuato.[/warning]")
@@ -2346,6 +2462,7 @@ def analyze_video_visuals(video_path: str, duration: float, workdir: str,
     notes: list[dict] = []
 
     def _process(update) -> None:
+        errors = 0
         for i, (ts, path) in enumerate(frames, 1):
             if _interrupted:
                 break
@@ -2357,7 +2474,14 @@ def analyze_video_visuals(video_path: str, duration: float, workdir: str,
                         console.print("[warning]Crediti Groq esauriti durante l'analisi visiva: "
                                       "proseguo con i fotogrammi già letti.[/warning]")
                     _report(i, len(frames), "Crediti Groq esauriti durante l'analisi visiva")
+                    _stat("rate_limited", True)
+                    _stat("last_error", str(e))
                     break
+                # Errore NON di credito sul singolo fotogramma: lo saltiamo, ma lo
+                # registriamo così il chiamante non resta al buio se falliscono tutti.
+                errors += 1
+                _stat("errors", errors)
+                _stat("last_error", str(e))
                 text = ""
             if text and not _is_empty_visual(text):
                 notes.append({"start": float(ts), "text": text.strip(), "_frame": path})
@@ -2378,9 +2502,11 @@ def analyze_video_visuals(video_path: str, duration: float, workdir: str,
 
     raw = len(notes)
     notes = _dedup_visual_notes(notes)  # scarta slide ripetute (stesso contenuto a schermo)
+    _stat("notes", len(notes))
     # Conserva i fotogrammi delle note TENUTE: il workdir temporaneo verrà
     # cancellato, quindi li copiamo nella cartella definitiva e ne salviamo il nome.
-    if frames_out_dir:
+    # Solo se c'è davvero qualcosa da salvare: niente cartella 'frames' vuota.
+    if frames_out_dir and notes:
         try:
             os.makedirs(frames_out_dir, exist_ok=True)
             for idx, note in enumerate(notes):
@@ -3236,10 +3362,30 @@ def _summary_user_prompt(text: str, section_title: str | None) -> str:
     return f"{head}Testo da riassumere:\n\n{text}"
 
 
+def _groq_chat_capture(client, model: str, **kwargs):
+    """client.chat.completions.create che, quando possibile, registra i crediti
+    residui del modello dagli header x-ratelimit-* (per il pulsante "crediti"),
+    SENZA costo aggiuntivo. Se la variante raw fallisce per motivi diversi da
+    credito/auth, ripiega sulla chiamata normale. Restituisce l'oggetto risposta
+    già parsato, come la create() classica."""
+    try:
+        raw = client.chat.completions.with_raw_response.create(model=model, **kwargs)
+    except Exception as e:
+        msg = str(e)
+        if _is_rate_limit(msg) or "401" in msg or "403" in msg:
+            raise
+        return client.chat.completions.create(model=model, **kwargs)
+    try:
+        record_rate_limits(model, raw.headers)
+    except Exception:
+        pass
+    return raw.parse()
+
+
 def _summarize_groq(client, text: str, section_title: str | None) -> str:
     """Riassume un testo con un modello di CHAT di Groq (non Whisper)."""
-    resp = client.chat.completions.create(
-        model=GROQ_SUMMARY_MODEL,
+    resp = _groq_chat_capture(
+        client, GROQ_SUMMARY_MODEL,
         messages=[
             {"role": "system", "content": _active_summary_prompt()},
             {"role": "user", "content": _summary_user_prompt(text, section_title)},
