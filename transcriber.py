@@ -229,6 +229,59 @@ OLLAMA_NUM_CTX = _env_int("ECHOSCRIPT_OLLAMA_NUM_CTX", 8192)
 # i parziali vengono uniti (map-reduce), per non sforare il contesto del modello.
 SUMMARY_MAX_CHARS = _env_int("ECHOSCRIPT_SUMMARY_MAX_CHARS", 12000)
 
+# --- ANALISI VISIVA (vision) — trascrive ciò che si VEDE nel video ---
+# Oltre all'audio, EchoScript può "guardare" i fotogrammi di un video (slide,
+# codice a schermo, formule, grafici, diagrammi) ed estrarne il contenuto con un
+# modello multimodale, per arricchire il riassunto. È OPZIONALE (chiesto a ogni
+# run su sorgenti video) e usa gli stessi due motori del resto del programma:
+#   • Groq (cloud): modello vision di GroqCloud (veloce; consuma crediti/frame).
+#   • Ollama (locale): modello vision via Ollama (100% offline; richiede
+#     `ollama pull <modello-vision>`, es. llama3.2-vision).
+# Estensioni con traccia VIDEO (da cui ha senso estrarre i fotogrammi).
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
+# Modello vision su Groq. Default: qwen3.6-27b (multimodale; sostituto del
+# deprecato llama-4-scout). Cambiabile da .env.
+GROQ_VISION_MODEL = _env_str("ECHOSCRIPT_GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
+# Modello vision su Ollama (locale). Scaricalo con: ollama pull llama3.2-vision
+OLLAMA_VISION_MODEL = _env_str("ECHOSCRIPT_OLLAMA_VISION_MODEL", "llama3.2-vision")
+# Soglia di "cambio scena" (0..1) per scegliere i fotogrammi: più è bassa, più
+# fotogrammi (e più analisi/costo). 0.4 cattura bene i cambi di slide/codice.
+VISION_SCENE_THRESHOLD = float(_env_str("ECHOSCRIPT_VISION_SCENE", "0.4"))
+# Larghezza (px) a cui ridimensionare i fotogrammi prima dell'analisi (riduce
+# token/banda; l'altezza resta proporzionale).
+VISION_FRAME_WIDTH = _env_int("ECHOSCRIPT_VISION_WIDTH", 1280)
+# Tetto massimo di fotogrammi analizzati per video (controlla costo/tempo): se il
+# rilevamento scene ne trova di più, vengono campionati uniformemente.
+VISION_MAX_FRAMES = _env_int("ECHOSCRIPT_VISION_MAX_FRAMES", 60)
+# Se il rilevamento scene trova troppi pochi fotogrammi (video con un'unica
+# inquadratura fissa), si campiona a intervalli regolari ogni N secondi.
+VISION_FALLBACK_INTERVAL = _env_int("ECHOSCRIPT_VISION_INTERVAL", 45)
+# Risoluzione massima del video scaricato da YouTube per l'analisi visiva (più
+# bassa = download più leggero). Usata solo quando l'analisi è attiva.
+VISION_YT_MAX_HEIGHT = _env_int("ECHOSCRIPT_VISION_YT_HEIGHT", 720)
+
+# --- PDF "ricco" (formule LaTeX + mappe Mermaid DISEGNATE) ---
+# Il PDF base (fpdf2) è testo semplice: mostra le formule come `$...$` grezzo e i
+# blocchi mermaid come testo. Per un PDF in cui formule e mappe sono davvero
+# renderizzate, generiamo un HTML (MathJax + Mermaid) e lo stampiamo con un
+# browser Chromium GIÀ presente sul sistema (Edge su Windows): nessun LaTeX da
+# installare. Se manca il browser o la rete (serve solo la prima volta, per
+# scaricare le due librerie JS in cache locale), si ripiega in automatico sul PDF
+# fpdf2. Disattivabile con ECHOSCRIPT_RICH_PDF=0.
+RICH_PDF = _env_bool("ECHOSCRIPT_RICH_PDF", True)
+# Percorso a un browser Chromium specifico (altrimenti rilevato in automatico).
+BROWSER_PATH = _env_opt("ECHOSCRIPT_BROWSER")
+
+# Mappa concettuale (diagramma Mermaid) nel riassunto dei video con analisi
+# visiva. Disattivata di default: spesso è banale/ridondante rispetto al testo e
+# i diagrammi generati da un LLM sono la parte meno affidabile. Codice e formule
+# restano comunque (sono il vero valore). Attivala con ECHOSCRIPT_CONCEPT_MAP=1.
+CONCEPT_MAP = _env_bool("ECHOSCRIPT_CONCEPT_MAP", False)
+# Mostra i FOTOGRAMMI anche dentro il riassunto (oltre che nel documento di
+# analisi visiva), accanto al testo, raggruppati per sezione/timestamp. Costo
+# Groq aggiuntivo: ZERO (i frame esistono già). Disattiva con ECHOSCRIPT_SUMMARY_FRAMES=0.
+SUMMARY_FRAMES = _env_bool("ECHOSCRIPT_SUMMARY_FRAMES", True)
+
 # === GRACEFUL SHUTDOWN ===
 # A flag that becomes True on the first Ctrl+C: the loops check it to stop in an
 # orderly way. On the second Ctrl+C we exit immediately.
@@ -512,6 +565,7 @@ def _trim_audio(audio_path: str, start_seconds: float, workdir: str) -> str:
 TRANS_SUBDIRS = {"it": "trascrizioni", "en": "transcriptions"}
 TRANSL_SUBDIRS = {"it": "traduzioni", "en": "translations"}
 SUMMARY_SUBDIRS = {"it": "riassunti", "en": "summaries"}
+VISUAL_SUBDIRS = {"it": "analisi_visiva", "en": "visual_analysis"}
 # Suffix added to the summary file name, per UI language.
 SUMMARY_SUFFIX = {"it": "riassunto", "en": "summary"}
 
@@ -529,6 +583,11 @@ def transl_subdir(lang: str | None = "it") -> str:
 def summary_subdir(lang: str | None = "it") -> str:
     """Name of the SUMMARY subfolder for the given UI language."""
     return SUMMARY_SUBDIRS.get(lang or "it", SUMMARY_SUBDIRS["it"])
+
+
+def visual_subdir(lang: str | None = "it") -> str:
+    """Name of the VISUAL-ANALYSIS subfolder for the given UI language."""
+    return VISUAL_SUBDIRS.get(lang or "it", VISUAL_SUBDIRS["it"])
 
 
 def transcription_exists(out_root: str, title: str) -> bool:
@@ -1916,9 +1975,602 @@ def _print_ratelimit_notice(title: str, done_seconds: float, total_seconds: floa
                         title_align="left"))
 
 
+# === ANALISI VISIVA: estrazione fotogrammi + lettura con un modello vision ====
+
+def _has_video_stream(path: str) -> bool:
+    """True se il file ha una traccia VIDEO (evita l'analisi su mp3/audio puri)."""
+    if os.path.splitext(path)[1].lower() in VIDEO_EXTENSIONS:
+        return True
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=codec_type", "-of",
+             "default=noprint_wrappers=1:nokey=1", path],
+            capture_output=True, text=True, check=True)
+        return "video" in out.stdout
+    except Exception:
+        return False
+
+
+def download_video(url: str, workdir: str) -> str | None:
+    """Scarica il VIDEO (capped a VISION_YT_MAX_HEIGHT) per l'analisi visiva.
+
+    A differenza di download_audio (solo audio), qui serve l'immagine: scarichiamo
+    un file muxed a risoluzione contenuta, da cui poi si estraggono SIA i
+    fotogrammi SIA l'audio per la trascrizione (un solo download). None su errore."""
+    out_template = os.path.join(workdir, "video.%(ext)s")
+    progress = Progress(
+        SpinnerColumn("dots", style="bright_blue"),
+        TextColumn("[phase]{task.description}"),
+        BarColumn(bar_width=40, style="bar.back", complete_style="bright_blue", finished_style="bright_green"),
+        TaskProgressColumn(), DownloadColumn(), TransferSpeedColumn(),
+        TextColumn("[dim]→[/dim]"), TimeRemainingColumn(),
+        console=console, expand=False,
+    )
+    task_id = progress.add_task("Scarico video", total=None)
+
+    def _hook(d: dict) -> None:
+        if _interrupted:
+            raise KeyboardInterrupt
+        if d["status"] == "downloading":
+            total = d.get("total_bytes") or d.get("total_bytes_estimate")
+            done = d.get("downloaded_bytes", 0)
+            if total:
+                progress.update(task_id, completed=done, total=total)
+            else:
+                progress.update(task_id, completed=done)
+        elif d["status"] == "finished":
+            progress.update(task_id, description="Preparo il video (attendi)")
+
+    h = VISION_YT_MAX_HEIGHT
+    ydl_opts = {
+        # Video+audio muxed con altezza limitata; preferiamo mp4 per compatibilità.
+        "format": f"bestvideo[height<={h}]+bestaudio/best[height<={h}]/best",
+        "merge_output_format": "mp4",
+        "outtmpl": out_template,
+        "quiet": True, "no_warnings": True, "noprogress": True,
+        "progress_hooks": [_hook],
+    }
+    try:
+        with progress:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+    except KeyboardInterrupt:
+        return None
+    except Exception as e:
+        console.print(f"[error]Errore nel download video: {e}[/error]")
+        return None
+    for fname in os.listdir(workdir):
+        if fname.startswith("video."):
+            return os.path.join(workdir, fname)
+    return None
+
+
+def _parse_showinfo_times(stderr: str) -> list[float]:
+    """Estrae i pts_time (secondi) dalle righe 'showinfo' di ffmpeg, in ordine."""
+    times: list[float] = []
+    for line in stderr.splitlines():
+        idx = line.find("pts_time:")
+        if idx == -1:
+            continue
+        rest = line[idx + len("pts_time:"):].strip()
+        token = rest.split()[0] if rest else ""
+        try:
+            times.append(float(token))
+        except ValueError:
+            continue
+    return times
+
+
+def extract_keyframes(video_path: str, duration: float, workdir: str) -> list[tuple[float, str]]:
+    """Estrae i FOTOGRAMMI CHIAVE di un video, con il loro timestamp (secondi).
+
+    Strategia: rilevamento di CAMBIO SCENA via ffmpeg (cattura un frame quando
+    l'immagine cambia davvero: nuova slide, nuovo codice, nuova formula), così di
+    natura non si ripetono fotogrammi quasi identici. Se il video è quasi statico
+    e le scene rilevate sono troppo poche, ripiega su un campionamento a intervalli
+    regolari. Limita il totale a VISION_MAX_FRAMES (campionamento uniforme).
+    Restituisce una lista di (timestamp, percorso_jpg) ordinata per tempo."""
+    frames_dir = os.path.join(workdir, "frames")
+    os.makedirs(frames_dir, exist_ok=True)
+
+    # 1) Rilevamento cambio scena.
+    pattern = os.path.join(frames_dir, "kf_%05d.jpg")
+    vf = (f"select='gt(scene,{VISION_SCENE_THRESHOLD})',"
+          f"scale={VISION_FRAME_WIDTH}:-2,showinfo")
+    try:
+        proc = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-i", video_path, "-vf", vf,
+             "-vsync", "vfr", "-q:v", "3", pattern],
+            capture_output=True, text=True)
+        times = _parse_showinfo_times(proc.stderr)
+    except Exception as e:
+        console.print(f"[warning]Estrazione fotogrammi non riuscita: {e}[/warning]")
+        return []
+    files = sorted(os.path.join(frames_dir, n) for n in os.listdir(frames_dir)
+                   if n.startswith("kf_"))
+    frames = list(zip(times, files))  # l'ordine di showinfo coincide con quello dei file
+
+    # 2) Fallback: video quasi statico o senza stacchi netti -> pochi cambi scena.
+    # Campiona a intervalli regolari, con un passo ADATTIVO alla durata così anche
+    # i video brevi ricevono comunque alcuni fotogrammi.
+    min_expected = max(4, int((duration or 0) // 180))
+    if len(frames) < min_expected and (duration or 0) >= 2:
+        for f in files:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+        # Quanti fotogrammi vogliamo: tra min_expected e il cap, in base a quanti
+        # intervalli "standard" entrano nella durata.
+        want = max(min_expected,
+                   min(VISION_MAX_FRAMES,
+                       int((duration or 0) // VISION_FALLBACK_INTERVAL) or min_expected))
+        interval = max(1.0, (duration or 0) / want)
+        ipattern = os.path.join(frames_dir, "iv_%05d.jpg")
+        ivf = f"fps=1/{interval:.3f},scale={VISION_FRAME_WIDTH}:-2"
+        try:
+            subprocess.run(
+                ["ffmpeg", "-hide_banner", "-i", video_path, "-vf", ivf,
+                 "-vsync", "vfr", "-q:v", "3", ipattern],
+                capture_output=True, text=True, check=True)
+            ifiles = sorted(os.path.join(frames_dir, n) for n in os.listdir(frames_dir)
+                            if n.startswith("iv_"))
+            frames = [(float(i) * interval, f) for i, f in enumerate(ifiles)]
+        except Exception:
+            pass
+
+    # 3) Cap: se sono troppi, campiona uniformemente lungo la timeline.
+    if len(frames) > VISION_MAX_FRAMES:
+        step = len(frames) / VISION_MAX_FRAMES
+        frames = [frames[int(i * step)] for i in range(VISION_MAX_FRAMES)]
+    return frames
+
+
+# Prompt per il modello vision: estrae SOLO il contenuto informativo visibile e
+# scarta i fotogrammi "vuoti" (volti, transizioni) rispondendo "NIENTE".
+_VISION_SYSTEM_PROMPT = (
+    "Analizzi UN fotogramma di un video didattico/divulgativo. Estrai SOLO il "
+    "contenuto informativo VISIBILE a schermo che il parlato non può rendere:\n"
+    "• CODICE sorgente: trascrivilo ALLA LETTERA (indentazione e simboli inclusi) "
+    "dentro un blocco markdown ``` con il nome del linguaggio.\n"
+    "• FORMULE matematiche e relativi PASSAGGI/DIMOSTRAZIONI: scrivile in LaTeX "
+    "(`$...$` in linea, `$$...$$` per i passaggi), riportando tutti i passaggi "
+    "visibili.\n"
+    "• GRAFICI, DIAGRAMMI, TABELLE, SCHEMI: descrivili indicando assi, valori, "
+    "relazioni e la conclusione che mostrano.\n"
+    "• TESTO significativo di slide (titoli, definizioni, elenchi): riportalo.\n"
+    "Regole: NON descrivere volti, persone che parlano, sfondi, arredi o elementi "
+    "decorativi. Se il fotogramma non contiene NULLA di tecnico/informativo (solo "
+    "una persona che parla, una slide di titolo, una transizione), rispondi "
+    "ESATTAMENTE con la sola parola: NIENTE. Rispondi in italiano, conciso e ben "
+    "strutturato, senza preamboli e SENZA includere il tuo ragionamento: fornisci "
+    "solo il risultato finale."
+)
+_VISION_USER_PROMPT = "Estrai il contenuto tecnico/informativo visibile in questo fotogramma."
+
+
+def _strip_think(text: str) -> str:
+    """Rimuove il ragionamento <think>…</think> dei modelli "reasoning".
+
+    Molti modelli (es. qwen3) antepongono alla risposta un lungo blocco di
+    ragionamento racchiuso in <think>…</think>: va tolto, altrimenti inquina le
+    note visive e il riassunto (e gonfia l'input di 5-7×)."""
+    import re
+    t = re.sub(r"(?is)<think\b.*?</think>", "", text or "")
+    # Tag di apertura rimasto senza chiusura (output troncato): tieni ciò che
+    # segue una eventuale chiusura, altrimenti scarta il ragionamento incompleto.
+    low = t.lower()
+    i = low.find("<think")
+    if i != -1:
+        j = low.find("</think>", i)
+        t = t[j + len("</think>"):] if j != -1 else t[:i]
+    return re.sub(r"(?is)</?think>", "", t).strip()
+
+
+def _dedup_visual_notes(notes: list[dict]) -> list[dict]:
+    """Scarta le note visive quasi-identiche (stessa slide ripresa più volte),
+    tenendo la PRIMA occorrenza. Confronto per similarità di Jaccard sui termini
+    significativi: una slide/definizione rimasta a lungo a schermo genera note
+    duplicate che, senza questo filtro, farebbero ripetere il riassunto."""
+    import re
+
+    def sig(t: str) -> set:
+        words = re.findall(r"[a-zà-ù0-9]+", t.lower())
+        return {w for w in words if len(w) > 2}
+
+    kept: list[dict] = []
+    sigs: list[set] = []
+    for n in notes:
+        s = sig(n.get("text", ""))
+        if not s:
+            continue
+        if any((len(s & ps) / (len(s | ps) or 1)) > 0.8 for ps in sigs):
+            continue
+        kept.append(n)
+        sigs.append(s)
+    return kept
+
+
+def _fix_mermaid_arrows(text: str) -> str:
+    """Corregge la sintassi errata delle frecce Mermaid: '-->|etichetta|>' non è
+    valido, va scritto '-->|etichetta|'. I modelli la sbagliano spesso."""
+    import re
+    return re.sub(r"(-->\s*\|[^|]*\|)>", r"\1", text or "")
+
+
+def _strip_mermaid_blocks(text: str) -> str:
+    """Rimuove i blocchi ```mermaid (rete di sicurezza quando la mappa concettuale
+    è disattivata e il modello ne genera comunque una)."""
+    import re
+    return re.sub(r"```mermaid\b.*?```\s*", "", text or "", flags=re.S).strip()
+
+
+def _encode_image_b64(path: str) -> str:
+    """Legge un'immagine e la codifica in base64 (per le API vision)."""
+    import base64
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode("ascii")
+
+
+def _vision_groq(client, b64: str) -> str:
+    """Analizza un fotogramma con un modello multimodale di Groq.
+
+    I modelli "reasoning" (es. qwen3) antepongono un blocco <think>…</think>:
+    proviamo a disattivarlo a monte (reasoning_effort, per non sprecare token) e
+    in ogni caso lo rimuoviamo dall'output con _strip_think."""
+    data_url = f"data:image/jpeg;base64,{b64}"
+    messages = [
+        {"role": "system", "content": _VISION_SYSTEM_PROMPT},
+        {"role": "user", "content": [
+            {"type": "text", "text": _VISION_USER_PROMPT},
+            {"type": "image_url", "image_url": {"url": data_url}},
+        ]},
+    ]
+    try:
+        resp = client.chat.completions.create(
+            model=GROQ_VISION_MODEL, messages=messages, temperature=0.2,
+            reasoning_effort="none")
+    except Exception as e:
+        if _is_rate_limit(str(e)):
+            raise
+        # Il modello non accetta 'reasoning_effort': riprova senza il parametro.
+        resp = client.chat.completions.create(
+            model=GROQ_VISION_MODEL, messages=messages, temperature=0.2)
+    return _strip_think(resp.choices[0].message.content or "")
+
+
+def _vision_ollama(b64: str) -> str:
+    """Analizza un fotogramma con un modello vision locale via Ollama (HTTP)."""
+    import urllib.request
+    payload = {
+        "model": OLLAMA_VISION_MODEL,
+        "messages": [
+            {"role": "system", "content": _VISION_SYSTEM_PROMPT},
+            {"role": "user", "content": _VISION_USER_PROMPT, "images": [b64]},
+        ],
+        "stream": False,
+        "options": {"temperature": 0.2, "num_ctx": OLLAMA_NUM_CTX},
+    }
+    req = urllib.request.Request(
+        OLLAMA_HOST + "/api/chat",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=600) as r:
+        data = json.loads(r.read().decode("utf-8"))
+    return _strip_think(data.get("message", {}).get("content") or "")
+
+
+def _check_ollama_vision() -> None:
+    """Verifica Ollama + presenza di un modello vision; spiega come rimediare."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(OLLAMA_HOST + "/api/tags", timeout=5) as r:
+            tags = json.loads(r.read().decode("utf-8"))
+    except Exception:
+        raise RuntimeError(
+            f"Ollama non raggiungibile su {OLLAMA_HOST}. Per l'analisi visiva in "
+            "locale installa Ollama (https://ollama.com), avvialo e scarica un "
+            f"modello vision, es:  ollama pull {OLLAMA_VISION_MODEL}")
+    names = [m.get("name", "") for m in tags.get("models", [])]
+    base = OLLAMA_VISION_MODEL.split(":")[0]
+    if not any(n.split(":")[0] == base for n in names):
+        raise RuntimeError(
+            f"Modello vision '{OLLAMA_VISION_MODEL}' non presente in Ollama. "
+            f"Scaricalo con:  ollama pull {OLLAMA_VISION_MODEL}")
+
+
+def _make_vision_analyzer(client=None):
+    """Sceglie il motore dell'analisi visiva e restituisce (funzione(b64)->testo, etichetta).
+
+    Preferisce Groq se c'è un client (backend cloud), altrimenti Ollama in locale
+    (100% offline). RuntimeError se nessuno è utilizzabile (il chiamante può così
+    saltare l'analisi senza bloccare il resto)."""
+    if client is not None:
+        return (lambda b64: _vision_groq(client, b64)), f"Groq · {GROQ_VISION_MODEL}"
+    _check_ollama_vision()
+    return (lambda b64: _vision_ollama(b64)), f"locale · Ollama {OLLAMA_VISION_MODEL}"
+
+
+def _is_empty_visual(text: str) -> bool:
+    """True se la risposta del modello vision equivale a 'NIENTE' (frame vuoto)."""
+    norm = (text or "").upper()
+    for ch in "*_.!#>` \n\t-":
+        norm = norm.replace(ch, "")
+    return norm == "" or norm == "NIENTE"
+
+
+def analyze_video_visuals(video_path: str, duration: float, workdir: str,
+                          client=None, frames_out_dir: str | None = None,
+                          on_progress=None, quiet: bool = False) -> list[dict]:
+    """Estrae i fotogrammi chiave del video e li "legge" con un modello vision.
+
+    Restituisce una lista di NOTE VISIVE {'start': sec, 'text': str, 'image': str},
+    una per fotogramma con informazione (i "vuoti" — volti, transizioni — vengono
+    scartati). Se 'frames_out_dir' è dato, COPIA lì il fotogramma di ogni nota
+    tenuta (il workdir temporaneo verrà cancellato) e ne salva il nome in 'image'.
+
+    Doppia modalità di output, così è riusabile sia dalla CLI sia dal motore/GUI:
+    con 'on_progress(phase,cur,total,detail)' riporta tramite callback (niente
+    console rich); senza, usa la console rich (CLI). 'quiet' silenzia comunque la
+    console. Lista vuota se non c'è nulla o se il motore vision non è disponibile."""
+    use_rich = on_progress is None and not quiet
+
+    def _report(cur, total, detail):
+        if on_progress:
+            on_progress("visual", cur, total, detail)
+
+    try:
+        analyze_fn, label = _make_vision_analyzer(client)
+    except RuntimeError as e:
+        if use_rich:
+            console.print(f"[warning]Analisi visiva non disponibile: {e}[/warning]")
+        _report(None, None, f"Analisi visiva non disponibile: {e}")
+        return []
+
+    _report(None, None, "Individuo i fotogrammi chiave (cambi scena)…")
+    if use_rich:
+        with console.status("[info]Individuo i fotogrammi chiave (cambi scena)...[/info]", spinner="dots"):
+            frames = extract_keyframes(video_path, duration, workdir)
+    else:
+        frames = extract_keyframes(video_path, duration, workdir)
+    if not frames:
+        if use_rich:
+            console.print("[warning]Nessun fotogramma significativo individuato.[/warning]")
+        _report(None, None, "Nessun fotogramma significativo individuato")
+        return []
+    if use_rich:
+        console.print(f"  {SYM_OK} [info]{len(frames)}[/info] fotogrammi da analizzare ({label})")
+    _report(0, len(frames), f"{len(frames)} fotogrammi da analizzare ({label})")
+
+    notes: list[dict] = []
+
+    def _process(update) -> None:
+        for i, (ts, path) in enumerate(frames, 1):
+            if _interrupted:
+                break
+            try:
+                text = analyze_fn(_encode_image_b64(path))
+            except Exception as e:
+                if _is_rate_limit(str(e)):
+                    if use_rich:
+                        console.print("[warning]Crediti Groq esauriti durante l'analisi visiva: "
+                                      "proseguo con i fotogrammi già letti.[/warning]")
+                    _report(i, len(frames), "Crediti Groq esauriti durante l'analisi visiva")
+                    break
+                text = ""
+            if text and not _is_empty_visual(text):
+                notes.append({"start": float(ts), "text": text.strip(), "_frame": path})
+            update(i)
+
+    if use_rich:
+        progress = Progress(
+            SpinnerColumn("dots", style="bright_yellow"),
+            TextColumn("[phase]{task.description}"),
+            BarColumn(bar_width=40, style="bar.back", complete_style="bright_yellow", finished_style="bold yellow"),
+            TaskProgressColumn(), console=console, expand=False,
+        )
+        with progress:
+            task_id = progress.add_task("Analizzo i fotogrammi", total=len(frames))
+            _process(lambda i: progress.update(task_id, completed=i))
+    else:
+        _process(lambda i: _report(i, len(frames), f"Analizzo fotogramma {i}/{len(frames)}"))
+
+    raw = len(notes)
+    notes = _dedup_visual_notes(notes)  # scarta slide ripetute (stesso contenuto a schermo)
+    # Conserva i fotogrammi delle note TENUTE: il workdir temporaneo verrà
+    # cancellato, quindi li copiamo nella cartella definitiva e ne salviamo il nome.
+    if frames_out_dir:
+        try:
+            os.makedirs(frames_out_dir, exist_ok=True)
+            for idx, note in enumerate(notes):
+                src = note.get("_frame")
+                if src and os.path.isfile(src):
+                    name = f"frame_{idx:03d}_{int(note['start'])}s.jpg"
+                    shutil.copyfile(src, os.path.join(frames_out_dir, name))
+                    note["image"] = name
+        except OSError:
+            pass
+    for note in notes:
+        note.pop("_frame", None)
+    if use_rich:
+        dropped = f" ([dim]{raw - len(notes)} duplicati scartati[/dim])" if raw != len(notes) else ""
+        console.print(f"  {SYM_OK} Contenuti visivi estratti: [info]{len(notes)}[/info] su {len(frames)} fotogrammi{dropped}")
+    _report(len(frames), len(frames), f"{len(notes)} contenuti visivi estratti su {len(frames)} fotogrammi")
+    return notes
+
+
+def save_visual_notes(out_root: str, meta: dict, notes: list[dict],
+                      engine_label: str, do_export: bool, ui_lang: str = "it",
+                      quiet: bool = False) -> None:
+    """Salva le NOTE VISIVE in results/<title>/analisi_visiva/.
+
+    Produce: il .json, un .md leggibile e — se l'export è attivo — un PDF "ricco"
+    in cui OGNI nota mostra il suo FOTOGRAMMA accanto al contenuto estratto
+    (codice/formula/grafico), così il frame fa da prova/riferimento visivo.
+    'quiet' silenzia la console (per il motore/GUI, che riporta a modo suo)."""
+    if not notes:
+        return
+    safe = _safe_filename(meta["title"])
+    video_dir = os.path.join(out_root, safe)
+    vdir = os.path.join(video_dir, visual_subdir(ui_lang))
+    frames_dir = os.path.join(vdir, "frames")
+    os.makedirs(vdir, exist_ok=True)
+    base = os.path.join(vdir, f"{safe}_visivo")
+    payload = {
+        "title": meta["title"],
+        "engine": engine_label,
+        "count": len(notes),
+        "notes": [{"start": n["start"],
+                   "timestamp": _format_timestamp(n["start"]),
+                   "image": n.get("image"),
+                   "text": n["text"]} for n in notes],
+    }
+    with open(base + ".json", "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    # Markdown del documento: fotogramma (se presente) + testo, per ogni nota.
+    # 'img_prefix' permette link RELATIVI per il .md (portabile) e ASSOLUTI per il
+    # PDF (il browser headless deve trovare i file).
+    def _companion_md(img_prefix: str) -> str:
+        out = [f"# {meta['title']} — Analisi visiva", "",
+               f"- **Estratto con:** {engine_label}",
+               f"- **Fotogrammi con contenuto:** {len(notes)}", "", "---", ""]
+        for n in notes:
+            out.append(f"## [{_format_timestamp(n['start'])}]")
+            out.append("")
+            if n.get("image"):
+                out.append(f"![fotogramma {_format_timestamp(n['start'])}]({img_prefix}{n['image']})")
+                out.append("")
+            out.append(n["text"])
+            out.append("")
+        return "\n".join(out)
+
+    with open(base + ".md", "w", encoding="utf-8") as f:
+        f.write(_companion_md("frames/"))
+    if not quiet:
+        console.print(f"  {SYM_OK} Analisi visiva salvata in [info]{visual_subdir(ui_lang)}/[/info]")
+
+    # PDF "ricco": fotogramma + testo estratto, uno per nota (immagini con percorso
+    # ASSOLUTO). Solo se l'export è attivo e ci sono davvero dei fotogrammi salvati.
+    if do_export and RICH_PDF and any(n.get("image") for n in notes):
+        try:
+            if quiet:
+                build_pdf_rich(_companion_md(frames_dir + os.sep), base + ".pdf")
+            else:
+                with console.status("[info]Creo il PDF dell'analisi visiva (fotogrammi + testo)...[/info]", spinner="dots"):
+                    ok = build_pdf_rich(_companion_md(frames_dir + os.sep), base + ".pdf")
+                if ok:
+                    console.print(f"  {SYM_OK} PDF analisi visiva con i fotogrammi creato.")
+        except Exception:
+            pass
+
+
+def load_visual_notes(out_root: str, title: str) -> list[dict]:
+    """Rilegge le note visive salvate (per arricchire il riassunto). [] se assenti."""
+    safe = _safe_filename(title)
+    for sub in VISUAL_SUBDIRS.values():
+        p = os.path.join(out_root, safe, sub, f"{safe}_visivo.json")
+        if os.path.isfile(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                # Pulizia difensiva anche in lettura: toglie eventuale ragionamento
+                # <think> e le note duplicate (così il riassunto resta pulito anche
+                # rigenerandolo da note salvate da versioni precedenti).
+                cleaned = []
+                for n in d.get("notes", []):
+                    txt = _strip_think(n.get("text", ""))
+                    if txt and not _is_empty_visual(txt):
+                        cleaned.append({"start": float(n.get("start") or 0), "text": txt,
+                                        "image": n.get("image")})
+                return _dedup_visual_notes(cleaned)
+            except Exception:
+                return []
+    return []
+
+
+def _append_frames_to_sections(sections: list[dict], notes: list[dict], img_path_fn) -> list[dict]:
+    """Aggiunge in coda a OGNI sezione i suoi FOTOGRAMMI (per timestamp) come
+    immagini markdown. 'img_path_fn(nome_immagine) -> percorso' consente link
+    relativi (per il .md, portabile) o assoluti (per il PDF). Non muta gli input."""
+    notes = sorted([n for n in notes if n.get("image")], key=lambda n: n["start"])
+    if not notes:
+        return sections
+    out = [dict(s) for s in sections]
+    if any(s.get("start") is not None for s in out):
+        bounds = []
+        for i, s in enumerate(out):
+            st = s.get("start") or 0
+            nxt = out[i + 1].get("start") if i + 1 < len(out) else None
+            bounds.append((st, nxt if nxt is not None else float("inf")))
+        buckets: list[list[dict]] = [[] for _ in out]
+        for note in notes:
+            placed = False
+            for i, (st, en) in enumerate(bounds):
+                if st <= note["start"] < en:
+                    buckets[i].append(note)
+                    placed = True
+                    break
+            if not placed:
+                buckets[-1].append(note)
+    else:
+        buckets = [list(notes)] + [[] for _ in out[1:]]
+    for i, s in enumerate(out):
+        if buckets[i]:
+            gallery = "\n\n".join(
+                f"![Fotogramma {_format_timestamp(n['start'])}]({img_path_fn(n['image'])})"
+                for n in buckets[i])
+            s["text"] = s.get("text", "").rstrip() + "\n\n**📷 Fotogrammi dal video:**\n\n" + gallery
+    return out
+
+
+def _merge_visual_into_sections(sections: list[dict], notes: list[dict]) -> list[dict]:
+    """Inserisce le note visive nel testo delle sezioni in base al timestamp.
+
+    Ogni nota finisce nella sezione il cui intervallo [start, start_successiva)
+    contiene il suo timestamp; se le sezioni non hanno start (testo continuo) le
+    note vanno in coda in ordine. Diventano annotazioni «[A SCHERMO — mm:ss] …»
+    così il modello del riassunto le vede insieme al parlato. Non muta gli input."""
+    if not notes:
+        return sections
+    notes = sorted(notes, key=lambda n: n["start"])
+    out = [dict(s) for s in sections]
+
+    def _annotate(items: list[dict]) -> str:
+        return "\n\n".join(
+            f"[A SCHERMO — {_format_timestamp(n['start'])}]\n{n['text']}" for n in items)
+
+    if any(s.get("start") is not None for s in out):
+        bounds = []
+        for i, s in enumerate(out):
+            st = s.get("start") or 0
+            nxt = out[i + 1].get("start") if i + 1 < len(out) else None
+            en = nxt if nxt is not None else float("inf")
+            bounds.append((st, en))
+        buckets: list[list[dict]] = [[] for _ in out]
+        for note in notes:
+            placed = False
+            for i, (st, en) in enumerate(bounds):
+                if st <= note["start"] < en:
+                    buckets[i].append(note)
+                    placed = True
+                    break
+            if not placed:
+                buckets[-1].append(note)
+        for i, s in enumerate(out):
+            if buckets[i]:
+                s["text"] = (s.get("text", "").strip() + "\n\n" + _annotate(buckets[i])).strip()
+    else:
+        out[0]["text"] = (out[0].get("text", "").strip() + "\n\n" + _annotate(notes)).strip()
+    return out
+
+
 def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
                   client, local_model: str | None,
-                  resume_cp: dict | None = None) -> list[dict] | None:
+                  resume_cp: dict | None = None,
+                  want_visual: bool = False,
+                  out_root: str | None = None) -> tuple[list[dict], list[dict]] | None:
     """Acquire the audio for ONE source and transcribe it.
 
     'source' is ('youtube', url) or ('local', filepath). For a local file there
@@ -1927,6 +2579,9 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
     il chiamante non salva una trascrizione incompleta). Returns the segments, or
     None on interruption / failure."""
     kind, ref = source
+    # L'analisi visiva ha senso solo su sorgenti con traccia video (YouTube o
+    # file video locali; un mp3 non ha fotogrammi).
+    do_visual = bool(want_visual) and (kind == "youtube" or _has_video_stream(ref))
 
     # Build the phase labels dynamically so "Fase x/y" is always correct.
     phase_names = []
@@ -1935,23 +2590,40 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
     if backend == "groq":
         phase_names.append("prepare")
     phase_names.append("transcribe")
+    if do_visual:
+        phase_names.append("visual")
     n = len(phase_names)
     step = {name: i + 1 for i, name in enumerate(phase_names)}
 
     # ignore_cleanup_errors: evita il PermissionError (WinError 32) su Windows se
     # l'audio temporaneo resta bloccato un istante da ffmpeg/whisper alla chiusura.
     with tempfile.TemporaryDirectory(prefix="echoscript_", ignore_cleanup_errors=True) as workdir:
-        # --- Acquire the audio ---
+        # --- Acquire the audio (e, se richiesta l'analisi visiva, il video) ---
+        media_path = None  # file VIDEO da cui estrarre i fotogrammi (analisi visiva)
         if kind == "youtube":
             console.print()
-            console.rule(f"[phase]⬇ Fase {step['download']}/{n} — Download audio[/phase]", style="bright_blue")
-            audio_path = download_audio(ref, workdir)
+            dl_label = "Download video" if do_visual else "Download audio"
+            console.rule(f"[phase]⬇ Fase {step['download']}/{n} — {dl_label}[/phase]", style="bright_blue")
+            if do_visual:
+                # Un solo download: dal video estraiamo SIA i fotogrammi SIA l'audio.
+                media_path = download_video(ref, workdir)
+                if media_path:
+                    audio_path = media_path
+                else:
+                    console.print("[warning]Download del video non riuscito: proseguo con il "
+                                  "solo audio (analisi visiva disattivata).[/warning]")
+                    do_visual = False
+                    audio_path = download_audio(ref, workdir)
+            else:
+                audio_path = download_audio(ref, workdir)
             if not audio_path or _interrupted:
                 console.print("[warning]Download non completato.[/warning]")
                 return None
         else:
             # Local file: feed it directly (ffmpeg/whisper read it in place).
             audio_path = ref
+            if do_visual:
+                media_path = ref
 
         # Duration: from metadata if present, otherwise probe the file with ffprobe.
         duration = meta["duration"] or _probe_duration(audio_path)
@@ -2031,9 +2703,28 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
         # Lingua dell'audio rilevata da Whisper (per la card di riepilogo).
         meta["detected_language"] = detected
 
+        # --- Analisi visiva (opzionale): "leggi" i fotogrammi del video ---
+        # Va fatta ORA, finché il file video esiste (per YouTube è nella cartella
+        # temporanea, cancellata all'uscita dal blocco `with`).
+        visual_notes: list[dict] = []
+        if do_visual and media_path and not _interrupted:
+            console.print()
+            console.rule(f"[phase]👁 Fase {step['visual']}/{n} — Analisi visiva (cosa si VEDE)[/phase]",
+                         style="bright_yellow")
+            # Cartella DEFINITIVA dei fotogrammi (li copiamo qui prima che il
+            # workdir temporaneo venga cancellato), così il documento li mostra.
+            frames_out_dir = None
+            if out_root:
+                frames_out_dir = os.path.join(out_root, _safe_filename(meta["title"]),
+                                              visual_subdir(), "frames")
+            visual_notes = analyze_video_visuals(media_path, duration, workdir, client,
+                                                 frames_out_dir=frames_out_dir)
+
     # (Here the temporary folder has already been deleted: the data we need
-    #  — the segments — is already in memory.)
-    return segments or None
+    #  — segments and visual notes — is already in memory.)
+    if not segments:
+        return None
+    return segments, visual_notes
 
 
 def _save_outputs(meta: dict, segments: list[dict], engine_label: str,
@@ -2069,13 +2760,11 @@ def _save_outputs(meta: dict, segments: list[dict], engine_label: str,
     if do_export:
         console.print()
         console.rule("[phase]📄 Esportazione PDF[/phase]", style="bright_blue")
-        for title, secs, ts, base_path, etichetta in [(meta["title"], sections, True, base_orig, "originale")]:
-            try:
-                with console.status(f"[info]Creo il PDF ({etichetta})...[/info]", spinner="dots"):
-                    build_pdf(title, meta, secs, f"{base_path}.pdf", with_timestamps=ts)
-                created.append(os.path.relpath(f"{base_path}.pdf", video_dir).replace("\\", "/"))
-            except Exception as e:
-                console.print(f"[error]Export fallito ({etichetta}): {e}[/error]")
+        with console.status("[info]Creo il PDF...[/info]", spinner="dots"):
+            ok = _save_pdf(meta, sections, f"{base_orig}.pdf", with_timestamps=True,
+                           engine_label=engine_label)
+        if ok:
+            created.append(os.path.relpath(f"{base_orig}.pdf", video_dir).replace("\\", "/"))
 
     # --- Summary ---
     n_words = sum(len(s["text"].split()) for s in segments)
@@ -2181,12 +2870,11 @@ def translate_existing(out_root: str, title: str, target: str = "it",
     _save(f"{base}.json",
           json.dumps({"target": target, "sections": translated}, ensure_ascii=False, indent=2))
     if do_export:
-        try:
-            with console.status("[info]Creo il PDF (traduzione)...[/info]", spinner="dots"):
-                build_pdf(meta["title"], meta, translated, f"{base}.pdf", with_timestamps=False)
+        with console.status("[info]Creo il PDF (traduzione)...[/info]", spinner="dots"):
+            ok = _save_pdf(meta, translated, f"{base}.pdf", with_timestamps=False,
+                           engine_label=engine_label)
+        if ok:
             created.append(os.path.relpath(f"{base}.pdf", video_dir).replace("\\", "/"))
-        except Exception as e:
-            console.print(f"[error]Export PDF traduzione fallito: {e}[/error]")
 
     files = "  ".join(os.path.splitext(c.split('/')[-1])[1] for c in created)
     console.print()
@@ -2240,6 +2928,307 @@ _SUMMARY_SYSTEM_PROMPT = (
     "entra direttamente nel contenuto."
 )
 
+# Estensione del prompt usata quando il testo contiene anche le note dell'ANALISI
+# VISIVA: istruisce il modello a integrare codice, formule e diagrammi visti a
+# schermo e ad aggiungere una mappa concettuale quando il contenuto è visuale.
+_SUMMARY_VISUAL_BASE = (
+    "\nIl testo può contenere annotazioni nel formato «[A SCHERMO — mm:ss] …» che "
+    "riportano ciò che era VISIBILE nel video in quel momento (codice, formule, "
+    "grafici, diagrammi, slide). Trattale come fonte attendibile quanto il parlato "
+    "e INTEGRALE nel riassunto in modo naturale, secondo queste regole aggiuntive:\n"
+    "• riporta il CODICE in blocchi markdown delimitati da ``` con il linguaggio "
+    "indicato, preservandolo fedelmente;\n"
+    "• scrivi le FORMULE e le relative dimostrazioni in LaTeX (`$...$` in linea, "
+    "`$$...$$` per i passaggi), includendo tutti i passaggi mostrati;\n"
+    "• descrivi GRAFICI, DIAGRAMMI e TABELLE riportandone dati, assi, relazioni e "
+    "la conclusione.\n"
+    "Importante: se la stessa slide, definizione o diagramma compare in più "
+    "annotazioni (perché restava a schermo a lungo), trattalo UNA volta sola e non "
+    "ripetere paragrafi o concetti già esposti. Non limitarti a citare le "
+    "annotazioni: fondile nel discorso come parte integrante della spiegazione."
+)
+# Variante CON mappa concettuale (attivabile via ECHOSCRIPT_CONCEPT_MAP=1).
+_SUMMARY_VISUAL_MAP = (
+    "\nSe (e solo se) il contenuto è prevalentemente concettuale o animato, "
+    "aggiungi UNA SOLA mappa concettuale complessiva alla fine, in un blocco "
+    "```mermaid con sintassi `graph TD` e archi nel formato corretto "
+    "`A -->|etichetta| B` (MAI `A -->|etichetta|> B`); non ripetere lo stesso "
+    "diagramma più volte."
+)
+# Variante SENZA mappa (default): vietiamo esplicitamente i diagrammi mermaid.
+_SUMMARY_VISUAL_NOMAP = (
+    "\nNON generare mappe concettuali, diagrammi né blocchi ```mermaid: limitati a "
+    "prosa, elenchi essenziali, codice e formule."
+)
+_SUMMARY_SYSTEM_PROMPT_VISUAL = _SUMMARY_SYSTEM_PROMPT + _SUMMARY_VISUAL_BASE + _SUMMARY_VISUAL_NOMAP
+_SUMMARY_SYSTEM_PROMPT_VISUAL_MAP = _SUMMARY_SYSTEM_PROMPT + _SUMMARY_VISUAL_BASE + _SUMMARY_VISUAL_MAP
+# Override temporaneo del prompt di sistema del riassunto (impostato da
+# summarize_existing quando ci sono note visive da integrare). None = prompt base.
+_SUMMARY_PROMPT_OVERRIDE = None
+
+
+def _active_summary_prompt() -> str:
+    """Prompt di sistema del riassunto attualmente attivo (base o «visivo»)."""
+    return globals().get("_SUMMARY_PROMPT_OVERRIDE") or _SUMMARY_SYSTEM_PROMPT
+
+
+# === PDF "RICCO": HTML (MathJax + Mermaid) stampato da un browser headless =====
+
+PDF_ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".pdfassets")
+# Librerie JS scaricate UNA volta in cache locale (poi funziona anche offline).
+_PDF_ASSET_URLS = {
+    "tex-svg.js": "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js",
+    "mermaid.min.js": "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js",
+}
+
+_PDF_HTML_TEMPLATE = """<!doctype html>
+<html lang="it"><head><meta charset="utf-8">
+<style>
+  @page { margin: 1.6cm 1.7cm; }
+  body { font-family: 'Segoe UI', Calibri, Arial, sans-serif; color: #1b1b1b;
+         line-height: 1.55; font-size: 12pt; }
+  h1 { color: #0b6b3a; font-size: 20pt; margin: 0 0 4px; }
+  h2 { color: #0b6b3a; font-size: 15pt; margin: 22px 0 8px;
+       border-bottom: 2px solid #d8efe2; padding-bottom: 3px; }
+  h3 { color: #128a4b; font-size: 13pt; margin: 16px 0 6px; }
+  strong { color: #0b3b22; }
+  p { margin: 0 0 10px; text-align: justify; }
+  ul { margin: 0 0 10px; padding-left: 22px; }
+  hr { border: none; border-top: 1px solid #e2e2e2; margin: 14px 0; }
+  code { font-family: Consolas, 'Courier New', monospace; font-size: 10.5pt;
+         background: #f3f4f6; padding: 1px 4px; border-radius: 4px; }
+  pre { background: #f6f8fa; border: 1px solid #e6e8eb; border-radius: 8px;
+        padding: 12px 14px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  .mermaid { background: #fbfdfc; border: 1px solid #eef3f0; border-radius: 8px;
+             padding: 12px; text-align: center; margin: 0 0 12px; }
+  img { max-width: 100%; max-height: 15cm; display: block; margin: 8px 0 12px;
+        border: 1px solid #e3e7e4; border-radius: 8px; }
+</style>
+<script>window.MathJax = {tex: {inlineMath: [['$','$']], displayMath: [['$$','$$']]},
+  svg: {fontCache: 'global'}};</script>
+<script src="__MATHJAX__"></script>
+<script src="__MERMAID__"></script>
+<script>window.addEventListener('load', function () {
+  if (window.mermaid) { try { mermaid.initialize({startOnLoad: true, theme: 'neutral'}); } catch (e) {} }
+});</script>
+</head><body>
+__BODY__
+</body></html>
+"""
+
+
+def _md_inline_to_html(text: str) -> str:
+    """Converte il markup inline di una riga: escape HTML + grassetto **…**."""
+    import re
+    import html as _html
+    text = _html.escape(text, quote=False)
+    return re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
+
+
+def _md_to_html(md: str) -> str:
+    """Converte il markdown del riassunto in HTML per il PDF "ricco".
+
+    Gestisce: titoli, grassetto, elenchi, righello, blocchi di codice e mermaid,
+    e lascia INTATTE le formule `$…$`/`$$…$$` (le renderizza MathJax). I blocchi
+    di codice/formule vengono "messi da parte" per non essere alterati dall'escape
+    o dalla formattazione."""
+    import re
+    import html as _html
+    store: dict[str, str] = {}
+    block_keys: set[str] = set()  # placeholder che sono elementi di blocco (pre/mermaid)
+
+    def _stash(content: str, block: bool = False) -> str:
+        key = f"\x00{len(store)}\x00"
+        store[key] = content
+        if block:
+            block_keys.add(key)
+        return key
+
+    # 1) Blocchi recintati ``` ``` (incl. ```mermaid). Il contenuto va escapato:
+    # il browser lo de-escapa nel textContent, quindi mermaid riceve i caratteri
+    # giusti (es. le frecce -->), ma l'HTML resta valido.
+    def _fence(m):
+        lang = (m.group(1) or "").strip().lower()
+        body = _html.escape(m.group(2))
+        if lang == "mermaid":
+            return _stash(f'<pre class="mermaid">{body}</pre>', block=True)
+        return _stash(f"<pre><code>{body}</code></pre>", block=True)
+
+    md = re.sub(r"```([^\n]*)\n(.*?)```", _fence, md, flags=re.S)
+
+    # 1b) Immagini ![alt](src): elemento di blocco. I percorsi locali diventano
+    # file:// così il browser headless li carica.
+    def _img(m):
+        import pathlib
+        alt = _html.escape(m.group(1))
+        src = m.group(2).strip()
+        if "://" not in src:
+            try:
+                src = pathlib.Path(src).as_uri()
+            except Exception:
+                pass
+        return _stash(f'<img alt="{alt}" src="{src}">', block=True)
+
+    md = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", _img, md)
+    # 2) Formule: lasciate grezze (MathJax le legge dal testo), ma messe da parte
+    # così l'escape non tocca eventuali < > al loro interno.
+    md = re.sub(r"\$\$(.+?)\$\$", lambda m: _stash(f"$${m.group(1)}$$"), md, flags=re.S)
+    md = re.sub(r"\$(.+?)\$", lambda m: _stash(f"${m.group(1)}$"), md)
+    # 3) Codice inline `…`
+    md = re.sub(r"`([^`]+)`", lambda m: _stash(f"<code>{_html.escape(m.group(1))}</code>"), md)
+
+    # 4) Struttura a blocchi, riga per riga.
+    out: list[str] = []
+    para: list[str] = []
+    in_list = False
+
+    def _flush_para():
+        if para:
+            out.append("<p>" + _md_inline_to_html(" ".join(para)) + "</p>")
+            para.clear()
+
+    def _close_list():
+        nonlocal in_list
+        if in_list:
+            out.append("</ul>")
+            in_list = False
+
+    for line in md.split("\n"):
+        s = line.strip()
+        if not s:
+            _flush_para(); _close_list(); continue
+        if s in block_keys:  # blocco codice/mermaid: elemento a sé, niente <p>
+            _flush_para(); _close_list(); out.append(s); continue
+        if s.startswith("### "):
+            _flush_para(); _close_list(); out.append("<h3>" + _md_inline_to_html(s[4:]) + "</h3>")
+        elif s.startswith("## "):
+            _flush_para(); _close_list(); out.append("<h2>" + _md_inline_to_html(s[3:]) + "</h2>")
+        elif s.startswith("# "):
+            _flush_para(); _close_list(); out.append("<h1>" + _md_inline_to_html(s[2:]) + "</h1>")
+        elif s in ("---", "***", "___"):
+            _flush_para(); _close_list(); out.append("<hr>")
+        elif s.startswith("- ") or s.startswith("* "):
+            _flush_para()
+            if not in_list:
+                out.append("<ul>"); in_list = True
+            out.append("<li>" + _md_inline_to_html(s[2:]) + "</li>")
+        else:
+            _close_list(); para.append(s)
+    _flush_para(); _close_list()
+
+    body = "\n".join(out)
+    # 5) Ripristina i blocchi messi da parte (codice/mermaid/formule).
+    for key, content in store.items():
+        body = body.replace(key, content)
+    return body
+
+
+def _ensure_pdf_assets():
+    """Restituisce (path_mathjax, path_mermaid), scaricandoli in cache se mancano.
+
+    None se non è possibile procurarseli (niente rete e niente cache)."""
+    import urllib.request
+    try:
+        os.makedirs(PDF_ASSETS_DIR, exist_ok=True)
+    except OSError:
+        return None
+    paths = {}
+    for name, url in _PDF_ASSET_URLS.items():
+        p = os.path.join(PDF_ASSETS_DIR, name)
+        if not (os.path.isfile(p) and os.path.getsize(p) > 10000):
+            try:
+                with urllib.request.urlopen(url, timeout=30) as r:
+                    data = r.read()
+                with open(p, "wb") as f:
+                    f.write(data)
+            except Exception:
+                return None
+        paths[name] = p
+    return paths["tex-svg.js"], paths["mermaid.min.js"]
+
+
+def _find_browser() -> str | None:
+    """Trova un browser Chromium (Edge/Chrome) per la stampa PDF. None se assente."""
+    candidates: list[str] = []
+    if BROWSER_PATH:
+        candidates.append(BROWSER_PATH)
+    for name in ("msedge", "chrome", "chromium", "chromium-browser", "brave"):
+        found = shutil.which(name)
+        if found:
+            candidates.append(found)
+    bases = [os.environ.get("ProgramFiles", r"C:\Program Files"),
+             os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+             os.environ.get("LocalAppData", "")]
+    for base in bases:
+        if not base:
+            continue
+        candidates.append(os.path.join(base, "Microsoft", "Edge", "Application", "msedge.exe"))
+        candidates.append(os.path.join(base, "Google", "Chrome", "Application", "chrome.exe"))
+    for c in candidates:
+        if c and os.path.isfile(c):
+            return c
+    return None
+
+
+def build_pdf_rich(md_text: str, out_path: str) -> bool:
+    """Genera un PDF con formule (MathJax) e mappe (Mermaid) DISEGNATE.
+
+    Converte il markdown in HTML e lo stampa con un browser Chromium headless già
+    presente sul sistema. Restituisce True se il PDF è stato creato, False se non
+    è possibile (nessun browser/asset): in tal caso il chiamante ripiega su fpdf2."""
+    import pathlib
+    browser = _find_browser()
+    if not browser:
+        return False
+    assets = _ensure_pdf_assets()
+    if not assets:
+        return False
+    mathjax, mermaid = assets
+    html_doc = (_PDF_HTML_TEMPLATE
+                .replace("__MATHJAX__", pathlib.Path(mathjax).as_uri())
+                .replace("__MERMAID__", pathlib.Path(mermaid).as_uri())
+                .replace("__BODY__", _md_to_html(md_text)))
+    with tempfile.TemporaryDirectory(prefix="echoscript_pdf_", ignore_cleanup_errors=True) as td:
+        html_path = os.path.join(td, "doc.html")
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(html_doc)
+        cmd = [
+            browser, "--headless=new", "--disable-gpu", "--no-sandbox",
+            "--no-first-run", "--no-default-browser-check", "--disable-extensions",
+            # virtual-time-budget: lascia a MathJax/Mermaid il tempo di disegnare
+            # prima di stampare (altrimenti il PDF esce a metà rendering).
+            "--virtual-time-budget=20000", "--run-all-compositor-stages-before-draw",
+            f"--print-to-pdf={out_path}", pathlib.Path(html_path).as_uri(),
+        ]
+        try:
+            subprocess.run(cmd, capture_output=True, timeout=120)
+        except Exception:
+            return False
+    return os.path.isfile(out_path) and os.path.getsize(out_path) > 1500
+
+
+def _save_pdf(meta: dict, sections: list[dict], out_path: str, with_timestamps: bool,
+              engine_label: str = "", markdown: bool = False) -> bool:
+    """Esporta un PDF: prima quello "ricco" (formule/mappe disegnate via browser
+    headless), poi ripiega su fpdf2. NON usa Groq — lavora su testo già prodotto,
+    quindi NESSUN credito speso. Restituisce True se il PDF è stato creato."""
+    if RICH_PDF:
+        try:
+            md_text = build_md(meta["title"], meta, engine_label, sections,
+                               with_timestamps=with_timestamps)
+            if build_pdf_rich(md_text, out_path):
+                return True
+        except Exception:
+            pass
+    try:
+        build_pdf(meta["title"], meta, sections, out_path,
+                  with_timestamps=with_timestamps, markdown=markdown)
+        return True
+    except Exception as e:
+        console.print(f"[error]Export PDF fallito: {e}[/error]")
+        return False
+
 
 def _summary_user_prompt(text: str, section_title: str | None) -> str:
     """Messaggio utente per il modello: titolo della sezione (se c'è) + testo."""
@@ -2252,7 +3241,7 @@ def _summarize_groq(client, text: str, section_title: str | None) -> str:
     resp = client.chat.completions.create(
         model=GROQ_SUMMARY_MODEL,
         messages=[
-            {"role": "system", "content": _SUMMARY_SYSTEM_PROMPT},
+            {"role": "system", "content": _active_summary_prompt()},
             {"role": "user", "content": _summary_user_prompt(text, section_title)},
         ],
         temperature=0.3,
@@ -2279,7 +3268,7 @@ def _summarize_ollama(text: str, section_title: str | None) -> str:
     payload = {
         "model": OLLAMA_MODEL,
         "messages": [
-            {"role": "system", "content": _SUMMARY_SYSTEM_PROMPT},
+            {"role": "system", "content": _active_summary_prompt()},
             {"role": "user", "content": _summary_user_prompt(text, section_title)},
         ],
         "stream": False,
@@ -2375,6 +3364,14 @@ def summarize_existing(out_root: str, title: str, client=None,
     if not sections:
         return False
 
+    # Arricchimento visivo: se esistono note visive salvate (analisi dei
+    # fotogrammi), le fondiamo nelle sezioni per timestamp e attiveremo il prompt
+    # «visivo» (codice/formule/grafici/mappa concettuale nel riassunto).
+    visual_notes = load_visual_notes(out_root, title)
+    if visual_notes:
+        sections = _merge_visual_into_sections(sections, visual_notes)
+        console.print(f"  [dim]👁  Riassunto arricchito con {len(visual_notes)} contenuti visivi a schermo.[/dim]")
+
     try:
         summarize_fn, engine_label = _make_summarizer(client)
     except RuntimeError as e:
@@ -2396,6 +3393,14 @@ def summarize_existing(out_root: str, title: str, client=None,
         BarColumn(bar_width=40, style="bar.back", complete_style="bright_magenta", finished_style="bold magenta"),
         TaskProgressColumn(), console=console, expand=False,
     )
+    # Attiva il prompt «visivo» solo durante questo riassunto (reset nel finally,
+    # così un job successivo nel batch senza note visive torna al prompt base).
+    # Con/senza mappa concettuale a seconda di CONCEPT_MAP.
+    if visual_notes:
+        globals()["_SUMMARY_PROMPT_OVERRIDE"] = (
+            _SUMMARY_SYSTEM_PROMPT_VISUAL_MAP if CONCEPT_MAP else _SUMMARY_SYSTEM_PROMPT_VISUAL)
+    else:
+        globals()["_SUMMARY_PROMPT_OVERRIDE"] = None
     try:
         with progress:
             task_id = progress.add_task("Riassumo le sezioni", total=len(sections))
@@ -2409,6 +3414,16 @@ def summarize_existing(out_root: str, title: str, client=None,
         else:
             console.print(f"[error]Riassunto fallito: {e}[/error]")
         return False
+    finally:
+        globals()["_SUMMARY_PROMPT_OVERRIDE"] = None
+
+    # Pulizia diagrammi: corregge le frecce Mermaid e, se la mappa concettuale è
+    # disattivata, rimuove eventuali blocchi mermaid sfuggiti al modello.
+    for sec in summarized:
+        txt = _fix_mermaid_arrows(sec.get("text", ""))
+        if not CONCEPT_MAP:
+            txt = _strip_mermaid_blocks(txt)
+        sec["text"] = txt
 
     created: list[str] = []
 
@@ -2417,16 +3432,28 @@ def summarize_existing(out_root: str, title: str, client=None,
             f.write(content)
         created.append(os.path.relpath(path, video_dir).replace("\\", "/"))
 
-    # Il riassunto è testo pulito: niente timestamp.
-    _save(f"{base}.md", build_md(meta["title"], meta, engine_label, summarized, with_timestamps=False))
+    # Fotogrammi nel riassunto: aggiungiamo i frame (per timestamp) alle sezioni.
+    # Sono salvati in analisi_visiva/frames/: link RELATIVO per il .md (portabile)
+    # e ASSOLUTO per il PDF (il browser deve trovarli). Costo Groq aggiuntivo: 0
+    # (i frame esistono già, nessuna nuova chiamata al modello vision).
+    frame_notes = [n for n in visual_notes if n.get("image")] if SUMMARY_FRAMES else []
+    sections_md, sections_pdf = summarized, summarized
+    if frame_notes:
+        frames_dir = os.path.join(video_dir, visual_subdir(ui_lang), "frames")
+        rel_prefix = f"../{visual_subdir(ui_lang)}/frames/"
+        sections_md = _append_frames_to_sections(summarized, frame_notes, lambda img: rel_prefix + img)
+        sections_pdf = _append_frames_to_sections(summarized, frame_notes,
+                                                  lambda img: os.path.join(frames_dir, img))
+
+    # Il riassunto è testo pulito: niente timestamp. Il .txt resta senza immagini.
+    _save(f"{base}.md", build_md(meta["title"], meta, engine_label, sections_md, with_timestamps=False))
     _save(f"{base}.txt", build_txt(meta["title"], meta, summarized, markdown=True))
     if do_export:
-        try:
-            with console.status("[info]Creo il PDF (riassunto)...[/info]", spinner="dots"):
-                build_pdf(meta["title"], meta, summarized, f"{base}.pdf", with_timestamps=False, markdown=True)
+        with console.status("[info]Creo il PDF (formule, mappe e fotogrammi)...[/info]", spinner="dots"):
+            ok = _save_pdf(meta, sections_pdf, f"{base}.pdf", with_timestamps=False,
+                           engine_label=engine_label, markdown=True)
+        if ok:
             created.append(os.path.relpath(f"{base}.pdf", video_dir).replace("\\", "/"))
-        except Exception as e:
-            console.print(f"[error]Export PDF riassunto fallito: {e}[/error]")
 
     files = "  ".join(os.path.splitext(c.split('/')[-1])[1] for c in created)
     console.print()
@@ -2555,6 +3582,20 @@ def run() -> None:
     if al:
         LANGUAGE = al
 
+    # --- Analisi visiva opzionale (solo se la sorgente ha dei fotogrammi) ---
+    has_video_source = (source_kind == "youtube") or any(
+        kind == "local" and os.path.splitext(ref)[1].lower() in VIDEO_EXTENSIONS
+        for _, (kind, ref) in jobs)
+    want_visual = False
+    if has_video_source:
+        console.print()
+        console.print("  [bold bright_yellow]👁  Analisi visiva del video (sperimentale)[/bold bright_yellow]")
+        console.print("  [dim]Oltre all'audio, EchoScript può «guardare» i fotogrammi ed estrarre ciò che è[/dim]")
+        console.print("  [dim]scritto a schermo — codice, formule, grafici, diagrammi — per includerlo nel[/dim]")
+        console.print("  [dim]riassunto. È più lento e, con Groq, consuma crediti per ogni fotogramma.[/dim]")
+        v_eng = "Groq cloud" if backend == "groq" else f"Ollama locale ({OLLAMA_VISION_MODEL})"
+        want_visual = _confirm(f"Attivo l'analisi visiva? (motore: {v_eng})", accent="bright_yellow")
+
     # We initialize the Groq client only if it is really needed (cloud backend),
     # and only after the user's confirmation.
     client = None
@@ -2652,14 +3693,22 @@ def run() -> None:
                 _drop_cp()
                 resume_cp = None
 
-        segments = _run_pipeline(meta, source, backend, client, local_model, resume_cp)
-        if not segments:
+        result = _run_pipeline(meta, source, backend, client, local_model,
+                               resume_cp, want_visual, out_root)
+        if not result or not result[0]:
             # _run_pipeline ha già spiegato il motivo (interruzione/limite o errore).
             continue
+        segments, visual_notes = result
         # Se si è completato in locale dopo il limite Groq, l'etichetta motore è
         # stata aggiornata (Groq + Locale); altrimenti vale quella scelta a monte.
         label = meta.pop("engine_label_override", engine_label)
         _save_outputs(meta, segments, label, do_export, out_root)
+        # Analisi visiva: salva le note (json + md) accanto alla trascrizione, così
+        # il riassunto (anche se rigenerato in seguito) le ritrova e le integra.
+        if visual_notes:
+            v_label = (f"Groq · {GROQ_VISION_MODEL}" if client is not None
+                       else f"Ollama · {OLLAMA_VISION_MODEL}")
+            save_visual_notes(out_root, meta, visual_notes, v_label, do_export)
         # Traduzione automatica dopo una trascrizione COMPLETATA (rilegge il .json
         # appena scritto). Si arriva qui solo se _run_pipeline ha restituito i
         # segmenti, cioè a trascrizione al 100%: i parziali da crediti esauriti

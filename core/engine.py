@@ -19,6 +19,7 @@ import os
 import sys
 import json
 import time
+import shutil
 import subprocess
 import tempfile
 
@@ -343,6 +344,44 @@ def download_audio(url: str, workdir: str, on_progress=_noop) -> str:
     raise EngineError("File audio non trovato dopo il download.")
 
 
+def download_video(url: str, workdir: str, on_progress=_noop) -> str:
+    """Scarica il VIDEO (a risoluzione contenuta) per l'analisi visiva.
+
+    A differenza di download_audio, qui serve l'immagine: da questo unico file si
+    estraggono SIA i fotogrammi SIA l'audio per la trascrizione. Restituisce il
+    percorso del video. Raises EngineError on failure."""
+    out_template = os.path.join(workdir, "video.%(ext)s")
+
+    def hook(d: dict) -> None:
+        if d["status"] == "downloading":
+            total = d.get("total_bytes") or d.get("total_bytes_estimate")
+            done = d.get("downloaded_bytes", 0)
+            on_progress("download", done, total, "Scarico video")
+        elif d["status"] == "finished":
+            on_progress("download", None, None, "Preparo il video")
+
+    h = tx.VISION_YT_MAX_HEIGHT
+    ydl_opts = {
+        "format": f"bestvideo[height<={h}]+bestaudio/best[height<={h}]/best",
+        "merge_output_format": "mp4",
+        "outtmpl": out_template,
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+        "progress_hooks": [hook],
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+    except Exception as e:
+        raise EngineError(f"Errore nel download video: {e}")
+
+    for fname in os.listdir(workdir):
+        if fname.startswith("video."):
+            return os.path.join(workdir, fname)
+    raise EngineError("File video non trovato dopo il download.")
+
+
 # === AUDIO SPLITTING (Groq only) ===
 
 def split_audio(audio_path: str, duration: float, workdir: str, on_progress=_noop) -> list[tuple[float, str]]:
@@ -578,9 +617,34 @@ def transcribe_only(source: str, options: dict, on_progress=_noop, resume: bool 
         else:
             local_cp = tx.load_local_checkpoint(meta)
 
+    # Analisi visiva: serve il VIDEO (non solo l'audio) e va CONSERVATO oltre il
+    # workdir temporaneo, perché i fotogrammi si estraggono nella fase 2
+    # (save_results). Per YouTube lo scarichiamo in una cartella che sopravvive;
+    # per un file locale usiamo il file stesso. Chiavi con underscore: i builder
+    # dei file non le serializzano.
+    do_visual = bool(options.get("visual")) and (
+        source_kind == "youtube" or tx._has_video_stream(source))
+    meta["_video_path"] = None
+    meta["_video_tmpdir"] = None
+
     with tempfile.TemporaryDirectory(prefix="echoscript_", ignore_cleanup_errors=True) as workdir:
         if source_kind == "local":
             audio_path = source  # fed directly to ffmpeg / whisper
+            if do_visual:
+                meta["_video_path"] = source  # il file locale resta dov'è
+        elif do_visual:
+            # Un solo download (video): da qui estraiamo audio e fotogrammi.
+            vtmp = tempfile.mkdtemp(prefix="echoscript_vid_")
+            try:
+                meta["_video_path"] = download_video(source, vtmp, on_progress)
+                meta["_video_tmpdir"] = vtmp
+                audio_path = meta["_video_path"]
+            except EngineError:
+                # Video non scaricabile: ripiego su solo-audio (niente analisi visiva).
+                shutil.rmtree(vtmp, ignore_errors=True)
+                do_visual = False
+                meta["_video_path"] = None
+                audio_path = download_audio(source, workdir, on_progress)
         else:
             audio_path = download_audio(source, workdir, on_progress)
         duration = meta["duration"] or tx._probe_duration(audio_path)
@@ -752,20 +816,13 @@ def _translate_outputs(meta: dict, sections: list[dict], options: dict,
            json.dumps({"target": target, "sections": translated}, ensure_ascii=False, indent=2),
            created, video_dir)
     if options.get("export"):
-        for attempt in (1, 2):
-            try:
-                _ensure_dir(f"{base}.pdf")
-                tx.build_pdf(meta["title"], meta, translated, f"{base}.pdf", with_timestamps=False)
+        try:
+            _ensure_dir(f"{base}.pdf")
+            if tx._save_pdf(meta, translated, f"{base}.pdf", with_timestamps=False,
+                            engine_label=engine_label):
                 created.append(os.path.relpath(f"{base}.pdf", video_dir).replace("\\", "/"))
-                break
-            except OSError:
-                if attempt == 2:
-                    warnings.append("PDF della traduzione non creato (errore filesystem).")
-                else:
-                    time.sleep(0.4)
-            except Exception as e:
-                warnings.append(f"PDF della traduzione non creato: {e}")
-                break
+        except Exception as e:
+            warnings.append(f"PDF della traduzione non creato: {e}")
     return translated
 
 
@@ -788,12 +845,16 @@ def _resolve_summary_client(options: dict, client):
 
 def _summarize_outputs(meta: dict, sections: list[dict], options: dict,
                        video_dir: str, created: list[str], warnings: list[str],
-                       client=None, on_progress=_noop) -> None:
+                       client=None, on_progress=_noop, visual_notes=None) -> None:
     """Summarize the (Italian) sections per-section and write md/txt(+pdf).
 
     'sections' should already be Italian (the translation when available, else
     the original). Uses Groq when a client/key is available, else Ollama. Any
-    failure becomes a warning — the transcription/translation stay saved."""
+    failure becomes a warning — the transcription/translation stay saved.
+
+    Se 'visual_notes' è dato (analisi visiva), le note vengono fuse nel testo per
+    timestamp, si attiva il prompt «visivo» (codice/formule/mappe) e i FOTOGRAMMI
+    vengono inseriti nel riassunto. Il PDF è quello "ricco" (formule/mappe/frame)."""
     sum_client = _resolve_summary_client(options, client)
     try:
         summarize_fn, engine_label = tx._make_summarizer(sum_client)
@@ -807,8 +868,16 @@ def _summarize_outputs(meta: dict, sections: list[dict], options: dict,
     suffix = tx.SUMMARY_SUFFIX.get(ui_lang or "it", tx.SUMMARY_SUFFIX["it"])
     base = os.path.join(sum_dir, f"{safe_title}_{suffix}")
 
+    # Arricchimento visivo: fonde le note nelle sezioni e attiva il prompt giusto.
+    visual_notes = visual_notes or []
+    if visual_notes:
+        sections = tx._merge_visual_into_sections(sections, visual_notes)
+
     n = len(sections)
     on_progress("summarize", 0, n, "Riassumo le sezioni")
+    tx._SUMMARY_PROMPT_OVERRIDE = (
+        (tx._SUMMARY_SYSTEM_PROMPT_VISUAL_MAP if tx.CONCEPT_MAP else tx._SUMMARY_SYSTEM_PROMPT_VISUAL)
+        if visual_notes else None)
     try:
         summarized = tx.summarize_sections(
             sections, summarize_fn,
@@ -821,25 +890,38 @@ def _summarize_outputs(meta: dict, sections: list[dict], options: dict,
         else:
             warnings.append(f"Riassunto fallito: {e}")
         return
+    finally:
+        tx._SUMMARY_PROMPT_OVERRIDE = None
 
-    # Il riassunto è testo pulito: niente timestamp.
-    _write(f"{base}.md", tx.build_md(meta["title"], meta, engine_label, summarized, with_timestamps=False), created, video_dir)
+    # Pulizia diagrammi: corregge le frecce Mermaid e, se la mappa concettuale è
+    # disattivata, rimuove eventuali blocchi mermaid sfuggiti al modello.
+    for sec in summarized:
+        txt = tx._fix_mermaid_arrows(sec.get("text", ""))
+        if not tx.CONCEPT_MAP:
+            txt = tx._strip_mermaid_blocks(txt)
+        sec["text"] = txt
+
+    # Fotogrammi nel riassunto (link RELATIVI nel .md, ASSOLUTI nel PDF).
+    frame_notes = [n for n in visual_notes if n.get("image")] if tx.SUMMARY_FRAMES else []
+    sections_md, sections_pdf = summarized, summarized
+    if frame_notes:
+        frames_dir = os.path.join(video_dir, tx.visual_subdir(ui_lang), "frames")
+        rel_prefix = f"../{tx.visual_subdir(ui_lang)}/frames/"
+        sections_md = tx._append_frames_to_sections(summarized, frame_notes, lambda img: rel_prefix + img)
+        sections_pdf = tx._append_frames_to_sections(summarized, frame_notes,
+                                                    lambda img: os.path.join(frames_dir, img))
+
+    # Il riassunto è testo pulito: niente timestamp. Il .txt resta senza immagini.
+    _write(f"{base}.md", tx.build_md(meta["title"], meta, engine_label, sections_md, with_timestamps=False), created, video_dir)
     _write(f"{base}.txt", tx.build_txt(meta["title"], meta, summarized, markdown=True), created, video_dir)
     if options.get("export"):
-        for attempt in (1, 2):
-            try:
-                _ensure_dir(f"{base}.pdf")
-                tx.build_pdf(meta["title"], meta, summarized, f"{base}.pdf", with_timestamps=False, markdown=True)
+        try:
+            _ensure_dir(f"{base}.pdf")
+            if tx._save_pdf(meta, sections_pdf, f"{base}.pdf", with_timestamps=False,
+                            engine_label=engine_label, markdown=True):
                 created.append(os.path.relpath(f"{base}.pdf", video_dir).replace("\\", "/"))
-                break
-            except OSError:
-                if attempt == 2:
-                    warnings.append("PDF del riassunto non creato (errore filesystem).")
-                else:
-                    time.sleep(0.4)
-            except Exception as e:
-                warnings.append(f"PDF del riassunto non creato: {e}")
-                break
+        except Exception as e:
+            warnings.append(f"PDF del riassunto non creato: {e}")
 
 
 def save_results(meta: dict, segments: list[dict], engine_label: str, options: dict,
@@ -868,31 +950,61 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
     _write(f"{base_orig}.txt", tx.build_txt(meta["title"], meta, sections), created, video_dir)
     _write(f"{base_orig}.json", tx.build_transcript_json(meta, segments, engine_label), created, video_dir)
 
-    # Optional PDF export of the transcription.
+    # Optional PDF export of the transcription (PDF "ricco": formule/mappe/frame
+    # renderizzati via browser headless, con ripiego automatico su fpdf2).
     if do_export:
         on_progress("export", None, None, "Creo il PDF")
-        for attempt in (1, 2):  # defensive dir-ensure + single retry (OneDrive)
-            try:
-                _ensure_dir(f"{base_orig}.pdf")
-                tx.build_pdf(meta["title"], meta, sections, f"{base_orig}.pdf", with_timestamps=True)
+        try:
+            _ensure_dir(f"{base_orig}.pdf")
+            if tx._save_pdf(meta, sections, f"{base_orig}.pdf", with_timestamps=True,
+                            engine_label=engine_label):
                 created.append(os.path.relpath(f"{base_orig}.pdf", video_dir).replace("\\", "/"))
-                break
-            except OSError:
-                if attempt == 2:
-                    raise
-                time.sleep(0.4)
+        except Exception as e:
+            warnings.append(f"PDF della trascrizione non creato: {e}")
 
     # --- Optional translation (to Italian) and per-section summary ---
     # The transcription is already on disk, so any failure here is a warning, not
     # a fatal error. The summary works on the ITALIAN text: the translation when
     # produced, otherwise the original (already Italian, or accepted as-is).
+    # Un solo client chat per tutto il post-processing (analisi visiva, traduzione,
+    # riassunto): se è None siamo offline, quindi traduzione/vision vanno in locale
+    # (Ollama). Risolto solo se serve (evita una validazione Groq di rete a vuoto).
+    chat_client = (_resolve_summary_client(options, client)
+                   if (options.get("translate") or options.get("summarize")
+                       or options.get("visual"))
+                   else None)
+
+    # --- Analisi visiva (opzionale): legge i fotogrammi del video, salva il
+    # documento dedicato e fornisce le note per arricchire il riassunto ---
+    visual_notes: list[dict] = []
+    visual_info = None
+    if options.get("visual") and meta.get("_video_path"):
+        try:
+            vis_label = (f"Groq · {tx.GROQ_VISION_MODEL}" if chat_client is not None
+                         else f"Ollama · {tx.OLLAMA_VISION_MODEL}")
+            frames_out = os.path.join(video_dir, tx.visual_subdir(options.get("ui_lang", "it")), "frames")
+            with tempfile.TemporaryDirectory(prefix="echoscript_vis_", ignore_cleanup_errors=True) as vwork:
+                visual_notes = tx.analyze_video_visuals(
+                    meta["_video_path"], meta.get("duration") or 0.0, vwork,
+                    client=chat_client, frames_out_dir=frames_out, on_progress=on_progress)
+            if visual_notes:
+                tx.save_visual_notes(out_root, meta, visual_notes, vis_label,
+                                     do_export, options.get("ui_lang", "it"), quiet=True)
+                visual_info = {
+                    "count": len(visual_notes),
+                    "with_image": sum(1 for n in visual_notes if n.get("image")),
+                    "dir": os.path.join(video_dir, tx.visual_subdir(options.get("ui_lang", "it"))),
+                }
+        except Exception as e:
+            warnings.append(f"Analisi visiva non completata: {e}")
+        finally:
+            # Pulizia del video temporaneo scaricato per la visiva (caso YouTube).
+            if meta.get("_video_tmpdir"):
+                shutil.rmtree(meta["_video_tmpdir"], ignore_errors=True)
+                meta["_video_tmpdir"] = None
+
     translated_sections = None
     audio_lang = meta.get("detected_language")
-    # Un solo client chat per tutto il post-processing: se è None siamo offline,
-    # quindi anche la TRADUZIONE va in locale (Ollama), non solo il riassunto.
-    # Risolto solo se serve (evita una validazione Groq di rete a vuoto).
-    chat_client = (_resolve_summary_client(options, client)
-                   if options.get("translate") or options.get("summarize") else None)
     if options.get("translate"):
         if tx._is_italian(audio_lang):
             warnings.append("Audio già in italiano: traduzione non necessaria.")
@@ -903,7 +1015,7 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
     if options.get("summarize"):
         _summarize_outputs(
             meta, translated_sections or sections, options, video_dir,
-            created, warnings, chat_client, on_progress)
+            created, warnings, chat_client, on_progress, visual_notes=visual_notes)
 
     n_words = sum(len(s["text"].split()) for s in segments)
     # Crediti Groq: secondi audio consumati da QUESTA trascrizione (≈ durata) e i
@@ -924,6 +1036,7 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
         "engine_label": engine_label,
         "warnings": warnings,
         "credits": credits,
+        "visual": visual_info,
     }
 
 

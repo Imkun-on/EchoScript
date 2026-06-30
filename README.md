@@ -56,6 +56,7 @@ python transcriber.py     # interfaccia da terminale (CLI)
 - [📄 Esportazione PDF](#-esportazione-pdf)
 - [🌐 Traduzione automatica](#-traduzione-automatica)
 - [🧠 Riassunto automatico](#-riassunto-automatico)
+- [👁️ Analisi visiva del video](#️-analisi-visiva-del-video)
 - [🛠️ Configurazione](#️-configurazione)
 - [🔒 Privacy](#-privacy)
 - [⚖️ Note legali](#️-note-legali)
@@ -168,9 +169,10 @@ Dopo **"Carica info"** si apre una finestra con la **copertina** del video e i s
 - **Annulla** → lo scarti e puoi incollarne un altro.
 
 ### Passo 3 — "Output aggiuntivi" (opzionale)
-Sotto i due riquadri c'è una card con **due interruttori**, entrambi **spenti** di default (così una trascrizione semplice resta tale):
+Sotto i due riquadri c'è una card con **tre interruttori**, tutti **spenti** di default (così una trascrizione semplice resta tale):
 - 🌐 **Traduci in italiano**: se l'audio **non è già in italiano**, oltre alla trascrizione crea anche una **traduzione** nella sottocartella `traduzioni/` (Google Translate se hai la chiave Groq, altrimenti **Ollama** in locale e 100% offline).
 - 🧠 **Crea riassunto**: genera un **riassunto pulito per sezione** del testo italiano in `riassunti/`. Usa **Groq** se hai caricato la chiave, altrimenti **Ollama** in locale (se installato). Se nessuno dei due è disponibile, la trascrizione viene comunque salvata e compare un avviso.
+- 👁️ **Analisi visiva del video**: "guarda" i fotogrammi ed estrae **codice, formule, grafici** a schermo, includendoli nel riassunto e in un **documento dedicato** con i fotogrammi (vedi il capitolo [Analisi visiva del video](#️-analisi-visiva-del-video)). Compare solo per le sorgenti **video**.
 
 ### Il pulsante "Trascrivi"
 È il grande pulsante verde in basso. Si **attiva** solo quando è tutto pronto. Se lo premi prima, compare una **finestra d'avviso** che ti **elenca cosa manca**, ad esempio:
@@ -234,7 +236,9 @@ Se scegli **Locale**, un secondo pannello ti fa scegliere il modello ogni volta:
 - 📄 **PDF generato sempre** in automatico, diviso per capitoli
 - 🌐 **Traduzione automatica** in italiano (se l'audio non è già in italiano): Google Translate in cloud · Ollama in locale (offline)
 - 🧠 **Riassunto automatico** del testo, **per sezione**: pulisce intercalari, ripetizioni e autocorrezioni (Groq in cloud · Ollama in locale)
-- 🗂️ **Output organizzato** in `results/<nome video>/` nelle sottocartelle `trascrizioni/`, `traduzioni/`, `riassunti/`
+- 👁️ **Analisi visiva del video** (opzionale): "guarda" i fotogrammi ed estrae **codice, formule, grafici e diagrammi** a schermo, integrandoli nel riassunto e in un **documento dedicato con i fotogrammi** (Groq in cloud · Ollama in locale)
+- 📐 **PDF "ricco"**: quando servono, **formule LaTeX** e **mappe** vengono renderizzate e i **fotogrammi** mostrati nel testo (browser di sistema; ripiego automatico su PDF semplice)
+- 🗂️ **Output organizzato** in `results/<nome video>/` nelle sottocartelle `trascrizioni/`, `traduzioni/`, `riassunti/`, `analisi_visiva/`
 - 🎨 **Interfacce curate**: GUI scura con sfondo animato, oppure CLI Rich con barre e pannelli
 - 🔑 **Gestione chiave sicura**: variabile d'ambiente o file `.env` (mai nel codice)
 - 🧯 **Errori chiari**: la chiave viene validata all'avvio; niente retry inutili su errori di autenticazione
@@ -478,13 +482,18 @@ results/
     │   ├── <Nome>_it.txt
     │   ├── <Nome>_it.json     (sezioni tradotte, riusate da «Solo riassunto»)
     │   └── <Nome>_it.pdf
-    └── riassunti/             (riassunto pulito, per sezione)
-        ├── <Nome>_riassunto.md
-        ├── <Nome>_riassunto.txt
-        └── <Nome>_riassunto.pdf
+    ├── riassunti/             (riassunto pulito, per sezione)
+    │   ├── <Nome>_riassunto.md
+    │   ├── <Nome>_riassunto.txt
+    │   └── <Nome>_riassunto.pdf
+    └── analisi_visiva/        (se attivi l'analisi visiva: cosa si VEDE nel video)
+        ├── <Nome>_visivo.md   (ogni fotogramma con il contenuto estratto)
+        ├── <Nome>_visivo.json
+        ├── <Nome>_visivo.pdf  (fotogramma + testo, uno per nota)
+        └── frames/            (i fotogrammi salvati, usati anche nel riassunto)
 ```
 
-> Per i **file locali** `<Nome>` è il nome del file (senza estensione); per i video YouTube è il titolo. In **batch** ogni file produce la sua cartella `results/<nome file>/`. Le cartelle `traduzioni/` e `riassunti/` compaiono solo quando quei passaggi vengono eseguiti.
+> Per i **file locali** `<Nome>` è il nome del file (senza estensione); per i video YouTube è il titolo. In **batch** ogni file produce la sua cartella `results/<nome file>/`. Le cartelle `traduzioni/`, `riassunti/` e `analisi_visiva/` compaiono solo quando quei passaggi vengono eseguiti.
 
 ### Perché tre (anzi quattro) formati e a cosa servono
 
@@ -501,9 +510,10 @@ Non è ridondanza: ogni formato risolve un bisogno diverso, così non sei costre
 
 ## 📄 Esportazione PDF
 
-Il **PDF viene generato sempre, in automatico**. EchoScript crea:
+Il **PDF viene generato sempre, in automatico** — per trascrizione, traduzione e riassunto, **diviso per capitoli**. EchoScript usa **due strategie**, con ripiego automatico:
 
-- **`.pdf`**: tramite `fpdf2` (pure-python, **niente LaTeX da installare**, font Arial per gli accenti), **diviso per capitoli**.
+- 📐 **PDF "ricco" (preferito).** Quando il contenuto contiene **formule**, **mappe concettuali** o **fotogrammi** (analisi visiva), il PDF viene impaginato con un **browser Chromium già presente sul sistema** (Edge su Windows): le **formule LaTeX** sono renderizzate (MathJax), le **mappe** disegnate (Mermaid) e i **fotogrammi** mostrati nel testo. **Nessun LaTeX da installare**; le due librerie JS si scaricano una sola volta in cache locale (poi funziona anche **offline**). Disattivabile con `ECHOSCRIPT_RICH_PDF=0`.
+- 📄 **PDF base (ripiego).** Se non c'è un browser disponibile (o per scelta), si usa `fpdf2` (pure-python, font Arial per gli accenti): testo semplice, sempre disponibile e offline. In questo caso formule e mappe restano come testo grezzo: per la resa "bella" apri il `.md`.
 
 ---
 
@@ -603,6 +613,58 @@ Se trascrivi di nuovo un video **già presente** in `results/`, la CLI mostra un
 
 ---
 
+## 👁️ Analisi visiva del video
+
+> ℹ️ Disponibile sia nella **CLI** sia nella **GUI** (interruttore "Analisi visiva del video" nella card "Output aggiuntivi"). È **opzionale** e viene proposta solo quando la sorgente è un **video** (YouTube o file video locale): un mp3 non ha fotogrammi.
+
+### A cosa serve
+
+In molti video il valore **non è solo in ciò che si sente, ma in ciò che si vede**: un tutorial di programmazione mostra **codice** a schermo, una lezione di matematica scrive **formule e dimostrazioni**, un video tecnico mostra **grafici, diagrammi, tabelle, slide**. La sola trascrizione dell'audio **perde tutto questo**: chi parla dice *"come vedete qui"*, ma "qui" nel testo non c'è.
+
+L'**analisi visiva** aggiunge un secondo "occhio" al tool: oltre a *trascrivere l'audio*, **guarda i fotogrammi** del video ed estrae il contenuto a schermo, integrandolo **nel riassunto** e in un **documento dedicato** con i fotogrammi accanto a ciò che mostrano.
+
+```
+video ──┬─► [audio]  ─► trascrizione (Groq/whisper)  ──┐
+        │                                               ├─► RIASSUNTO (fuso per timestamp)
+        └─► [frame]  ─► analisi visiva (modello vision) ┘
+```
+
+### Come funziona (in 4 passi)
+
+1. **Estrazione intelligente dei fotogrammi.** Non si analizzano tutti i frame (sarebbero decine di migliaia): si usa il **rilevamento dei cambi di scena** di ffmpeg per catturare un fotogramma **quando l'immagine cambia davvero** — una nuova slide, un nuovo blocco di codice, una nuova formula. Sui video statici (un'unica inquadratura) si ripiega su un **campionamento a intervalli** adattivo. I quasi-duplicati vengono scartati e c'è un **tetto massimo** di fotogrammi, per tenere sotto controllo costo e tempo.
+2. **Lettura con un modello "vision".** Ogni fotogramma viene letto da un **modello multimodale** con un prompt mirato: *trascrivi alla lettera il codice (indicando il linguaggio), scrivi le formule in LaTeX con i passaggi, descrivi grafici e diagrammi, riporta il testo delle slide*. I fotogrammi "vuoti" (un volto che parla, una transizione) vengono **scartati**. Due motori, come per trascrizione e riassunto: **Groq** (cloud) o **Ollama** (locale, offline).
+3. **Fusione per timestamp.** Le "note visive" estratte vengono **interlacciate con il parlato** sulla linea temporale, così il modello del riassunto vede *"al minuto 4:12 si dice X **mentre a schermo c'è questo codice/formula**"*.
+4. **Integrazione nel riassunto + documento dedicato.** Il riassunto incorpora il **codice** in blocchi, le **formule** in LaTeX e i **fotogrammi** raggruppati per sezione. In più viene salvato il documento `analisi_visiva/` con **ogni fotogramma accanto al contenuto estratto**.
+
+### Perché così (e non un'"immagine generata")
+
+Per il contenuto tecnico vale una regola: **estrai, non immaginare**. Un modello generativo (text-to-image) "ridisegnerebbe" il grafico inventando valori ed etichette. Invece:
+
+- per il **codice**, la riproduzione fedele è la **trascrizione alla lettera** (già pronta da copiare ed eseguire), e il **fotogramma allegato** fa da prova: verifichi a colpo d'occhio se il modello ha sbagliato un carattere;
+- per **grafici e disegni**, la riproduzione più fedele in assoluto è **il fotogramma stesso** — i pixel originali — che il tool ti mostra accanto alla spiegazione.
+
+### Cosa ottieni
+
+Una nuova sottocartella `analisi_visiva/` con:
+
+- `<Nome>_visivo.md` e `.json` — le note estratte con i loro timestamp;
+- `<Nome>_visivo.pdf` — **ogni fotogramma con accanto il suo contenuto** (codice, formula, descrizione del grafico);
+- `frames/` — i fotogrammi salvati.
+
+E nel **riassunto** trovi il codice e le formule integrati nel testo, con i fotogrammi raggruppati per sezione.
+
+### Costo, requisiti e limiti (in chiaro)
+
+- **Costo.** L'analisi visiva è la parte **più pesante**: le immagini "costano" molti token. Su **Groq** consuma più crediti del resto (in dollari resta bassa — pochi centesimi a video — ma sul **piano gratuito** ne limita il numero giornaliero). In **locale** con Ollama è **gratis e offline**, solo più lenta e richiede un modello vision installato (`ollama pull llama3.2-vision`).
+- **Mostrare i fotogrammi costa zero**: il costo è solo la *lettura* dei frame; allegarli e impaginarli nel PDF è tutto locale.
+- **Limiti onesti.** Il codice è "quasi sempre giusto", ma un singolo carattere errato lo romperebbe: il fotogramma allegato serve proprio a controllare. Il codice che **scorre** su più schermate non viene ancora ricucito in un unico file.
+
+### Configurazione
+
+Tutto regolabile da `.env`: `ECHOSCRIPT_GROQ_VISION_MODEL`, `ECHOSCRIPT_OLLAMA_VISION_MODEL`, `ECHOSCRIPT_VISION_SCENE` (sensibilità ai cambi di scena), `ECHOSCRIPT_VISION_MAX_FRAMES` (tetto fotogrammi), `ECHOSCRIPT_SUMMARY_FRAMES` (fotogrammi nel riassunto), `ECHOSCRIPT_CONCEPT_MAP` (mappa concettuale Mermaid nel riassunto, **disattivata** di default).
+
+---
+
 ## 🛠️ Configurazione
 
 Tutte le "manopole" si impostano da variabili d'ambiente / file `.env` (vedi
@@ -623,6 +685,13 @@ il file `.env`), senza toccare il codice. Ogni valore ha un default sensato:
 | `ECHOSCRIPT_OLLAMA_HOST` | `http://localhost:11434` | Indirizzo del server Ollama |
 | `ECHOSCRIPT_OLLAMA_NUM_CTX` | `8192` | Finestra di contesto Ollama (evita il troncamento sui blocchi lunghi) |
 | `ECHOSCRIPT_SUMMARY_MAX_CHARS` | `12000` | Soglia oltre cui una sezione viene riassunta a blocchi (map-reduce) |
+| `ECHOSCRIPT_GROQ_VISION_MODEL` | `qwen/qwen3.6-27b` | Modello **vision** su Groq (analisi visiva, cloud) |
+| `ECHOSCRIPT_OLLAMA_VISION_MODEL` | `llama3.2-vision` | Modello **vision** su Ollama (analisi visiva, locale) |
+| `ECHOSCRIPT_VISION_SCENE` | `0.4` | Soglia di cambio scena per scegliere i fotogrammi (più basso = più fotogrammi) |
+| `ECHOSCRIPT_VISION_MAX_FRAMES` | `60` | Tetto massimo di fotogrammi analizzati per video (costo/tempo) |
+| `ECHOSCRIPT_SUMMARY_FRAMES` | `1` | Mostra i fotogrammi anche nel riassunto (0 = solo nel documento dedicato) |
+| `ECHOSCRIPT_CONCEPT_MAP` | `0` | Mappa concettuale Mermaid nel riassunto (disattivata di default) |
+| `ECHOSCRIPT_RICH_PDF` | `1` | PDF "ricco" con formule/mappe/frame via browser (0 = solo fpdf2) |
 
 > **Traduzione e riassunto in locale.** Senza chiave Groq, **sia la traduzione sia
 > il riassunto** girano in locale: serve [Ollama](https://ollama.com) installato e

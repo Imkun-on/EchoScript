@@ -58,6 +58,7 @@ python transcriber.py     # terminal interface (CLI)
 - [📄 PDF export](#-pdf-export)
 - [🌐 Automatic translation](#-automatic-translation)
 - [🧠 Automatic summary](#-automatic-summary)
+- [👁️ Visual analysis of the video](#️-visual-analysis-of-the-video)
 - [🛠️ Configuration](#️-configuration)
 - [🔒 Privacy](#-privacy)
 - [⚖️ Legal notice](#️-legal-notice)
@@ -170,9 +171,10 @@ After **"Load info"** a window opens with the video's **cover** and details (cha
 - **Cancel** → discard it and paste another one.
 
 ### Step 3 — "Extra outputs" (optional)
-Below the two tiles there's a card with **two switches**, both **off** by default (so a plain transcription stays plain):
+Below the two tiles there's a card with **three switches**, all **off** by default (so a plain transcription stays plain):
 - 🌐 **Translate to Italian**: if the audio is **not already Italian**, alongside the transcription it also creates a **translation** in the `traduzioni/` subfolder (Google Translate if you have a Groq key, otherwise **Ollama** locally, 100% offline).
 - 🧠 **Create summary**: generates a **clean per-section summary** of the Italian text in `riassunti/`. Uses **Groq** if you've loaded a key, otherwise local **Ollama** (if installed). If neither is available the transcription is still saved and a notice appears.
+- 👁️ **Visual analysis of the video**: "looks" at the frames and extracts on-screen **code, formulas, charts**, weaving them into the summary and into a **dedicated document** with the frames (see the [Visual analysis of the video](#️-visual-analysis-of-the-video) chapter). It only appears for **video** sources.
 
 ### The "Transcribe" button
 It's the big green button at the bottom. It becomes **active** only when everything is ready. If you press it too early, a **warning window** appears **listing what's missing**, for example:
@@ -236,7 +238,9 @@ If you choose **Local**, a second panel lets you pick the model each time:
 - 📄 **PDF always generated** automatically, split by chapter
 - 🌐 **Automatic translation** to Italian (when the audio isn't already Italian): Google Translate in the cloud · Ollama locally (offline)
 - 🧠 **Automatic summary** of the text, **per section**: strips fillers, repetitions and self-corrections (Groq in the cloud · Ollama locally)
-- 🗂️ **Organized output** in `results/<video name>/` under the `trascrizioni/`, `traduzioni/`, `riassunti/` subfolders
+- 👁️ **Visual analysis of the video** (optional): "looks" at the frames and extracts on-screen **code, formulas, charts and diagrams**, weaving them into the summary and into a **dedicated document with the frames** (Groq in the cloud · Ollama locally)
+- 📐 **"Rich" PDF**: when needed, **LaTeX formulas** and **maps** are rendered and the **frames** shown in the text (system browser; automatic fallback to a plain PDF)
+- 🗂️ **Organized output** in `results/<video name>/` under the `trascrizioni/`, `traduzioni/`, `riassunti/`, `analisi_visiva/` subfolders
 - 🎨 **Polished interfaces**: dark GUI with animated background, or Rich CLI with bars and panels
 - 🔑 **Safe key handling**: environment variable or `.env` file (never in the code)
 - 🧯 **Clear errors**: the key is validated at startup; no pointless retries on auth errors
@@ -458,13 +462,18 @@ results/
     │   ├── <Name>_it.txt
     │   ├── <Name>_it.json     (translated sections, reused by "Summary only")
     │   └── <Name>_it.pdf
-    └── riassunti/             (clean summary, per section)
-        ├── <Name>_riassunto.md
-        ├── <Name>_riassunto.txt
-        └── <Name>_riassunto.pdf
+    ├── riassunti/             (clean summary, per section)
+    │   ├── <Name>_riassunto.md
+    │   ├── <Name>_riassunto.txt
+    │   └── <Name>_riassunto.pdf
+    └── analisi_visiva/        (if you enable visual analysis: what is SEEN in the video)
+        ├── <Name>_visivo.md   (each frame with its extracted content)
+        ├── <Name>_visivo.json
+        ├── <Name>_visivo.pdf  (frame + text, one per note)
+        └── frames/            (the saved frames, also used in the summary)
 ```
 
-> For **local files** `<Name>` is the file name (without extension); for YouTube videos it's the title. In **batch**, each file gets its own `results/<file name>/` folder. The `traduzioni/` and `riassunti/` folders appear only when those steps run. (Folder names are in Italian to match the app's interface; in the GUI they follow the chosen UI language, e.g. `transcriptions/`, `translations/`, `summaries/` in English.)
+> For **local files** `<Name>` is the file name (without extension); for YouTube videos it's the title. In **batch**, each file gets its own `results/<file name>/` folder. The `traduzioni/`, `riassunti/` and `analisi_visiva/` folders appear only when those steps run. (Folder names are in Italian to match the app's interface; in the GUI they follow the chosen UI language, e.g. `transcriptions/`, `translations/`, `summaries/` in English.)
 
 ### Why three (actually four) formats, and what they're for
 
@@ -481,9 +490,10 @@ It's not redundancy: each format solves a different need, so you never have to r
 
 ## 📄 PDF export
 
-The **PDF is always generated, automatically**. EchoScript creates:
+The **PDF is always generated, automatically** — for transcription, translation and summary, **split by chapter**. EchoScript uses **two strategies**, with automatic fallback:
 
-- **`.pdf`**: via `fpdf2` (pure-python, **no LaTeX to install**, Arial font for accents), **split by chapter**.
+- 📐 **"Rich" PDF (preferred).** When the content has **formulas**, **concept maps** or **frames** (visual analysis), the PDF is laid out with a **Chromium browser already on the system** (Edge on Windows): **LaTeX formulas** are rendered (MathJax), **maps** drawn (Mermaid) and the **frames** shown in the text. **No LaTeX to install**; the two JS libraries are downloaded once into a local cache (then it works **offline** too). Disable with `ECHOSCRIPT_RICH_PDF=0`.
+- 📄 **Plain PDF (fallback).** If no browser is available (or by choice), it uses `fpdf2` (pure-python, Arial font for accents): simple text, always available and offline. In this case formulas and maps stay as raw text: for the "pretty" rendering open the `.md`.
 
 ---
 
@@ -585,6 +595,58 @@ If you transcribe again a video **already present** in `results/`, the CLI shows
 
 ---
 
+## 👁️ Visual analysis of the video
+
+> ℹ️ Available in both the **CLI** and the **GUI** ("Visual analysis of the video" switch in the "Extra outputs" card). It's **optional** and is offered only when the source is a **video** (YouTube or a local video file): an mp3 has no frames.
+
+### What it's for
+
+In many videos the value **isn't only in what you hear, but in what you see**: a coding tutorial shows **code** on screen, a maths lesson writes **formulas and proofs**, a technical video shows **charts, diagrams, tables, slides**. Transcribing the audio alone **loses all of this**: the speaker says *"as you can see here"*, but "here" isn't in the text.
+
+**Visual analysis** adds a second "eye" to the tool: beyond *transcribing the audio*, it **looks at the video frames** and extracts the on-screen content, weaving it **into the summary** and into a **dedicated document** with the frames next to what they show.
+
+```
+video ──┬─► [audio]  ─► transcription (Groq/whisper) ──┐
+        │                                               ├─► SUMMARY (merged by timestamp)
+        └─► [frames] ─► visual analysis (vision model) ┘
+```
+
+### How it works (in 4 steps)
+
+1. **Smart frame extraction.** It doesn't analyze every frame (there'd be tens of thousands): it uses ffmpeg **scene-change detection** to capture a frame **when the image really changes** — a new slide, a new code block, a new formula. On static videos (a single shot) it falls back to adaptive **interval sampling**. Near-duplicates are dropped and there's a **max cap** on frames, to keep cost and time under control.
+2. **Reading with a "vision" model.** Each frame is read by a **multimodal model** with a focused prompt: *transcribe the code verbatim (with its language), write formulas in LaTeX with the steps, describe charts and diagrams, report the slide text*. "Empty" frames (a talking head, a transition) are **discarded**. Two engines, like for transcription and summary: **Groq** (cloud) or **Ollama** (local, offline).
+3. **Merge by timestamp.** The extracted "visual notes" are **interleaved with the speech** along the timeline, so the summary model sees *"at 4:12 they say X **while this code/formula is on screen**"*.
+4. **Integration into the summary + dedicated document.** The summary embeds the **code** in fenced blocks, the **formulas** in LaTeX and the **frames** grouped by section. On top of that, an `analisi_visiva/` document is saved with **each frame next to its extracted content**.
+
+### Why this way (and not a "generated image")
+
+For technical content there's a rule: **extract, don't imagine**. A generative model (text-to-image) would "redraw" the chart, inventing values and labels. Instead:
+
+- for **code**, the faithful reproduction is the **verbatim transcription** (ready to copy and run), and the **attached frame** acts as proof: you can check at a glance whether the model got a character wrong;
+- for **charts and drawings**, the most faithful reproduction of all is **the frame itself** — the original pixels — shown next to the explanation.
+
+### What you get
+
+A new `analisi_visiva/` subfolder with:
+
+- `<Name>_visivo.md` and `.json` — the extracted notes with their timestamps;
+- `<Name>_visivo.pdf` — **each frame with its content next to it** (code, formula, chart description);
+- `frames/` — the saved frames.
+
+And in the **summary** you'll find code and formulas woven into the text, with frames grouped by section.
+
+### Cost, requirements and limits (in the open)
+
+- **Cost.** Visual analysis is the **heaviest** part: images "cost" many tokens. On **Groq** it uses more credits than the rest (in dollars it stays low — a few cents per video — but on the **free tier** it limits how many you can do per day). **Locally** with Ollama it's **free and offline**, just slower, and needs a vision model installed (`ollama pull llama3.2-vision`).
+- **Showing the frames costs nothing**: the cost is only *reading* the frames; attaching and laying them out in the PDF is all local.
+- **Honest limits.** Code is "almost always right", but a single wrong character would break it: the attached frame is exactly what lets you check. Code that **scrolls** across multiple screens isn't yet stitched back into a single file.
+
+### Configuration
+
+All tunable via `.env`: `ECHOSCRIPT_GROQ_VISION_MODEL`, `ECHOSCRIPT_OLLAMA_VISION_MODEL`, `ECHOSCRIPT_VISION_SCENE` (scene-change sensitivity), `ECHOSCRIPT_VISION_MAX_FRAMES` (frame cap), `ECHOSCRIPT_SUMMARY_FRAMES` (frames in the summary), `ECHOSCRIPT_CONCEPT_MAP` (Mermaid concept map in the summary, **off** by default).
+
+---
+
 ## 🛠️ Configuration
 
 Every "knob" is set via environment variables / a `.env` file (see
@@ -605,6 +667,13 @@ the `.env` file), no code editing needed. Each value has a sensible default:
 | `ECHOSCRIPT_OLLAMA_HOST` | `http://localhost:11434` | Ollama server address |
 | `ECHOSCRIPT_OLLAMA_NUM_CTX` | `8192` | Ollama context window (avoids truncating long blocks) |
 | `ECHOSCRIPT_SUMMARY_MAX_CHARS` | `12000` | Threshold above which a section is summarized in blocks (map-reduce) |
+| `ECHOSCRIPT_GROQ_VISION_MODEL` | `qwen/qwen3.6-27b` | **Vision** model on Groq (visual analysis, cloud) |
+| `ECHOSCRIPT_OLLAMA_VISION_MODEL` | `llama3.2-vision` | **Vision** model on Ollama (visual analysis, local) |
+| `ECHOSCRIPT_VISION_SCENE` | `0.4` | Scene-change threshold for picking frames (lower = more frames) |
+| `ECHOSCRIPT_VISION_MAX_FRAMES` | `60` | Max frames analyzed per video (cost/time) |
+| `ECHOSCRIPT_SUMMARY_FRAMES` | `1` | Show frames in the summary too (0 = only in the dedicated document) |
+| `ECHOSCRIPT_CONCEPT_MAP` | `0` | Mermaid concept map in the summary (off by default) |
+| `ECHOSCRIPT_RICH_PDF` | `1` | "Rich" PDF with formulas/maps/frames via browser (0 = fpdf2 only) |
 
 > **Local translation and summary.** Without a Groq key, **both translation and
 > summary** run locally: requires [Ollama](https://ollama.com) installed and
