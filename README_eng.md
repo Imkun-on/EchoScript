@@ -134,7 +134,7 @@ The **GUI** adds a few conveniences:
 - 🏷️ **Engine badge** during transcription (Groq cloud or Local CPU), so you always know what you're transcribing with
 - 📊 **Dedicated progress window**: a real bar, a checklist of steps and a sentence on what's happening
 - 🌐 **Italian translation** and 🧠 **summary** toggled on via two switches (the "Extra outputs" card)
-- 💰 **Groq API credits**: a button shows the **remaining credits** (and when they reset); when done you also see the ones **used**
+- 💰 **Groq API credits**: a button opens, **per model** (transcription, summary, visual analysis), the **credits used**, **remaining** and the **reset** time (when they refill). Data is read from a passive cache: **the button spends nothing** and the numbers don't drop when you click it
 - 📄 **PDF always generated** automatically
 
 > Both write the same files to `results/<name>/`. Pick whichever you prefer: the result is identical.
@@ -158,7 +158,7 @@ This section is written for **non-technical users**: we explain every screen, ev
 ### Step 1 — "How do you want to transcribe?"
 Two cards to choose from (they glow green when selected):
 - 🔒 **Local**: transcribes **on your computer**, **offline**, sending nothing. Below you can pick the **model** (more accurate = slower). Best with a GPU; slower on CPU.
-- ⚡ **Groq (cloud)**: **very fast**, but the audio is sent to Groq's servers. Needs a **free key**: click **"Load key from .txt file"** and select your key file. The **"Show Groq API credits"** button opens a window listing the **remaining credits** for transcription (audio seconds, requests) and **when they reset**; **"Get a key →"** opens the site to create one.
+- ⚡ **Groq (cloud)**: **very fast**, but the audio is sent to Groq's servers. Needs a **free key**: click **"Load key from .txt file"** and select your key file. The **"Show Groq API credits"** button opens a window that, **for each model** used by the app (transcription, summary, visual analysis), lists the **credits used**, the **remaining** ones (audio seconds, requests, tokens) and the **reset** time; models not used yet this session are still listed. It's all read from a **passive cache**: the window **doesn't contact Groq and spends no credits**, so you can open it as often as you like. **"Get a key →"** opens the site to create one.
 
 > When transcription finishes, the **"Done!"** window also shows the **Groq credits used** (audio transcribed) and those **left for today**.
 
@@ -496,6 +496,12 @@ The **PDF is always generated, automatically** — for transcription, translatio
 - 📐 **"Rich" PDF (preferred).** When the content has **formulas**, **concept maps** or **frames** (visual analysis), the PDF is laid out with a **Chromium browser already on the system** (Edge on Windows): **LaTeX formulas** are rendered (MathJax), **maps** drawn (Mermaid) and the **frames** shown in the text. **No LaTeX to install**; the two JS libraries are downloaded once into a local cache (then it works **offline** too). Disable with `ECHOSCRIPT_RICH_PDF=0`.
 - 📄 **Plain PDF (fallback).** If no browser is available (or by choice), it uses `fpdf2` (pure-python, Arial font for accents): simple text, always available and offline. In this case formulas and maps stay as raw text: for the "pretty" rendering open the `.md`.
 
+**In every PDF** (transcription, translation, summary, visual analysis — cloud or local):
+
+- 🔖 **Clickable table of contents.** Chapters become the PDF **bookmarks/outline**: they show up in the reader's **side panel** (in Edge, the "Contents" button top-left) and clicking one **jumps straight to that chapter**.
+- 🧭 **Clean page.** No **date** at the top, no **file path** at the bottom-left, no **page number** at the bottom-right: the document is tidier.
+- 📁 **"Saved in".** The output folder path is shown **at the top**, among the metadata, right after "Transcribed with".
+
 ---
 
 ## 🌐 Automatic translation
@@ -506,6 +512,7 @@ After transcription, if the audio is **not already in Italian**, EchoScript **tr
 
 - **Two engines, picked automatically.** If you have a **Groq key**, translation uses **Google Translate** (the `deep-translator` library): free, no dedicated API key, **no Groq credits spent**. **Without a key**, locally, it translates with **Ollama on your PC** so it stays **100% offline** (needs Ollama running with the model pulled — the same one used for the summary). The choice mirrors the summary: no key → everything local.
 - The transcription stays intact; the translation goes to `traduzioni/` as separate `.md`/`.txt`/`.pdf` files, **without timings** (continuous text, easier to read).
+- 🇬🇧 **English tech terms stay in English.** Widely-adopted loanwords (e.g. *fine tuning*, *deploy*, *streaming*, *feedback*, *machine learning*) are **not translated or Italianized**. Locally it's Ollama's prompt that preserves them; with Google Translate (cloud) they're shielded with placeholders and restored after translation.
 
 ### How long videos are handled (in blocks)
 
@@ -524,6 +531,8 @@ This way text of any length goes through without errors. If a single sentence we
 After translation (or, if the audio was already Italian, on the **original transcription**), EchoScript generates a **clean summary** of the text, saved to `riassunti/` in the usual `.md`/`.txt`/`.pdf` formats.
 
 > ✨ **Key words in bold.** The summary highlights the central concepts, technical terms, names and relevant figures in **bold** (sparingly, never whole sentences) to aid reading. Bold shows in `.md` and the **PDF**; in the `.txt` (meant for other tools/LLMs) the markers are stripped so it stays plain text.
+
+> 🇬🇧 **Loanwords preserved** and 🩹 **typos fixed.** The summary keeps common English tech terms in English (*fine tuning*, *deploy*, …) and, since it works on an automatic speech transcription, **silently fixes obvious transcription errors** (garbled words, wrong homophones); when in doubt it keeps the original, without inventing.
 
 ### Why a summary is needed too
 

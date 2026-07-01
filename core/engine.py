@@ -313,19 +313,18 @@ def get_cached_credits() -> list[dict]:
     reset_at_iso}]}. 'reset_seconds' è ricalcolato ADESSO dal momento assoluto di
     azzeramento salvato in cache, così resta corretto anche a distanza di ore."""
     now = _datetime.now()
-    role_by_model = {
-        tx.GROQ_MODEL: ("transcription", 0),
-        tx.GROQ_SUMMARY_MODEL: ("summary", 1),
-        tx.GROQ_VISION_MODEL: ("vision", 2),
-    }
-    out: list[dict] = []
-    for snap in tx.cached_rate_limits():
-        model = snap.get("model", "")
-        role, order = role_by_model.get(model, ("other", 9))
-        try:
-            checked = _datetime.fromisoformat(snap["checked_at_iso"]).strftime("%H:%M")
-        except Exception:
-            checked = now.strftime("%H:%M")
+    # I tre modelli Groq usati dall'app, SEMPRE elencati (anche se non ancora
+    # chiamati in questa sessione): così il pannello crediti mostra tutti i modelli
+    # e non solo quelli già interrogati. 'used' distingue i due casi per la GUI.
+    known = [
+        (tx.GROQ_MODEL, "transcription", 0),
+        (tx.GROQ_SUMMARY_MODEL, "summary", 1),
+        (tx.GROQ_VISION_MODEL, "vision", 2),
+    ]
+    known_models = {m for m, _, _ in known}
+    cache_by_model = {snap.get("model", ""): snap for snap in tx.cached_rate_limits()}
+
+    def _items_from(snap: dict) -> list[dict]:
         items: list[dict] = []
         for it in snap.get("items", []):
             rem_s = None
@@ -335,15 +334,40 @@ def get_cached_credits() -> list[dict]:
                     rem_s = max(0.0, (reset_at - now).total_seconds())
                 except Exception:
                     rem_s = None
+            # 'used' = crediti consumati = limite - rimanenti (quando entrambi noti).
+            rem, lim = it.get("remaining"), it.get("limit")
+            used_val = (lim - rem) if (rem is not None and lim is not None) else None
             items.append({
                 "kind": it.get("kind"),
-                "remaining": it.get("remaining"),
-                "limit": it.get("limit"),
+                "remaining": rem,
+                "limit": lim,
+                "used": used_val,
                 "reset_seconds": rem_s,
                 "reset_at_iso": it.get("reset_at_iso"),
             })
-        out.append({"model": model, "role": role, "_order": order,
-                    "checked_at": checked, "items": items})
+        return items
+
+    def _checked(snap: dict) -> str:
+        try:
+            return _datetime.fromisoformat(snap["checked_at_iso"]).strftime("%H:%M")
+        except Exception:
+            return now.strftime("%H:%M")
+
+    out: list[dict] = []
+    for model, role, order in known:
+        snap = cache_by_model.get(model)
+        out.append({
+            "model": model, "role": role, "_order": order,
+            "used": bool(snap),
+            "checked_at": _checked(snap) if snap else None,
+            "items": _items_from(snap) if snap else [],
+        })
+    # Eventuali altri modelli in cache non fra i tre noti (raro): in coda.
+    for model, snap in cache_by_model.items():
+        if model in known_models:
+            continue
+        out.append({"model": model, "role": "other", "_order": 9, "used": True,
+                    "checked_at": _checked(snap), "items": _items_from(snap)})
     out.sort(key=lambda d: d.get("_order", 9))
     return out
 
