@@ -249,8 +249,14 @@ T = {
         "lim_kind_tokens": "Token",
         "lim_remaining": "{rem} / {lim} rimasti",
         "lim_remaining_only": "{rem} rimasti",
+        "lim_used_line": "Crediti utilizzati: {v}",
+        "lim_remaining_line": "Crediti rimanenti: {v}",
+        "lim_reset_line": "Ripristino crediti: {v}",
+        "lim_not_used": "Non ancora utilizzato in questa sessione — nessun credito consumato.",
         "lim_reset_at": "si azzera {clock} (tra {dur})",
         "lim_reset_in": "si azzera tra {dur}",
+        "lim_reset_value_at": "{clock} (tra {dur})",
+        "lim_reset_value_in": "tra {dur}",
         "lim_reset_today": "alle {hm}",
         "lim_reset_tomorrow": "domani alle {hm}",
         "lim_reset_date": "il {dm} alle {hm}",
@@ -440,8 +446,14 @@ T = {
         "lim_kind_tokens": "Tokens",
         "lim_remaining": "{rem} / {lim} left",
         "lim_remaining_only": "{rem} left",
+        "lim_used_line": "Credits used: {v}",
+        "lim_remaining_line": "Credits remaining: {v}",
+        "lim_reset_line": "Credits reset: {v}",
+        "lim_not_used": "Not used yet this session — no credits spent.",
         "lim_reset_at": "resets {clock} (in {dur})",
         "lim_reset_in": "resets in {dur}",
+        "lim_reset_value_at": "{clock} (in {dur})",
+        "lim_reset_value_in": "in {dur}",
         "lim_reset_today": "at {hm}",
         "lim_reset_tomorrow": "tomorrow at {hm}",
         "lim_reset_date": "on {dm} at {hm}",
@@ -584,10 +596,15 @@ class EchoScriptApp:
                 track_color=ft.Colors.with_opacity(0.05, GREEN),
             ),
         )
+        # Dimensioni d'avvio contenute e SEMPRE centrate: su schermi 1080p una
+        # finestra da 900px in altezza arriva quasi ai bordi e i tre pulsanti
+        # (riduci/ingrandisci/chiudi) finiscono a ridosso del bordo superiore
+        # dello schermo. 800px lascia margine e resta comoda; l'utente può sempre
+        # ingrandirla. min_height < altezza così ci sta anche su display piccoli.
         p.window.width = 1040
-        p.window.height = 900
+        p.window.height = 800
         p.window.min_width = 720
-        p.window.min_height = 620
+        p.window.min_height = 600
         p.window.title_bar_hidden = True
         p.window.title_bar_buttons_hidden = True
         p.window.on_event = self._on_window_event
@@ -1130,16 +1147,32 @@ class EchoScriptApp:
 
     def _fmt_limit_value(self, item: dict) -> str:
         """Localized 'remaining / limit' line; audio is shown as mm:ss durations."""
-        rem, lim, kind = item.get("remaining"), item.get("limit"), item.get("kind")
-        def one(v):
-            if v is None:
-                return "?"
-            if kind == "audio_seconds":
-                return tx._format_timestamp(v)
-            return f"{int(v):,}".replace(",", ".")
+        rem, lim = item.get("remaining"), item.get("limit")
         if lim is not None:
-            return self.t("lim_remaining").format(rem=one(rem), lim=one(lim))
-        return self.t("lim_remaining_only").format(rem=one(rem))
+            return self.t("lim_remaining").format(rem=self._fmt_qty(item, rem),
+                                                  lim=self._fmt_qty(item, lim))
+        return self.t("lim_remaining_only").format(rem=self._fmt_qty(item, rem))
+
+    def _fmt_qty(self, item: dict, value) -> str:
+        """Format ONE credit quantity: audio as mm:ss, otherwise a grouped integer.
+        '?' when the value is unknown (missing from the response)."""
+        if value is None:
+            return "?"
+        if item.get("kind") == "audio_seconds":
+            return tx._format_timestamp(value)
+        return f"{int(value):,}".replace(",", ".")
+
+    def _fmt_reset_value(self, item: dict) -> str:
+        """Just the reset instant ('HH:MM (in …)' / 'in …'), no 'resets' prefix.
+        Empty when the reset time is unknown."""
+        sec = item.get("reset_seconds")
+        if sec is None:
+            return ""
+        dur = self._fmt_duration_short(sec)
+        clock = self._reset_clock_label(item.get("reset_at_iso"))
+        if clock:
+            return self.t("lim_reset_value_at").format(clock=clock, dur=dur)
+        return self.t("lim_reset_value_in").format(dur=dur)
 
     def _show_credits(self) -> None:
         """Mostra i crediti Groq residui PER MODELLO.
@@ -1174,9 +1207,25 @@ class EchoScriptApp:
             ]))
             items = m.get("items") or []
             if not items:
-                rows.append(ft.Text(self.t("lim_none"), size=12, color=MUTED))
+                # Modello non ancora chiamato in questa sessione: lo diciamo
+                # esplicitamente (nessun credito consumato: non contattiamo Groq).
+                note = self.t("lim_not_used") if not m.get("used") else self.t("lim_none")
+                rows.append(ft.Text(note, size=12, color=MUTED, no_wrap=False))
             for it in items:
                 kind = it.get("kind", "")
+                reset_val = self._fmt_reset_value(it)
+                # Tre righe richieste: crediti utilizzati, rimanenti, ripristino.
+                lines = [
+                    ft.Text(self.t(f"lim_kind_{kind}") if f"lim_kind_{kind}" in T[self.lang] else kind,
+                            size=14, weight=ft.FontWeight.W_600, color=TEXT),
+                    ft.Text(self.t("lim_used_line").format(v=self._fmt_qty(it, it.get("used"))),
+                            size=12, color=MUTED),
+                    ft.Text(self.t("lim_remaining_line").format(v=self._fmt_limit_value(it)),
+                            size=13, color=GREEN_HI, weight=ft.FontWeight.W_600),
+                ]
+                if reset_val:
+                    lines.append(ft.Text(self.t("lim_reset_line").format(v=reset_val),
+                                         size=11, color=MUTED))
                 rows.append(ft.Container(
                     border_radius=12, padding=14, bgcolor=SURFACE2,
                     border=ft.border.all(1, BORDER),
@@ -1188,14 +1237,7 @@ class EchoScriptApp:
                                 alignment=ft.alignment.center,
                                 bgcolor=ft.Colors.with_opacity(0.12, GREEN),
                                 content=ft.Icon(self._credit_icon(kind), color=GREEN_HI, size=20)),
-                            ft.Column(spacing=2, tight=True, expand=True, controls=[
-                                ft.Text(self.t(f"lim_kind_{kind}") if f"lim_kind_{kind}" in T[self.lang] else kind,
-                                        size=14, weight=ft.FontWeight.W_600, color=TEXT),
-                                ft.Text(self._fmt_limit_value(it), size=13, color=GREEN_HI,
-                                        weight=ft.FontWeight.W_600),
-                                ft.Text(self._fmt_reset(it), size=11, color=MUTED) if self._fmt_reset(it)
-                                else ft.Container(height=0),
-                            ]),
+                            ft.Column(spacing=2, tight=True, expand=True, controls=lines),
                         ])))
         close = ft.FilledButton(
             self.t("btn_close"), icon=ft.Icons.CHECK,

@@ -132,7 +132,7 @@ La **GUI** aggiunge alcune comodità:
 - 🏷️ **Badge del motore** durante la trascrizione (Groq cloud o Locale CPU), così sai sempre con cosa stai trascrivendo
 - 📊 **Finestra di avanzamento dedicata**: barra reale, checklist dei passaggi e una frase su cosa sta avvenendo
 - 🌐 **Traduzione in italiano** e 🧠 **riassunto** attivabili con due interruttori (card "Output aggiuntivi")
-- 💰 **Crediti API Groq**: un pulsante mostra i **crediti residui** (e quando si azzerano); a fine lavoro vedi anche quelli **usati**
+- 💰 **Crediti API Groq**: un pulsante apre, **per ogni modello** (trascrizione, riassunto, analisi visiva), i **crediti utilizzati**, **rimanenti** e il **ripristino** (quando si azzerano). I dati sono letti da una cache passiva: **il pulsante non consuma nulla** e i numeri non calano cliccandolo
 - 📄 **PDF generato sempre** in automatico
 
 > Entrambe scrivono gli stessi file in `results/<nome>/`. Scegli quella che preferisci: il risultato è identico.
@@ -156,7 +156,7 @@ Questa sezione è pensata per chi **non è tecnico**: spieghiamo ogni schermata,
 ### Passo 1 — "Come vuoi trascrivere?"
 Due riquadri da scegliere (si illuminano di verde quando selezionati):
 - 🔒 **Locale**: trascrive **sul tuo computer**, **senza internet** e senza inviare nulla. Sotto puoi scegliere il **modello** (più accurato = più lento). Consigliato se hai una GPU; su CPU è più lento.
-- ⚡ **Groq (cloud)**: **velocissimo**, ma l'audio viene inviato ai server Groq. Richiede una **chiave gratuita**: clicca **"Carica chiave da file .txt"** e seleziona il file con la tua chiave. Il pulsante **"Mostra crediti API Groq"** apre una finestra con l'elenco dei **crediti residui** per la trascrizione (secondi audio, richieste) e **a che ora si azzerano**; **"Ottieni una chiave →"** apre il sito dove crearla.
+- ⚡ **Groq (cloud)**: **velocissimo**, ma l'audio viene inviato ai server Groq. Richiede una **chiave gratuita**: clicca **"Carica chiave da file .txt"** e seleziona il file con la tua chiave. Il pulsante **"Mostra crediti API Groq"** apre una finestra che, **per ogni modello** usato dall'app (trascrizione, riassunto, analisi visiva), elenca i **crediti utilizzati**, quelli **rimanenti** (secondi audio, richieste, token) e il **ripristino** (a che ora si azzerano); i modelli non ancora usati nella sessione sono comunque elencati. È tutto letto da una **cache passiva**: la finestra **non contatta Groq e non consuma crediti**, così puoi aprirla quante volte vuoi. **"Ottieni una chiave →"** apre il sito dove crearla.
 
 > A fine trascrizione, nella finestra **"Completato!"** compaiono anche i **crediti Groq usati** (audio trascritto) e quelli **residui per oggi**.
 
@@ -516,6 +516,12 @@ Il **PDF viene generato sempre, in automatico** — per trascrizione, traduzione
 - 📐 **PDF "ricco" (preferito).** Quando il contenuto contiene **formule**, **mappe concettuali** o **fotogrammi** (analisi visiva), il PDF viene impaginato con un **browser Chromium già presente sul sistema** (Edge su Windows): le **formule LaTeX** sono renderizzate (MathJax), le **mappe** disegnate (Mermaid) e i **fotogrammi** mostrati nel testo. **Nessun LaTeX da installare**; le due librerie JS si scaricano una sola volta in cache locale (poi funziona anche **offline**). Disattivabile con `ECHOSCRIPT_RICH_PDF=0`.
 - 📄 **PDF base (ripiego).** Se non c'è un browser disponibile (o per scelta), si usa `fpdf2` (pure-python, font Arial per gli accenti): testo semplice, sempre disponibile e offline. In questo caso formule e mappe restano come testo grezzo: per la resa "bella" apri il `.md`.
 
+**In ogni PDF** (trascrizione, traduzione, riassunto, analisi visiva — cloud o locale):
+
+- 🔖 **Sommario cliccabile.** I capitoli diventano i **segnalibri/outline** del PDF: si aprono nel **pannello laterale** del lettore (in Edge, il pulsante «Sommario» in alto a sinistra) e cliccandone uno **salti direttamente a quel capitolo**.
+- 🧭 **Pagina pulita.** Niente **data** in alto, niente **percorso del file** in basso a sinistra, niente **numero di pagina** in basso a destra: il documento è più ordinato.
+- 📁 **«Salvato in».** Il percorso della cartella di output è riportato **in testa**, tra i metadati, subito dopo «Trascritto con».
+
 ---
 
 ## 🌐 Traduzione automatica
@@ -526,6 +532,7 @@ Dopo la trascrizione, se l'audio **non è già in italiano**, EchoScript lo **tr
 
 - **Due motori, scelti in automatico.** Se hai una **chiave Groq** la traduzione usa **Google Translate** (libreria `deep-translator`): gratis, nessuna API key dedicata, **nessun credito Groq speso**. **Senza chiave**, in locale, traduce con **Ollama sul tuo PC** così resta **100% offline** (serve Ollama avviato col modello scaricato, lo stesso del riassunto). La scelta segue quella del riassunto: niente chiave → tutto in locale.
 - La trascrizione resta intatta; la traduzione finisce in `traduzioni/` come file separati `.md`/`.txt`/`.pdf`, **senza minutaggi** (testo continuo, più leggibile).
+- 🇬🇧 **Gli inglesismi restano in inglese.** I termini tecnici ormai di uso comune (es. *fine tuning*, *deploy*, *streaming*, *feedback*, *machine learning*) **non vengono tradotti né italianizzati**. In locale è il prompt di Ollama a preservarli; con Google Translate (cloud) vengono protetti con segnaposto e ripristinati a fine traduzione.
 
 ### Come viene risolto il problema dei video lunghi (a blocchi)
 
@@ -544,6 +551,8 @@ Così un testo di qualsiasi lunghezza passa senza errori. Se una singola frase f
 Dopo la traduzione (o, se l'audio era già in italiano, sulla **trascrizione originale**), EchoScript genera un **riassunto pulito** del testo, salvato in `riassunti/` nei soliti formati `.md`/`.txt`/`.pdf`.
 
 > ✨ **Parole chiave in grassetto.** Il riassunto evidenzia in **grassetto** i concetti centrali, i termini tecnici, i nomi e le cifre rilevanti (con parsimonia, mai intere frasi), per aiutare la lettura. Il grassetto si vede in `.md` e nel **PDF**; nel `.txt` (pensato per altri strumenti/LLM) i marcatori vengono rimossi per restare testo piano.
+
+> 🇬🇧 **Inglesismi preservati** e 🩹 **refusi corretti.** Il riassunto mantiene in inglese i termini tecnici di uso comune (*fine tuning*, *deploy*, …) e, poiché lavora su una trascrizione automatica del parlato, **corregge in silenzio gli evidenti errori di trascrizione** (parole storpiate, omofoni sbagliati); nel dubbio conserva l'originale, senza inventare.
 
 ### Perché serve anche un riassunto
 

@@ -1669,10 +1669,14 @@ def _build_sections(meta: dict, segments: list[dict]) -> list[dict]:
     return sections
 
 
-def _md_header(title: str, meta: dict, engine_label: str) -> list[str]:
+def _md_header(title: str, meta: dict, engine_label: str,
+               saved_in: str | None = None) -> list[str]:
     """Markdown header lines (metadata) shared between original and translated.
 
-    Local files have no channel/views/date, so we show the source path instead."""
+    Local files have no channel/views/date, so we show the source path instead.
+    'saved_in' (se passato) aggiunge la riga «Salvato in:» col percorso della
+    cartella di output, subito dopo «Trascritto con:» (usata nei PDF)."""
+    saved_line = [f"- **Salvato in:** {saved_in}"] if saved_in else []
     if _is_local(meta):
         return [
             f"# {title}", "",
@@ -1680,6 +1684,7 @@ def _md_header(title: str, meta: dict, engine_label: str) -> list[str]:
             f"- **File:** {meta['webpage_url']}",
             f"- **Durata:** {_format_duration(meta['duration'])}",
             f"- **Trascritto con:** {engine_label}",
+            *saved_line,
             "", "---", "",
         ]
     return [
@@ -1690,18 +1695,20 @@ def _md_header(title: str, meta: dict, engine_label: str) -> list[str]:
         f"- **Durata:** {_format_duration(meta['duration'])}",
         f"- **URL:** {meta['webpage_url']}",
         f"- **Trascritto con:** {engine_label}",
+        *saved_line,
         "", "---", "",
     ]
 
 
 def build_md(title: str, meta: dict, engine_label: str, sections: list[dict],
-             with_timestamps: bool = True) -> str:
+             with_timestamps: bool = True, saved_in: str | None = None) -> str:
     """Markdown document: header + sections.
 
     The timings (if with_timestamps) appear ONLY in the section titles
     (## [HH:MM:SS] Title); the body is flowing prose, tidier. The translated
-    version passes with_timestamps=False (no timings)."""
-    lines = _md_header(title, meta, engine_label)
+    version passes with_timestamps=False (no timings). 'saved_in' (usato dai PDF)
+    aggiunge la riga «Salvato in:» col percorso di output nell'intestazione."""
+    lines = _md_header(title, meta, engine_label, saved_in=saved_in)
     for sec in sections:
         if sec["title"] is None:
             lines.append("## Trascrizione")
@@ -1791,13 +1798,17 @@ def _section_heading(sec: dict, with_timestamps: bool) -> str:
 
 
 def build_pdf(title: str, meta: dict, sections: list[dict], out_path: str,
-              with_timestamps: bool = True, markdown: bool = False) -> None:
+              with_timestamps: bool = True, markdown: bool = False,
+              engine_label: str = "", saved_in: str | None = None) -> None:
     """Create a readable PDF, divided by chapters, with fpdf2 (no LaTeX).
 
     Uses Windows' Arial font (TrueType) to support accents and Unicode
     characters. Large title, metadata in italics, section titles in bold and the
     body text in paragraphs. Con 'markdown=True' (riassunto) il corpo interpreta
-    il **grassetto** Markdown, così le parole chiave risaltano anche nel PDF."""
+    il **grassetto** Markdown, così le parole chiave risaltano anche nel PDF.
+    Aggiunge un SOMMARIO cliccabile in testa (link interni ai capitoli) e i
+    segnalibri/outline del PDF; NON stampa data, percorso o numero di pagina.
+    'saved_in' aggiunge la riga «Salvato in:» tra i metadati."""
     from fpdf import FPDF                  # lazy import: needed only when exporting
     from fpdf.enums import XPos, YPos       # to bring the cursor back to the left after each cell
 
@@ -1829,10 +1840,22 @@ def build_pdf(title: str, meta: dict, sections: list[dict], out_path: str,
         cell(5, f"Canale: {meta['channel']}  |  Pubblicato: {_format_upload_date(meta['upload_date'])}"
                 f"  |  Durata: {_format_duration(meta['duration'])}")
         cell(5, meta["webpage_url"])
+    if engine_label:
+        cell(5, f"Trascritto con: {engine_label}")
+    if saved_in:
+        cell(5, f"Salvato in: {saved_in}")
     pdf.ln(4)
 
     for sec in sections:
         pdf.set_font("Doc", "B", 14)
+        # Ogni capitolo diventa una voce dei SEGNALIBRI/outline del PDF: è il
+        # «Sommario» cliccabile nel pannello laterale del lettore, che rimanda al
+        # capitolo. Nessun riquadro-indice dentro la pagina.
+        if sec.get("title"):
+            try:
+                pdf.start_section(_section_heading(sec, with_timestamps))
+            except Exception:
+                pass
         cell(7, _section_heading(sec, with_timestamps))
         pdf.ln(1)
         if sec["text"]:
@@ -1865,9 +1888,13 @@ def _translate_ollama(text: str, target: str) -> str:
     system = (
         f"Sei un traduttore professionista. Traduci il testo dell'utente in "
         f"{lang} in modo fedele e naturale. Conserva integralmente il "
-        f"significato, i nomi propri, le cifre e la punteggiatura. Non "
-        f"aggiungere e non omettere nulla. Rispondi esclusivamente con la "
-        f"traduzione, senza preamboli, note, virgolette o commenti.")
+        f"significato, i nomi propri, le cifre e la punteggiatura. Mantieni "
+        f"INVARIATI, nella loro forma inglese, i termini tecnici e gli "
+        f"inglesismi di uso comune (per esempio «fine tuning», «deploy», "
+        f"«streaming», «feedback», «machine learning», «commit», «buffer», "
+        f"«dataset», «prompt»): non tradurli né adattarli. Non aggiungere e non "
+        f"omettere nulla. Rispondi esclusivamente con la traduzione, senza "
+        f"preamboli, note, virgolette o commenti.")
     payload = {
         "model": OLLAMA_TRANSLATE_MODEL,
         "messages": [
@@ -1894,13 +1921,73 @@ def _translate_engine_label(target: str = "it", local: bool = False) -> str:
     return f"Traduzione automatica (Google Translate) → {lang}"
 
 
+# Inglesismi / termini tecnici che devono restare in inglese anche nella
+# traduzione italiana. Google Translate non è istruibile via prompt, perciò li
+# «proteggiamo» con un segnaposto (NGZ<n>ZQ) prima di tradurre e li ripristiniamo
+# dopo: quel formato (maiuscole + cifra) attraversa Google Translate INTATTO
+# (verificato), così il termine originale non viene mai tradotto.
+_ANGLICISMS = [
+    "fine tuning", "fine-tuning", "machine learning", "deep learning",
+    "data science", "big data", "cloud computing", "code review",
+    "problem solving", "user experience", "smart working", "team building",
+    "know-how", "know how", "step by step", "open source", "real time",
+    "deploy", "deployment", "devops", "commit", "merge", "rebase", "branch",
+    "buffer", "streaming", "stream", "streamer", "download", "upload",
+    "feedback", "deadline", "meeting", "brainstorming", "briefing", "budget",
+    "business", "dataset", "endpoint", "export", "import", "firmware",
+    "framework", "hardware", "software", "hosting", "input", "output", "layout",
+    "login", "logout", "marketing", "network", "online", "offline", "overflow",
+    "password", "performance", "plugin", "prompt", "query", "rendering",
+    "router", "screenshot", "server", "setup", "smartphone", "startup",
+    "target", "template", "testing", "thread", "token", "toolkit", "tool",
+    "trend", "tuning", "update", "upgrade", "username", "wireless", "workflow",
+    "workshop", "backup", "benchmark", "cache", "container", "cookie",
+    "debugging", "debug", "encoder", "decoder", "gaming", "hashtag",
+    "influencer", "kernel", "latency", "mainstream", "malware", "middleware",
+    "patch", "pipeline", "podcast", "proxy", "refactoring", "release",
+    "rollback", "scroll", "shader", "sprint", "stack", "string", "throughput",
+    "timeout", "trigger", "webcam", "widget", "browser", "frontend", "backend",
+    "fullstack", "boilerplate", "changelog", "hotfix", "webinar", "wildcard",
+    "ransomware", "spyware", "touchscreen", "playlist",
+]
+# Regex unica, alternative ordinate dalla più lunga (le locuzioni multi-parola
+# devono avere la precedenza sulle singole parole al loro interno).
+_ANGLICISM_RE = re.compile(
+    r"\b(" + "|".join(re.escape(w) for w in sorted(_ANGLICISMS, key=len, reverse=True))
+    + r")\b", re.IGNORECASE)
+_ANGLICISM_TOKEN_RE = re.compile(r"NGZ\d+ZQ")
+
+
+def _protect_anglicisms(text: str) -> tuple[str, dict[str, str]]:
+    """Sostituisce gli inglesismi con segnaposto NGZ<n>ZQ (che Google preserva).
+
+    Restituisce (testo_con_segnaposto, mappa segnaposto→forma originale)."""
+    mapping: dict[str, str] = {}
+
+    def repl(m: "re.Match") -> str:
+        token = f"NGZ{len(mapping)}ZQ"
+        mapping[token] = m.group(0)   # conserva la forma esatta trovata nel testo
+        return token
+
+    return _ANGLICISM_RE.sub(repl, text), mapping
+
+
+def _restore_anglicisms(text: str, mapping: dict[str, str]) -> str:
+    """Ripristina gli inglesismi originali al posto dei segnaposto."""
+    for token, original in mapping.items():
+        text = text.replace(token, original)
+    # Sicurezza: se qualche segnaposto fosse sopravvissuto storpiato, lo togliamo.
+    return _ANGLICISM_TOKEN_RE.sub("", text)
+
+
 def _make_translator(target: str = "it", local: bool = False):
     """Sceglie il motore di traduzione e restituisce una funzione (testo -> testo).
 
     In modalità locale traduce con Ollama (100% offline); altrimenti usa Google
-    Translate (cloud, gratuito, sorgente autorilevata). Solleva un RuntimeError
-    chiaro se il motore scelto non è disponibile (Ollama non raggiungibile o
-    deep_translator non installato)."""
+    Translate (cloud, gratuito, sorgente autorilevata). In entrambi i casi gli
+    inglesismi restano in inglese: via prompt con Ollama, via segnaposto con
+    Google Translate. Solleva un RuntimeError chiaro se il motore scelto non è
+    disponibile (Ollama non raggiungibile o deep_translator non installato)."""
     if local:
         _check_ollama()
         return lambda text: _translate_ollama(text, target)
@@ -1909,7 +1996,14 @@ def _make_translator(target: str = "it", local: bool = False):
     except ImportError:
         raise RuntimeError("deep_translator non installato. Esegui:  "
                            "pip install deep-translator")
-    return GoogleTranslator(source="auto", target=target).translate
+    google = GoogleTranslator(source="auto", target=target).translate
+
+    def translate(text: str) -> str:
+        protected, mapping = _protect_anglicisms(text)
+        result = google(protected) or ""
+        return _restore_anglicisms(result, mapping)
+
+    return translate
 
 
 def _split_for_translation(text: str) -> list[str]:
@@ -2558,10 +2652,12 @@ def save_visual_notes(out_root: str, meta: dict, notes: list[dict],
     # Markdown del documento: fotogramma (se presente) + testo, per ogni nota.
     # 'img_prefix' permette link RELATIVI per il .md (portabile) e ASSOLUTI per il
     # PDF (il browser headless deve trovare i file).
-    def _companion_md(img_prefix: str) -> str:
+    def _companion_md(img_prefix: str, saved_in: str | None = None) -> str:
+        saved_line = [f"- **Salvato in:** {saved_in}"] if saved_in else []
         out = [f"# {meta['title']} — Analisi visiva", "",
                f"- **Estratto con:** {engine_label}",
-               f"- **Fotogrammi con contenuto:** {len(notes)}", "", "---", ""]
+               f"- **Fotogrammi con contenuto:** {len(notes)}",
+               *saved_line, "", "---", ""]
         for n in notes:
             out.append(f"## [{_format_timestamp(n['start'])}]")
             out.append("")
@@ -2580,12 +2676,13 @@ def save_visual_notes(out_root: str, meta: dict, notes: list[dict],
     # PDF "ricco": fotogramma + testo estratto, uno per nota (immagini con percorso
     # ASSOLUTO). Solo se l'export è attivo e ci sono davvero dei fotogrammi salvati.
     if do_export and RICH_PDF and any(n.get("image") for n in notes):
+        pdf_saved_in = os.path.abspath(vdir)
         try:
             if quiet:
-                build_pdf_rich(_companion_md(frames_dir + os.sep), base + ".pdf")
+                build_pdf_rich(_companion_md(frames_dir + os.sep, saved_in=pdf_saved_in), base + ".pdf")
             else:
                 with console.status("[info]Creo il PDF dell'analisi visiva (fotogrammi + testo)...[/info]", spinner="dots"):
-                    ok = build_pdf_rich(_companion_md(frames_dir + os.sep), base + ".pdf")
+                    ok = build_pdf_rich(_companion_md(frames_dir + os.sep, saved_in=pdf_saved_in), base + ".pdf")
                 if ok:
                     console.print(f"  {SYM_OK} PDF analisi visiva con i fotogrammi creato.")
         except Exception:
@@ -3036,6 +3133,18 @@ _SUMMARY_SYSTEM_PROMPT = (
     "nomi propri, le cifre e gli esempi rilevanti. Non aggiungere informazioni "
     "assenti nel testo, non inventare e non introdurre interpretazioni o "
     "commenti personali.\n"
+    "Inglesismi e termini tecnici: mantieni in inglese i termini tecnici e gli "
+    "inglesismi ormai di uso comune in italiano (per esempio «fine tuning», "
+    "«deploy», «streaming», «feedback», «machine learning», «commit», «buffer», "
+    "«dataset», «prompt»). NON tradurli né italianizzarli: scrivili nella forma "
+    "inglese corrente, esattamente come li userebbe chi lavora nel settore.\n"
+    "Errori di trascrizione: il testo proviene da una trascrizione AUTOMATICA del "
+    "parlato e può contenere sviste (parole storpiate, omofoni sbagliati, "
+    "spaziature o concordanze errate, un termine tecnico reso male). Quando dal "
+    "contesto riconosci con ragionevole certezza un evidente errore di "
+    "trascrizione, correggilo in silenzio ripristinando la parola o l'espressione "
+    "corretta; se invece il dubbio è genuino, conserva il testo originale senza "
+    "inventare. Non segnalare, non elencare e non commentare le correzioni.\n"
     "Stile e struttura: redigi il riassunto in prosa continua e articolata, "
     "privilegiando un testo discorsivo che ricostruisca con ricchezza il filo "
     "del discorso e ne approfondisca i passaggi anziché comprimerli. Punta a un "
@@ -3110,9 +3219,19 @@ _PDF_ASSET_URLS = {
 _PDF_HTML_TEMPLATE = """<!doctype html>
 <html lang="it"><head><meta charset="utf-8">
 <style>
-  @page { margin: 1.6cm 1.7cm; }
+  /* margine di pagina a ZERO: così il browser headless NON disegna il proprio
+     header/footer (data in alto, percorso file in basso a sinistra, numero di
+     pagina in basso a destra). I margini di stampa reali, UGUALI su ogni pagina,
+     li ottiene la tabella .pagewrap qui sotto: thead/tfoot vengono ripetuti e
+     RISERVANO spazio in alto e in basso su tutte le pagine. */
+  @page { margin: 0; }
   body { font-family: 'Segoe UI', Calibri, Arial, sans-serif; color: #1b1b1b;
-         line-height: 1.55; font-size: 12pt; }
+         line-height: 1.55; font-size: 12pt; margin: 0; }
+  table.pagewrap { width: 100%; border-collapse: collapse; }
+  table.pagewrap > thead > tr > td,
+  table.pagewrap > tfoot > tr > td { height: 1.5cm; border: none; }
+  table.pagewrap > tbody > tr > td { padding: 0 1.7cm; border: none;
+         vertical-align: top; }
   h1 { color: #0b6b3a; font-size: 20pt; margin: 0 0 4px; }
   h2 { color: #0b6b3a; font-size: 15pt; margin: 22px 0 8px;
        border-bottom: 2px solid #d8efe2; padding-bottom: 3px; }
@@ -3139,7 +3258,11 @@ _PDF_HTML_TEMPLATE = """<!doctype html>
   if (window.mermaid) { try { mermaid.initialize({startOnLoad: true, theme: 'neutral'}); } catch (e) {} }
 });</script>
 </head><body>
+<table class="pagewrap"><thead><tr><td></td></tr></thead>
+<tfoot><tr><td></td></tr></tfoot>
+<tbody><tr><td>
 __BODY__
+</td></tr></tbody></table>
 </body></html>
 """
 
@@ -3204,7 +3327,10 @@ def _md_to_html(md: str) -> str:
     # 3) Codice inline `…`
     md = re.sub(r"`([^`]+)`", lambda m: _stash(f"<code>{_html.escape(m.group(1))}</code>"), md)
 
-    # 4) Struttura a blocchi, riga per riga.
+    # 4) Struttura a blocchi, riga per riga. Gli heading (# / ## / ###) diventano
+    # h1/h2/h3: da questi il browser genera i SEGNALIBRI/outline del PDF (il
+    # «Sommario» cliccabile nel pannello laterale del lettore), grazie al flag
+    # --generate-pdf-document-outline usato in build_pdf_rich.
     out: list[str] = []
     para: list[str] = []
     in_list = False
@@ -3325,6 +3451,11 @@ def build_pdf_rich(md_text: str, out_path: str) -> bool:
             # virtual-time-budget: lascia a MathJax/Mermaid il tempo di disegnare
             # prima di stampare (altrimenti il PDF esce a metà rendering).
             "--virtual-time-budget=20000", "--run-all-compositor-stages-before-draw",
+            # Genera i SEGNALIBRI/outline del PDF dai titoli (h1/h2/h3): è il
+            # «Sommario» cliccabile nel pannello laterale del lettore PDF, che
+            # rimanda a ogni capitolo. Flag ignorato dai browser troppo vecchi
+            # (nessun errore: in tal caso il PDF esce semplicemente senza outline).
+            "--generate-pdf-document-outline",
             f"--print-to-pdf={out_path}", pathlib.Path(html_path).as_uri(),
         ]
         try:
@@ -3339,17 +3470,21 @@ def _save_pdf(meta: dict, sections: list[dict], out_path: str, with_timestamps: 
     """Esporta un PDF: prima quello "ricco" (formule/mappe disegnate via browser
     headless), poi ripiega su fpdf2. NON usa Groq — lavora su testo già prodotto,
     quindi NESSUN credito speso. Restituisce True se il PDF è stato creato."""
+    # «Salvato in:»: la cartella di output, ricavata dal percorso del PDF. Compare
+    # tra i metadati in testa al documento (non più in fondo a ogni pagina).
+    saved_in = os.path.dirname(os.path.abspath(out_path))
     if RICH_PDF:
         try:
             md_text = build_md(meta["title"], meta, engine_label, sections,
-                               with_timestamps=with_timestamps)
+                               with_timestamps=with_timestamps, saved_in=saved_in)
             if build_pdf_rich(md_text, out_path):
                 return True
         except Exception:
             pass
     try:
         build_pdf(meta["title"], meta, sections, out_path,
-                  with_timestamps=with_timestamps, markdown=markdown)
+                  with_timestamps=with_timestamps, markdown=markdown,
+                  engine_label=engine_label, saved_in=saved_in)
         return True
     except Exception as e:
         console.print(f"[error]Export PDF fallito: {e}[/error]")
