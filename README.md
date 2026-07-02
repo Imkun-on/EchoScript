@@ -194,9 +194,13 @@ Il **PDF viene creato sempre**, in automatico, e i file vengono salvati senza ul
 Una finestra **"Completato!"** riassume tutto: motore usato, numero di parole/sezioni, **dove sono stati salvati i file** (cartella `results/`) e l'elenco dei file creati. Il pulsante **"Apri cartella risultati"** apre direttamente la cartella.
 
 ### Messaggi speciali (video lungo o già fatto)
-- 🔁 **"Video già trascritto"**: se rifai un video già fatto, l'app ti chiede se **Ritrascrivere tutto** (sostituisce i file).
+- 🔁 **"Video già trascritto"**: se selezioni un video già presente in `results/`, l'app **non rispende crediti di trascrizione** e ti fa scegliere cosa fare:
+  - **Trascrivi nuovamente** — rifà tutto da capo (trascrizione + traduzione + riassunto);
+  - **Riprendi da dove si è interrotto** — compare **solo** se una fase era rimasta a metà, con l'indicazione del punto (es. *«riassunto — sezione 8/20»*) e riparte esattamente da lì;
+  - **Solo traduzione** — traduce la trascrizione salvata;
+  - **Solo riassunto** — genera solo il riassunto dal testo salvato.
 - ⏸️ **"Ripresa disponibile"**: se una trascrizione lunga si era interrotta (limite Groq, o trascrizione locale interrotta), l'app ha **salvato il punto** e ti propone di **Riprendere** da dove si era fermata o **Ricominciare** da capo.
-- ⏳ **"Limite Groq raggiunto"**: avviso arancione che indica quanti blocchi sono stati fatti; **riprendi più tardi**, quando tornano i crediti gratuiti.
+- ⏳ **"Limite Groq raggiunto"**: avviso arancione che indica quanti blocchi sono stati fatti; puoi **riprendere più tardi** (quando tornano i crediti gratuiti) o **continuare subito in locale**. Vale anche per il **riassunto**: se i crediti finiscono a metà riassunto, l'app propone di **finirlo in locale con Ollama**, ripartendo dalla sezione ferma.
 
 ---
 
@@ -235,8 +239,11 @@ Se scegli **Locale**, un secondo pannello ti fa scegliere il modello ogni volta:
 - ⏱️ **Minutaggi e sezioni**: usa i **capitoli** di YouTube come sezioni del documento
 - 💾 **3 formati base** sempre generati: `.md` (umano), `.txt` (per altri LLM), `.json` (per RAG)
 - 📄 **PDF generato sempre** in automatico, diviso per capitoli
-- 🌐 **Traduzione automatica** in italiano (se l'audio non è già in italiano): Google Translate in cloud · Ollama in locale (offline)
-- 🧠 **Riassunto automatico** del testo, **per sezione**: pulisce intercalari, ripetizioni e autocorrezioni (Groq in cloud · Ollama in locale)
+- 🌐 **Traduzione automatica** nella **lingua dell'interfaccia** (italiano o inglese): se l'audio è già in quella lingua il passaggio si salta; Google Translate in cloud · Ollama in locale (offline)
+- 🧠 **Riassunto automatico** del testo, **per sezione**, nella **lingua dell'interfaccia**: pulisce intercalari, ripetizioni e autocorrezioni (Groq in cloud · Ollama in locale)
+- ♻️ **Riprendi da dove si è interrotto**: uno **stato salvato** della pipeline permette di riprendere **traduzione e riassunto per sezione** (non solo la trascrizione), senza rispendere crediti sul lavoro già fatto
+- 💻 **Continua in locale** se i crediti Groq si esauriscono a metà: la **trascrizione** e ora anche il **riassunto** possono essere completati con Ollama, ripartendo dal punto esatto
+- 🕹️ **Menu «video già trascritto»** (GUI e CLI): trascrivi nuovamente · riprendi · solo traduzione · solo riassunto, riusando la trascrizione salvata
 - 👁️ **Analisi visiva del video** (opzionale): "guarda" i fotogrammi ed estrae **codice, formule, grafici e diagrammi** a schermo, integrandoli nel riassunto e in un **documento dedicato con i fotogrammi** (Groq in cloud · Ollama in locale)
 - 📐 **PDF "ricco"**: quando servono, **formule LaTeX** e **mappe** vengono renderizzate e i **fotogrammi** mostrati nel testo (browser di sistema; ripiego automatico su PDF semplice)
 - 🗂️ **Output organizzato** in `results/<nome video>/` nelle sottocartelle `trascrizioni/`, `traduzioni/`, `riassunti/`, `analisi_visiva/`
@@ -496,6 +503,10 @@ results/
 
 > Per i **file locali** `<Nome>` è il nome del file (senza estensione); per i video YouTube è il titolo. In **batch** ogni file produce la sua cartella `results/<nome file>/`. Le cartelle `traduzioni/`, `riassunti/` e `analisi_visiva/` compaiono solo quando quei passaggi vengono eseguiti.
 
+> 🌍 **Nomi cartelle secondo la lingua del tool.** Con l'interfaccia in **inglese** le sottocartelle prendono il nome inglese — `transcriptions/`, `translations/`, `summaries/`, `visual_analysis/` — e la traduzione usa il suffisso `_en` (es. `<Nome>_en.md`). Con l'interfaccia in italiano restano quelle mostrate sopra.
+
+> ♻️ **Stato per il «Riprendi».** In `results/.checkpoints/` l'app tiene un piccolo file di **stato** per video (JSON) che traccia l'avanzamento delle fasi e le sezioni già fatte di traduzione/riassunto: è ciò che permette di **riprendere dal punto esatto** dopo un'interruzione. È una cartella di servizio, puoi ignorarla.
+
 ### Perché tre (anzi quattro) formati e a cosa servono
 
 Non è ridondanza: ogni formato risolve un bisogno diverso, così non sei costretto a riconvertire il testo a mano.
@@ -528,7 +539,9 @@ Il **PDF viene generato sempre, in automatico** — per trascrizione, traduzione
 
 > ℹ️ Traduzione e riassunto sono disponibili sia nella **CLI** (`transcriber.py`) sia nella **GUI** (gli interruttori della card "Output aggiuntivi"), con lo stesso motore condiviso.
 
-Dopo la trascrizione, se l'audio **non è già in italiano**, EchoScript lo **traduce in italiano** (in automatico nella CLI; attivando l'interruttore nella GUI) (se è già in italiano, salta il passaggio: tradurre `it → it` sarebbe inutile).
+Dopo la trascrizione, EchoScript **traduce il testo nella lingua dell'interfaccia** (in automatico nella CLI; attivando l'interruttore nella GUI). Se l'audio è **già in quella lingua**, salta il passaggio (tradurre `it → it` o `en → en` sarebbe inutile).
+
+> 🌍 **Gli output seguono la lingua del tool.** Con l'interfaccia in **italiano** la traduzione è **verso l'italiano** (un video inglese → italiano); con l'interfaccia in **inglese** è **verso l'inglese** (un video inglese non viene tradotto perché già in inglese, mentre un video francese/tedesco viene reso **in inglese**). La **CLI** è in italiano e traduce sempre verso l'italiano. La cartella e il suffisso del file seguono la lingua: `traduzioni/<Nome>_it.*` oppure `translations/<Nome>_en.*`.
 
 - **Due motori, scelti in automatico.** Se hai una **chiave Groq** la traduzione usa **Google Translate** (libreria `deep-translator`): gratis, nessuna API key dedicata, **nessun credito Groq speso**. **Senza chiave**, in locale, traduce con **Ollama sul tuo PC** così resta **100% offline** (serve Ollama avviato col modello scaricato, lo stesso del riassunto). La scelta segue quella del riassunto: niente chiave → tutto in locale.
 - La trascrizione resta intatta; la traduzione finisce in `traduzioni/` come file separati `.md`/`.txt`/`.pdf`, **senza minutaggi** (testo continuo, più leggibile).
@@ -548,7 +561,9 @@ Così un testo di qualsiasi lunghezza passa senza errori. Se una singola frase f
 
 ## 🧠 Riassunto automatico
 
-Dopo la traduzione (o, se l'audio era già in italiano, sulla **trascrizione originale**), EchoScript genera un **riassunto pulito** del testo, salvato in `riassunti/` nei soliti formati `.md`/`.txt`/`.pdf`.
+Dopo la traduzione (o, se l'audio era già nella lingua del tool, sulla **trascrizione originale**), EchoScript genera un **riassunto pulito** del testo, salvato in `riassunti/` (o `summaries/`) nei soliti formati `.md`/`.txt`/`.pdf`.
+
+> 🌍 **Riassunto nella lingua dell'interfaccia.** Con il tool in **italiano** il riassunto è in italiano; con il tool in **inglese** è in inglese (stesso identico set di regole redazionali, con il prompt nella lingua giusta). La **CLI** produce sempre riassunti in italiano.
 
 > ✨ **Parole chiave in grassetto.** Il riassunto evidenzia in **grassetto** i concetti centrali, i termini tecnici, i nomi e le cifre rilevanti (con parsimonia, mai intere frasi), per aiutare la lettura. Il grassetto si vede in `.md` e nel **PDF**; nel `.txt` (pensato per altri strumenti/LLM) i marcatori vengono rimossi per restare testo piano.
 
@@ -607,17 +622,22 @@ Al modello viene poi passato il **titolo della sezione** (se il video ha capitol
 
 ### Su un video già trascritto (rigenerare senza rispendere)
 
-Se trascrivi di nuovo un video **già presente** in `results/`, la CLI mostra un pannello con cui scegli **cosa rigenerare**, senza per forza ripartire da zero:
+Se selezioni un video **già presente** in `results/`, **sia la CLI sia la GUI** mostrano un menu con cui scegli **cosa fare**, senza per forza ripartire da zero e **senza rispendere crediti di trascrizione**:
 
 | Opzione | Cosa fa |
 |---|---|
-| 🔁 **Ritrascrivi tutto** | rifà da capo trascrizione + traduzione + riassunto |
-| 🌐 **Traduzione + riassunto** | riusa la trascrizione salvata, la traduce e la riassume (**nessun credito di trascrizione**) |
+| 🔁 **Trascrivi nuovamente** | rifà tutto da capo: trascrizione + traduzione + riassunto |
+| ⏯ **Riprendi da dove si è interrotto** | *(solo se c'è un parziale)* completa le fasi mancanti ripartendo dalla **sezione** in cui si era fermato — es. se il riassunto si era interrotto alla sezione 8/20, riparte dalla 8 |
+| 🌐 **Solo traduzione** | traduce la trascrizione salvata nella lingua del tool (**nessun credito di trascrizione**) |
 | 🧠 **Solo riassunto** | genera **soltanto** il riassunto dal testo già salvato (la **traduzione** se presente, altrimenti l'originale) |
 | 🎙 **Ritrascrivi soltanto** | rifà solo la trascrizione, senza traduzione né riassunto |
 | ⏭ **Salta** | non fa nulla per quel video |
 
-> Per riusare la traduzione, «Solo riassunto» rilegge `traduzioni/<Nome>_it.json` (salvato insieme alla traduzione). Se quel file non c'è (traduzioni vecchie), riassume la trascrizione originale.
+> Per riusare la traduzione, «Solo riassunto» rilegge il `.json` della traduzione salvata (`traduzioni/<Nome>_it.json` o `translations/<Nome>_en.json`). Se quel file non c'è, riassume la trascrizione originale.
+
+#### ♻️ Come funziona il «Riprendi» (lo stato della pipeline)
+
+Ogni lavoro salva uno **stato** in `results/.checkpoints/` che traccia le tre fasi — **trascrizione, traduzione, riassunto** — e, per traduzione e riassunto, **le sezioni già completate**. Così una lavorazione interrotta (tipicamente perché i **crediti Groq** si esauriscono a metà del riassunto) può riprendere **esattamente dalla sezione ferma**, senza rifare — né ripagare — ciò che era già pronto. Se i crediti finiscono durante il riassunto, l'app offre anche di **concluderlo in locale con Ollama** dal punto esatto.
 
 > ⏱️ **Tempi.** Con Groq il riassunto è quasi istantaneo. In locale su **CPU** può richiedere qualche minuto per i video lunghi (con **GPU** crolla a pochi secondi: Ollama la usa in automatico se presente). Tutto è configurabile da `.env` (modello, host, contesto, soglia map-reduce).
 

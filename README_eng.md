@@ -196,9 +196,13 @@ The **PDF is always created**, automatically, and the files are saved with no fu
 A **"Done!"** window summarizes everything: engine used, number of words/sections, **where the files were saved** (the `results/` folder) and the list of created files. The **"Open results folder"** button opens the folder directly.
 
 ### Special messages (long or already-done video)
-- 🔁 **"Video already transcribed"**: if you redo a video already done, the app asks whether to **Re-transcribe everything** (replaces the files).
+- 🔁 **"Video already transcribed"**: if you pick a video already in `results/`, the app **doesn't re-spend transcription credits** and lets you choose what to do:
+  - **Transcribe again** — redo everything from scratch (transcription + translation + summary);
+  - **Resume where it stopped** — appears **only** if a stage was left half-done, with the exact point (e.g. *“summary — section 8/20”*) and continues right from there;
+  - **Translation only** — translate the saved transcription;
+  - **Summary only** — generate just the summary from the saved text.
 - ⏸️ **"Resume available"**: if a long transcription was interrupted (Groq limit, or an interrupted local run), the app **saved the point** and offers to **Resume** from where it stopped or **Start over**.
-- ⏳ **"Groq limit reached"**: an amber notice showing how many chunks were done; **resume later**, when free credits return.
+- ⏳ **"Groq limit reached"**: an amber notice showing how many chunks were done; you can **resume later** (when free credits return) or **continue right now locally**. This also applies to the **summary**: if credits run out mid-summary, the app offers to **finish it locally with Ollama**, resuming from the section where it stopped.
 
 ---
 
@@ -237,8 +241,11 @@ If you choose **Local**, a second panel lets you pick the model each time:
 - ⏱️ **Timings & sections**: uses YouTube **chapters** as document sections
 - 💾 **3 base formats** always generated: `.md` (human), `.txt` (for other LLMs), `.json` (for RAG)
 - 📄 **PDF always generated** automatically, split by chapter
-- 🌐 **Automatic translation** to Italian (when the audio isn't already Italian): Google Translate in the cloud · Ollama locally (offline)
-- 🧠 **Automatic summary** of the text, **per section**: strips fillers, repetitions and self-corrections (Groq in the cloud · Ollama locally)
+- 🌐 **Automatic translation** into the **interface language** (Italian or English): if the audio is already in that language the step is skipped; Google Translate in the cloud · Ollama locally (offline)
+- 🧠 **Automatic summary** of the text, **per section**, in the **interface language**: strips fillers, repetitions and self-corrections (Groq in the cloud · Ollama locally)
+- ♻️ **Resume where it stopped**: a **saved pipeline state** lets you resume **translation and summary per section** (not just transcription), without re-spending credits on work already done
+- 💻 **Continue locally** if Groq credits run out mid-way: the **transcription** and now also the **summary** can be finished with Ollama, resuming from the exact point
+- 🕹️ **"Video already transcribed" menu** (GUI and CLI): transcribe again · resume · translation only · summary only, reusing the saved transcription
 - 👁️ **Visual analysis of the video** (optional): "looks" at the frames and extracts on-screen **code, formulas, charts and diagrams**, weaving them into the summary and into a **dedicated document with the frames** (Groq in the cloud · Ollama locally)
 - 📐 **"Rich" PDF**: when needed, **LaTeX formulas** and **maps** are rendered and the **frames** shown in the text (system browser; automatic fallback to a plain PDF)
 - 🗂️ **Organized output** in `results/<video name>/` under the `trascrizioni/`, `traduzioni/`, `riassunti/`, `analisi_visiva/` subfolders
@@ -474,7 +481,9 @@ results/
         └── frames/            (the saved frames, also used in the summary)
 ```
 
-> For **local files** `<Name>` is the file name (without extension); for YouTube videos it's the title. In **batch**, each file gets its own `results/<file name>/` folder. The `traduzioni/`, `riassunti/` and `analisi_visiva/` folders appear only when those steps run. (Folder names are in Italian to match the app's interface; in the GUI they follow the chosen UI language, e.g. `transcriptions/`, `translations/`, `summaries/` in English.)
+> For **local files** `<Name>` is the file name (without extension); for YouTube videos it's the title. In **batch**, each file gets its own `results/<file name>/` folder. The `traduzioni/`, `riassunti/` and `analisi_visiva/` folders appear only when those steps run. (Folder names are in Italian to match the app's interface; in the GUI they follow the chosen UI language, e.g. `transcriptions/`, `translations/`, `summaries/` in English, and the translation uses the `_en` suffix.)
+
+> ♻️ **State for "Resume".** In `results/.checkpoints/` the app keeps a small per-video **state** file (JSON) tracking stage progress and the sections already done for translation/summary: that's what enables **resuming from the exact point** after an interruption. It's a service folder, you can ignore it.
 
 ### Why three (actually four) formats, and what they're for
 
@@ -508,10 +517,12 @@ The **PDF is always generated, automatically** — for transcription, translatio
 
 > ℹ️ Translation and summary are available in both the **CLI** (`transcriber.py`) and the **GUI** (the "Extra outputs" card switches), sharing the same engine.
 
-After transcription, if the audio is **not already in Italian**, EchoScript **translates it to Italian** (automatically in the CLI; by flipping the switch in the GUI) (if it's already Italian it skips the step: translating `it → it` would be pointless).
+After transcription, EchoScript **translates the text into the interface language** (automatically in the CLI; by flipping the switch in the GUI). If the audio is **already in that language**, it skips the step (translating `it → it` or `en → en` would be pointless).
+
+> 🌍 **Outputs follow the app's language.** With the interface in **Italian**, translation targets **Italian** (an English video → Italian); with the interface in **English**, it targets **English** (an English video is not translated because it's already English, while a French/German video is rendered **in English**). The **CLI** is Italian and always translates to Italian. The folder and file suffix follow the language: `traduzioni/<Name>_it.*` or `translations/<Name>_en.*`.
 
 - **Two engines, picked automatically.** If you have a **Groq key**, translation uses **Google Translate** (the `deep-translator` library): free, no dedicated API key, **no Groq credits spent**. **Without a key**, locally, it translates with **Ollama on your PC** so it stays **100% offline** (needs Ollama running with the model pulled — the same one used for the summary). The choice mirrors the summary: no key → everything local.
-- The transcription stays intact; the translation goes to `traduzioni/` as separate `.md`/`.txt`/`.pdf` files, **without timings** (continuous text, easier to read).
+- The transcription stays intact; the translation goes to `traduzioni/` (or `translations/`) as separate `.md`/`.txt`/`.pdf` files, **without timings** (continuous text, easier to read).
 - 🇬🇧 **English tech terms stay in English.** Widely-adopted loanwords (e.g. *fine tuning*, *deploy*, *streaming*, *feedback*, *machine learning*) are **not translated or Italianized**. Locally it's Ollama's prompt that preserves them; with Google Translate (cloud) they're shielded with placeholders and restored after translation.
 
 ### How long videos are handled (in blocks)
@@ -528,7 +539,9 @@ This way text of any length goes through without errors. If a single sentence we
 
 ## 🧠 Automatic summary
 
-After translation (or, if the audio was already Italian, on the **original transcription**), EchoScript generates a **clean summary** of the text, saved to `riassunti/` in the usual `.md`/`.txt`/`.pdf` formats.
+After translation (or, if the audio was already in the app's language, on the **original transcription**), EchoScript generates a **clean summary** of the text, saved to `riassunti/` (or `summaries/`) in the usual `.md`/`.txt`/`.pdf` formats.
+
+> 🌍 **Summary in the interface language.** With the app in **Italian** the summary is in Italian; with the app in **English** it's in English (the exact same editorial rules, with the prompt in the right language). The **CLI** always produces Italian summaries.
 
 > ✨ **Key words in bold.** The summary highlights the central concepts, technical terms, names and relevant figures in **bold** (sparingly, never whole sentences) to aid reading. Bold shows in `.md` and the **PDF**; in the `.txt` (meant for other tools/LLMs) the markers are stripped so it stays plain text.
 
@@ -589,17 +602,22 @@ The model is then given the **section title** (if the video has chapters) and th
 
 ### On an already-transcribed video (regenerate without re-spending)
 
-If you transcribe again a video **already present** in `results/`, the CLI shows a panel to choose **what to regenerate**, without necessarily starting over:
+If you pick a video **already present** in `results/`, **both the CLI and the GUI** show a menu to choose **what to do**, without necessarily starting over and **without re-spending transcription credits**:
 
 | Option | What it does |
 |---|---|
-| 🔁 **Re-transcribe everything** | redoes transcription + translation + summary from scratch |
-| 🌐 **Translation + summary** | reuses the saved transcription, translates and summarizes it (**no transcription credits**) |
+| 🔁 **Transcribe again** | redoes everything from scratch: transcription + translation + summary |
+| ⏯ **Resume where it stopped** | *(only if a partial exists)* completes the missing stages restarting from the **section** where it stopped — e.g. if the summary was interrupted at section 8/20, it resumes from 8 |
+| 🌐 **Translation only** | translates the saved transcription into the app's language (**no transcription credits**) |
 | 🧠 **Summary only** | generates **only** the summary from the saved text (the **translation** if present, otherwise the original) |
 | 🎙 **Re-transcribe only** | redoes just the transcription, no translation or summary |
 | ⏭ **Skip** | does nothing for that video |
 
-> To reuse the translation, "Summary only" reads `traduzioni/<Name>_it.json` (saved alongside the translation). If that file is missing (older translations), it summarizes the original transcription.
+> To reuse the translation, "Summary only" reads the translation's `.json` (`traduzioni/<Name>_it.json` or `translations/<Name>_en.json`). If that file is missing, it summarizes the original transcription.
+
+#### ♻️ How "Resume" works (the pipeline state)
+
+Every run saves a small **state** file per video (JSON) in `results/.checkpoints/`, tracking the three stages — **transcription, translation, summary** — and, for translation and summary, **the sections already completed**. This is what lets an interrupted run (typically because **Groq credits** run out mid-summary) resume **exactly from the section where it stopped**, without redoing — or paying again for — what was already done. If credits run out during the summary, the app also offers to **finish it locally with Ollama** from that exact point.
 
 > ⏱️ **Timing.** With Groq the summary is nearly instant. Locally on **CPU** it can take a few minutes for long videos (with a **GPU** it drops to seconds: Ollama uses it automatically when present). Everything is configurable via `.env` (model, host, context, map-reduce threshold).
 

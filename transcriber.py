@@ -525,11 +525,16 @@ def _checkpoints_dir() -> str:
 
 
 def _checkpoint_key(meta: dict) -> str:
-    """Chiave stabile per identificare il video/file fra una sessione e l'altra."""
-    if meta.get("source") == "local":
-        base = os.path.basename(meta.get("source_path") or meta.get("webpage_url") or meta.get("title") or "local")
-        return "local_" + _safe_filename(base)
-    return "yt_" + _safe_filename(meta.get("id") or meta.get("title") or "video")
+    """Chiave stabile per identificare il video/file fra una sessione e l'altra.
+
+    Basata sul TITOLO (la stessa identità della cartella dei risultati), così
+    coincide sia con i metadati originali sia con quelli RICOSTRUITI dal .json
+    salvato — dove l'id del video e il percorso file non sono disponibili. Questo
+    è essenziale perché lo stato scritto durante il run e quello aggiornato dalle
+    fasi «solo traduzione/riassunto/riprendi» (che ricaricano da disco) puntino
+    allo stesso file."""
+    prefix = "local_" if meta.get("source") == "local" else "yt_"
+    return prefix + _safe_filename(meta.get("title") or meta.get("id") or "video")
 
 
 def checkpoint_path(meta: dict) -> str:
@@ -651,6 +656,154 @@ def _trim_audio(audio_path: str, start_seconds: float, workdir: str) -> str:
            "-ac", "1", "-ar", str(AUDIO_SAMPLE_RATE), out_path]
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
     return out_path
+
+
+# --- Pipeline state store (the job "database") ------------------------------
+# Un unico file JSON per video che traccia l'avanzamento di TUTTE le fasi
+# (trascrizione, traduzione, riassunto). I checkpoint qui sopra riguardano solo
+# la trascrizione; questo stato è di livello più alto e permette di riprendere
+# esattamente dalla sezione in cui ci si è fermati — ad esempio quando i crediti
+# Groq finiscono a metà del riassunto. È il "database" del job: JSON atomico e
+# ispezionabile, accanto ai checkpoint in results/.checkpoints/.
+#
+# Le sezioni parziali (già tradotte / già riassunte) vengono salvate DENTRO lo
+# stato dopo ogni sezione, così un "Riprendi" ricarica il lavoro già fatto e
+# processa solo le sezioni mancanti (nessun credito Groq rispeso su ciò che era
+# già pronto).
+
+# Fasi della pipeline, in ordine di esecuzione.
+PIPELINE_STAGES = ("transcription", "translation", "summary")
+
+# Stati possibili di una fase: da fare · completata parzialmente · completata ·
+# non applicabile (es. traduzione per un audio già in italiano).
+STAGE_PENDING = "pending"
+STAGE_PARTIAL = "partial"
+STAGE_DONE = "done"
+STAGE_SKIP = "skip"
+
+
+def state_path(meta: dict) -> str:
+    """Percorso del file di stato della pipeline per questo video/file."""
+    return os.path.join(_checkpoints_dir(), _checkpoint_key(meta) + "_state.json")
+
+
+def _empty_state(meta: dict, backend: str = "groq") -> dict:
+    """Nuovo stato "vuoto": tutte le fasi ancora da fare."""
+    return {
+        "key": _checkpoint_key(meta),
+        "title": meta.get("title"),
+        "source": meta.get("source"),
+        "url": meta.get("webpage_url") or meta.get("source_path"),
+        "backend": backend,
+        "detected_language": meta.get("detected_language"),
+        "stages": {s: {"status": STAGE_PENDING, "done": 0, "total": 0}
+                   for s in PIPELINE_STAGES},
+        "updated_at": None,
+    }
+
+
+def load_state(meta: dict) -> dict | None:
+    """Legge lo stato della pipeline, o None se assente/corrotto."""
+    p = state_path(meta)
+    if not os.path.isfile(p):
+        return None
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict) and isinstance(data.get("stages"), dict):
+            return data
+    except Exception:
+        return None
+    return None
+
+
+def save_state(meta: dict, state: dict) -> None:
+    """Salva (atomicamente) lo stato della pipeline, timbrando l'orario."""
+    os.makedirs(_checkpoints_dir(), exist_ok=True)
+    p = state_path(meta)
+    tmp = p + ".tmp"
+    state = dict(state)
+    state["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False)
+    os.replace(tmp, p)
+
+
+def update_stage(meta: dict, stage: str, *, status=None, done=None, total=None,
+                 sections=None, extra=None, backend=None) -> dict:
+    """Aggiorna una fase dello stato (creandolo se manca) e lo salva.
+
+    Passa solo i campi che cambiano: 'sections' è la lista delle sezioni già
+    completate (traduzione/riassunto) da conservare per il resume; 'extra'
+    aggiunge chiavi arbitrarie alla fase (es. 'target' per la traduzione)."""
+    state = load_state(meta) or _empty_state(meta, backend or "groq")
+    if backend:
+        state["backend"] = backend
+    if meta.get("detected_language") and not state.get("detected_language"):
+        state["detected_language"] = meta.get("detected_language")
+    st = state["stages"].setdefault(
+        stage, {"status": STAGE_PENDING, "done": 0, "total": 0})
+    if status is not None:
+        st["status"] = status
+    if done is not None:
+        st["done"] = done
+    if total is not None:
+        st["total"] = total
+    if sections is not None:
+        st["sections"] = sections
+    if extra:
+        st.update(extra)
+    save_state(meta, state)
+    return state
+
+
+def delete_state(meta: dict) -> None:
+    """Rimuove il file di stato (es. su "Ritrascrivi tutto" o a job concluso)."""
+    try:
+        os.remove(state_path(meta))
+    except OSError:
+        pass
+
+
+def stage_status(state: dict | None, stage: str) -> str:
+    """Stato ('pending'/'partial'/'done'/'skip') di una fase, robusto a None."""
+    if not state:
+        return STAGE_PENDING
+    return state.get("stages", {}).get(stage, {}).get("status", STAGE_PENDING)
+
+
+def stage_sections(state: dict | None, stage: str) -> list[dict]:
+    """Sezioni già completate salvate per una fase (lista, eventualmente vuota)."""
+    if not state:
+        return []
+    secs = state.get("stages", {}).get(stage, {}).get("sections")
+    return list(secs) if isinstance(secs, list) else []
+
+
+def resume_plan(state: dict | None) -> dict:
+    """Da uno stato salvato, ricava la prima fase incompleta da cui riprendere.
+
+    Ritorna {'stage', 'status', 'done', 'total'} oppure {'stage': None} se non
+    c'è nulla da riprendere (tutto completato o nessuno stato). Le fasi 'skip'
+    (non applicabili, es. traduzione di un audio già italiano) sono ignorate."""
+    if not state:
+        return {"stage": None}
+    for stage in PIPELINE_STAGES:
+        st = state.get("stages", {}).get(stage, {})
+        status = st.get("status", STAGE_PENDING)
+        if status in (STAGE_PENDING, STAGE_PARTIAL):
+            return {"stage": stage, "status": status,
+                    "done": int(st.get("done", 0) or 0),
+                    "total": int(st.get("total", 0) or 0)}
+    return {"stage": None}
+
+
+def has_resumable_state(meta: dict) -> bool:
+    """True se esiste uno stato con almeno una fase da riprendere.
+
+    Serve alla UI (CLI/GUI) per mostrare l'opzione «Riprendi da dove si è
+    interrotto» solo quando ha davvero senso."""
+    return resume_plan(load_state(meta)).get("stage") is not None
 
 
 # Subfolder names per interface language: an English user gets English folders
@@ -853,32 +1006,45 @@ def choose_local_model() -> str | None:
 
 # Actions offered when a video is ALREADY transcribed (numbered panel below).
 # number -> (icon, title, description, action-code)
-_EXISTING_ACTIONS = {
-    "1": ("🔁", "Ritrascrivi tutto",
-          "rifà da capo trascrizione + traduzione + riassunto", "both"),
-    "2": ("🌐", "Traduzione + riassunto",
-          "riusa la trascrizione salvata, la traduce e la riassume (nessun credito di trascrizione)", "translate"),
-    "3": ("🧠", "Solo riassunto",
-          "genera soltanto il riassunto dal testo salvato (la traduzione se c'è, altrimenti l'originale)", "summary"),
-    "4": ("🎙", "Ritrascrivi soltanto",
-          "rifà solo la trascrizione, senza traduzione né riassunto", "retranscribe"),
-    "5": ("⏭", "Salta",
-          "non fare nulla per questo video", "skip"),
-}
+# Azioni per un video GIÀ trascritto, in ordine di visualizzazione:
+# (codice, icona, nome, descrizione). «resume» viene mostrata solo se esiste uno
+# stato parziale da cui riprendere (traduzione/riassunto interrotti a metà).
+_EXISTING_ACTIONS = [
+    ("both", "🔁", "Trascrivi nuovamente",
+     "rifà tutto da capo: trascrizione + traduzione + riassunto"),
+    ("resume", "⏯", "Riprendi da dove si è interrotto",
+     "continua dalla fase/sezione in cui l'operazione si era fermata"),
+    ("translate", "🌐", "Solo traduzione",
+     "traduce in italiano la trascrizione salvata (nessun credito di trascrizione)"),
+    ("summary", "🧠", "Solo riassunto",
+     "genera soltanto il riassunto dal testo salvato (la traduzione se c'è, altrimenti l'originale)"),
+    ("retranscribe", "🎙", "Ritrascrivi soltanto",
+     "rifà solo la trascrizione, senza traduzione né riassunto"),
+    ("skip", "⏭", "Salta",
+     "non fare nulla per questo video"),
+]
 
 
-def choose_existing_action(title: str) -> str:
+def choose_existing_action(title: str, can_resume: bool = False,
+                           resume_info: str = "") -> str:
     """Pannello a elenco numerato per un video GIÀ trascritto: chiede cosa fare.
 
-    Mostra le opzioni numerate (come gli altri pannelli) ed è più chiaro del
-    vecchio prompt a lettere. Restituisce uno dei codici azione:
-    "both" · "translate" · "summary" · "retranscribe" · "skip"."""
+    Mostra le opzioni numerate; «Riprendi da dove si è interrotto» compare solo se
+    'can_resume' è vero (c'è un parziale salvato), con 'resume_info' a specificare
+    da dove. Restituisce uno dei codici azione:
+    "both" · "resume" · "translate" · "summary" · "retranscribe" · "skip"."""
+    actions = [a for a in _EXISTING_ACTIONS if a[0] != "resume" or can_resume]
     table = Table(show_header=True, box=None, expand=False, padding=(0, 2),
                   header_style="bold dim")
     table.add_column("#", style="bold bright_white", justify="center")
     table.add_column("Azione", style="bold bright_yellow", no_wrap=True)
     table.add_column("Cosa fa", style="info")
-    for key, (icon, name, desc, _code) in _EXISTING_ACTIONS.items():
+    mapping: dict[str, str] = {}
+    for i, (code, icon, name, desc) in enumerate(actions, 1):
+        key = str(i)
+        mapping[key] = code
+        if code == "resume" and resume_info:
+            desc = f"{desc} — [bright_cyan]{resume_info}[/bright_cyan]"
         table.add_row(key, f"{icon} {name}", desc)
 
     console.print()
@@ -891,13 +1057,104 @@ def choose_existing_action(title: str) -> str:
 
     while True:
         choice = console.input(
-            "\n[bold bright_yellow]›[/bold bright_yellow] [bold]Scelta[/bold] "
-            "[dim](1-5 · q = salta)[/dim]: ").strip().lower()
+            f"\n[bold bright_yellow]›[/bold bright_yellow] [bold]Scelta[/bold] "
+            f"[dim](1-{len(actions)} · q = salta)[/dim]: ").strip().lower()
         if choice == "q":
             return "skip"
-        if choice in _EXISTING_ACTIONS:
-            return _EXISTING_ACTIONS[choice][3]
+        if choice in mapping:
+            return mapping[choice]
         console.print("[warning]Scelta non valida, riprova.[/warning]")
+
+
+# Etichette leggibili delle fasi, per i messaggi di ripresa (CLI e GUI).
+STAGE_LABELS_IT = {
+    "transcription": "trascrizione", "translation": "traduzione", "summary": "riassunto",
+}
+STAGE_LABELS_EN = {
+    "transcription": "transcription", "translation": "translation", "summary": "summary",
+}
+
+
+def resume_info_text(meta: dict, lang: str = "it") -> str:
+    """Breve testo «da dove riprende» per il video, o "" se non c'è nulla.
+
+    Es. "riassunto — sezione 8/20". Usato nei menu CLI/GUI per spiegare all'utente
+    cosa farà «Riprendi da dove si è interrotto»."""
+    plan = resume_plan(load_state(meta))
+    stage = plan.get("stage")
+    if not stage:
+        return ""
+    labels = STAGE_LABELS_EN if lang == "en" else STAGE_LABELS_IT
+    name = labels.get(stage, stage)
+    done, total = plan.get("done", 0), plan.get("total", 0)
+    if total and plan.get("status") == STAGE_PARTIAL:
+        sec = "section" if lang == "en" else "sezione"
+        return f"{name} — {sec} {done + 1}/{total}"
+    return name
+
+
+def init_run_state(meta: dict, backend: str, want_translate: bool,
+                   want_summary: bool) -> dict:
+    """Registra il PIANO della pipeline all'avvio di un run completo.
+
+    Serve a «Riprendi»: sapendo quali fasi erano previste (pending) e quali no
+    (skip), la ripresa esegue solo quelle giuste. Sovrascrive un eventuale stato
+    precedente (usato per «Trascrivi nuovamente»/«Ritrascrivi soltanto»)."""
+    state = _empty_state(meta, backend)
+    state["stages"]["transcription"]["status"] = STAGE_PENDING
+    state["stages"]["translation"]["status"] = (
+        STAGE_PENDING if want_translate else STAGE_SKIP)
+    state["stages"]["summary"]["status"] = (
+        STAGE_PENDING if want_summary else STAGE_SKIP)
+    save_state(meta, state)
+    return state
+
+
+def resume_existing(out_root: str, meta: dict, client=None, do_export: bool = True,
+                    ui_lang: str = "it") -> None:
+    """Riprende un video da dove la pipeline si era interrotta (traduzione/riassunto).
+
+    Legge lo stato salvato e completa, nell'ordine, le sole fasi ancora da fare:
+    traduzione (se prevista e non già completata) e poi riassunto. Ogni fase
+    riparte dalla sezione in cui si era fermata (le sezioni già fatte sono
+    ricaricate dallo stato). Se i crediti Groq finiscono di nuovo sul riassunto,
+    offre di concluderlo in locale con Ollama."""
+    title = meta["title"]
+    state = load_state(meta)
+    if resume_plan(state).get("stage") is None:
+        console.print("[dim]Niente da riprendere: tutto già completato.[/dim]")
+        return
+    translated = None
+    if stage_status(state, "translation") in (STAGE_PENDING, STAGE_PARTIAL):
+        translated = translate_existing(out_root, title, target="it",
+                                        do_export=do_export, ui_lang=ui_lang,
+                                        local=client is None)
+    if stage_status(load_state(meta), "summary") in (STAGE_PENDING, STAGE_PARTIAL):
+        summarize_with_local_fallback(out_root, meta, client, translated,
+                                      do_export, ui_lang)
+
+
+def summarize_with_local_fallback(out_root: str, meta: dict, client,
+                                  source_sections, do_export: bool = True,
+                                  ui_lang: str = "it") -> bool:
+    """Riassume; se i crediti Groq si esauriscono a metà, offre di finire in locale.
+
+    Il riassunto parziale è già salvato nello stato: proseguendo con Ollama si
+    riprende dalla sezione ferma, senza rispendere nulla. Restituisce True se il
+    riassunto è stato completato."""
+    ok = summarize_existing(out_root, meta["title"], client=client,
+                            source_sections=source_sections, do_export=do_export,
+                            ui_lang=ui_lang)
+    if ok or client is None:
+        return ok
+    if stage_status(load_state(meta), "summary") not in (STAGE_PENDING, STAGE_PARTIAL):
+        return ok
+    if _confirm("Crediti Groq esauriti nel riassunto. Lo concludo ora in locale "
+                "con Ollama (dalla sezione ferma)?", accent="bright_yellow"):
+        return summarize_existing(out_root, meta["title"], client=None,
+                                  source_sections=source_sections,
+                                  do_export=do_export, ui_lang=ui_lang)
+    return ok
 
 
 # === SOURCE SELECTION (YouTube URL vs local file/folder) ===
@@ -1092,17 +1349,23 @@ def local_file_meta(path: str) -> dict:
     }
 
 
-def _lang_name(code: str | None) -> str | None:
-    """Nome italiano di una lingua. Accetta sia i codici ISO (faster-whisper:
-    'en') sia i nomi interi di Whisper (Groq: 'english'). None se assente."""
+def _lang_name(code: str | None, lang: str = "it") -> str | None:
+    """Nome di una lingua, in italiano (default) o in inglese ('lang="en"').
+
+    Accetta sia i codici ISO (faster-whisper: 'en') sia i nomi interi di Whisper
+    (Groq: 'english'). None se assente. Il parametro 'lang' serve alla GUI in
+    inglese, che vuole i nomi lingua in inglese ('English' invece di 'Inglese')."""
     if not code:
         return None
     c = str(code).split("-")[0].strip().lower()
     full = {"italian": "it", "english": "en", "spanish": "es",
             "french": "fr", "german": "de"}
     c = full.get(c, c)
-    names = {"it": "Italiano", "en": "Inglese", "es": "Spagnolo",
-             "fr": "Francese", "de": "Tedesco"}
+    names_it = {"it": "Italiano", "en": "Inglese", "es": "Spagnolo",
+                "fr": "Francese", "de": "Tedesco"}
+    names_en = {"it": "Italian", "en": "English", "es": "Spanish",
+                "fr": "French", "de": "German"}
+    names = names_en if lang == "en" else names_it
     return names.get(c, str(code).upper())
 
 
@@ -1115,6 +1378,115 @@ def _is_italian(code: str | None) -> bool:
         return False
     c = str(code).split("-")[0].strip().lower()
     return c in ("it", "ita", "italian", "italiano")
+
+
+def _lang_code(code: str | None) -> str | None:
+    """Codice ISO a 2 lettere da un codice/nome lingua ('english'->'en'), o None.
+
+    Normalizza sia i codici (faster-whisper: 'en') sia i nomi interi (Groq:
+    'english') e alcuni nomi italiani ('inglese')."""
+    if not code:
+        return None
+    c = str(code).split("-")[0].strip().lower()
+    full = {"italian": "it", "english": "en", "spanish": "es", "french": "fr",
+            "german": "de", "ita": "it", "eng": "en", "italiano": "it",
+            "inglese": "en", "spagnolo": "es", "francese": "fr", "tedesco": "de"}
+    return full.get(c, c)
+
+
+def _is_same_language(detected: str | None, target: str | None) -> bool:
+    """True se l'audio rilevato è GIÀ nella lingua 'target': tradurre sarebbe inutile.
+
+    Generalizza _is_italian a una lingua qualsiasi: con interfaccia in inglese il
+    target della traduzione è l'inglese, quindi un audio inglese non va tradotto."""
+    d, t = _lang_code(detected), _lang_code(target)
+    return bool(d and t and d == t)
+
+
+# --- Messaggi runtime localizzati (avanzamento + avvisi mostrati dalla GUI) ---
+# Il motore e l'analisi visiva sono UI-agnostici ma devono mostrare i testi nella
+# lingua dell'interfaccia. Qui il catalogo unico it/en; la CLI è italiano-only e
+# non lo usa (i suoi pannelli rich restano in italiano). Le stringhe con {…} sono
+# formattate dai chiamanti con i valori (indici, nomi, errori).
+_RUNTIME_MSGS = {
+    # download / lettura sorgente
+    "dl_audio":       {"it": "Scarico audio", "en": "Downloading audio"},
+    "extract_audio":  {"it": "Estraggo audio", "en": "Extracting audio"},
+    "convert_audio":  {"it": "Converto audio in m4a", "en": "Converting audio to m4a"},
+    "dl_video":       {"it": "Scarico video", "en": "Downloading video"},
+    "prep_video":     {"it": "Preparo il video", "en": "Preparing the video"},
+    "read_audio":     {"it": "Leggo il file audio", "en": "Reading the audio file"},
+    "read_info":      {"it": "Leggo le informazioni del video", "en": "Reading video information"},
+    # trascrizione
+    "chunk_prep":     {"it": "Blocco {i}/{n}", "en": "Chunk {i}/{n}"},
+    "chunk_send":     {"it": "Invio blocco {i}/{n} a Groq", "en": "Sending chunk {i}/{n} to Groq"},
+    "chunk_done":     {"it": "Blocco {i}/{n} completato", "en": "Chunk {i}/{n} done"},
+    "model_load":     {"it": "Carico il modello '{model}' su {dev}{note} (primo uso: scarica i pesi)",
+                       "en": "Loading model '{model}' on {dev}{note} (first use: downloads the weights)"},
+    "resume_from":    {"it": " (ripresa da {ts})", "en": " (resuming from {ts})"},
+    "transcribing":   {"it": "Trascrizione in corso", "en": "Transcribing"},
+    "transcribed":    {"it": "Trascrizione completata", "en": "Transcription complete"},
+    # traduzione
+    "translating_to": {"it": "Traduco in {lang}", "en": "Translating to {lang}"},
+    "section_tr":     {"it": "Sezione {i}/{n} tradotta", "en": "Section {i}/{n} translated"},
+    "tr_unavail":     {"it": "Traduzione non disponibile: {e}", "en": "Translation unavailable: {e}"},
+    "tr_interrupted": {"it": "Traduzione interrotta ({e}); parziale salvato, riprendibile.",
+                       "en": "Translation interrupted ({e}); partial saved, resumable."},
+    "tr_pdf_fail":    {"it": "PDF della traduzione non creato: {e}", "en": "Translation PDF not created: {e}"},
+    "audio_already":  {"it": "Audio già in {lang}: traduzione non necessaria.",
+                       "en": "Audio already in {lang}: translation not needed."},
+    # riassunto
+    "summarizing":    {"it": "Riassumo le sezioni", "en": "Summarizing sections"},
+    "section_sum":    {"it": "Sezione {i}/{n} riassunta", "en": "Section {i}/{n} summarized"},
+    "sum_unavail":    {"it": "Riassunto non disponibile: {e}", "en": "Summary unavailable: {e}"},
+    "sum_ratelimit":  {"it": "Crediti Groq esauriti: riassunto interrotto e salvato come parziale — riprendibile (anche in locale).",
+                       "en": "Groq credits exhausted: summary interrupted and saved as a partial — resumable (locally too)."},
+    "sum_fail":       {"it": "Riassunto fallito: {e}", "en": "Summary failed: {e}"},
+    "sum_pdf_fail":   {"it": "PDF del riassunto non creato: {e}", "en": "Summary PDF not created: {e}"},
+    # salvataggio
+    "saving_files":   {"it": "Salvo i file", "en": "Saving files"},
+    "creating_pdf":   {"it": "Creo il PDF", "en": "Creating the PDF"},
+    "trans_pdf_fail": {"it": "PDF della trascrizione non creato: {e}", "en": "Transcription PDF not created: {e}"},
+    # analisi visiva
+    "vis_unavail":    {"it": "Analisi visiva non disponibile: {e}", "en": "Visual analysis unavailable: {e}"},
+    "vis_detect":     {"it": "Individuo i fotogrammi chiave (cambi scena)…",
+                       "en": "Detecting key frames (scene changes)…"},
+    "vis_noframes":   {"it": "Nessun fotogramma significativo individuato",
+                       "en": "No significant frames found"},
+    "vis_toanalyze":  {"it": "{n} fotogrammi da analizzare ({label})",
+                       "en": "{n} frames to analyze ({label})"},
+    "vis_ratelimit":  {"it": "Crediti Groq esauriti durante l'analisi visiva",
+                       "en": "Groq credits exhausted during visual analysis"},
+    "vis_analyzing":  {"it": "Analizzo fotogramma {i}/{n}", "en": "Analyzing frame {i}/{n}"},
+    "vis_extracted":  {"it": "{k} contenuti visivi estratti su {n} fotogrammi",
+                       "en": "{k} visual items extracted from {n} frames"},
+    "vis_skipped":    {"it": "Analisi visiva saltata: il video non era disponibile (sorgente solo-audio o download video non riuscito).",
+                       "en": "Visual analysis skipped: the video was not available (audio-only source or video download failed)."},
+    "vis_incomplete": {"it": "Analisi visiva non completata: {e}", "en": "Visual analysis not completed: {e}"},
+    # motivi di fallimento dell'analisi visiva (_visual_failure_reason)
+    "vfr_ratelimit":  {"it": "Analisi visiva interrotta: crediti {eng} esauriti. I crediti del modello vision sono SEPARATI da quelli di trascrizione/riassunto. Riprova quando si azzerano (vedi «crediti») o usa un modello vision locale via Ollama.",
+                       "en": "Visual analysis interrupted: {eng} credits exhausted. The vision model's credits are SEPARATE from transcription/summary. Retry when they reset (see “credits”) or use a local vision model via Ollama."},
+    "vfr_eng_groq":   {"it": "Groq (qwen vision)", "en": "Groq (qwen vision)"},
+    "vfr_eng_other":  {"it": "del modello vision", "en": "of the vision model"},
+    "vfr_noframes":   {"it": "Analisi visiva: nessun fotogramma significativo individuato nel video.",
+                       "en": "Visual analysis: no significant frames found in the video."},
+    "vfr_allerrors":  {"it": "Analisi visiva non riuscita: il modello vision ha restituito errore su tutti i {n} fotogrammi ({err}).",
+                       "en": "Visual analysis failed: the vision model returned an error on all {n} frames ({err})."},
+    "vfr_notech":     {"it": "Analisi visiva: nessun contenuto tecnico (codice/formule/grafici) rilevato nei {n} fotogrammi analizzati.",
+                       "en": "Visual analysis: no technical content (code/formulas/charts) detected in the {n} frames analyzed."},
+    "vfr_unknown_err":{"it": "errore sconosciuto", "en": "unknown error"},
+}
+
+
+def msg(key: str, lang: str = "it", /, **fmt) -> str:
+    """Testo runtime localizzato dal catalogo _RUNTIME_MSGS (fallback: italiano).
+
+    'lang' = "it"/"en" (posizionale, così un eventuale segnaposto {lang} nella
+    stringa non entra in conflitto col parametro); i segnaposto {…} sono riempiti
+    con 'fmt'."""
+    d = _RUNTIME_MSGS.get(key, {})
+    s = d.get(lang) or d.get("it") or key
+    return s.format(**fmt) if fmt else s
 
 
 def display_video_info(meta: dict) -> None:
@@ -2051,23 +2423,37 @@ def _translate_text(translate_fn, text: str) -> str:
 
 
 def translate_sections(sections: list[dict], target: str = "it",
-                       local: bool = False, on_progress=None) -> list[dict]:
+                       local: bool = False, on_progress=None,
+                       done_sections: list[dict] | None = None,
+                       on_section=None) -> list[dict]:
     """Traduce titolo e testo di ogni sezione verso 'target' (default italiano).
 
     Con 'local=True' la traduzione avviene in locale via Ollama (100% offline);
     altrimenti via Google Translate. 'on_progress(i, n)' (opzionale) viene
     chiamato dopo ogni sezione tradotta, per aggiornare una barra/spinner.
-    Restituisce nuove sezioni (non muta quelle in ingresso)."""
+    Restituisce nuove sezioni (non muta quelle in ingresso).
+
+    Per il RESUME: 'done_sections' sono le sezioni già tradotte in una precedente
+    esecuzione (le prime len(done_sections) di 'sections'), che vengono saltate;
+    'on_section(list)' (opzionale) è chiamato dopo OGNI nuova sezione con l'elenco
+    completo tradotto finora, per persistere il parziale su disco (così un
+    interruzione a metà è riprendibile esattamente da lì)."""
     translate_fn = _make_translator(target, local)
-    out: list[dict] = []
+    out: list[dict] = list(done_sections or [])
+    start_index = len(out)
     n = len(sections)
-    for i, sec in enumerate(sections, 1):
+    if on_progress and start_index:
+        on_progress(start_index, n)  # riflette sulla barra il lavoro già fatto
+    for i in range(start_index, n):
+        sec = sections[i]
         title = sec.get("title")
         new_title = (_translate_text(translate_fn, title) if title else title)
         new_text = _translate_text(translate_fn, sec.get("text", ""))
         out.append({"start": sec.get("start"), "title": new_title, "text": new_text})
+        if on_section:
+            on_section(out)
         if on_progress:
-            on_progress(i, n)
+            on_progress(i + 1, n)
     return out
 
 
@@ -2495,7 +2881,7 @@ def _is_empty_visual(text: str) -> bool:
 def analyze_video_visuals(video_path: str, duration: float, workdir: str,
                           client=None, frames_out_dir: str | None = None,
                           on_progress=None, quiet: bool = False,
-                          stats: dict | None = None) -> list[dict]:
+                          stats: dict | None = None, lang: str = "it") -> list[dict]:
     """Estrae i fotogrammi chiave del video e li "legge" con un modello vision.
 
     Restituisce una lista di NOTE VISIVE {'start': sec, 'text': str, 'image': str},
@@ -2533,11 +2919,11 @@ def analyze_video_visuals(video_path: str, duration: float, workdir: str,
     except RuntimeError as e:
         if use_rich:
             console.print(f"[warning]Analisi visiva non disponibile: {e}[/warning]")
-        _report(None, None, f"Analisi visiva non disponibile: {e}")
+        _report(None, None, msg("vis_unavail", lang, e=e))
         _stat("unavailable", str(e))
         return []
 
-    _report(None, None, "Individuo i fotogrammi chiave (cambi scena)…")
+    _report(None, None, msg("vis_detect", lang))
     if use_rich:
         with console.status("[info]Individuo i fotogrammi chiave (cambi scena)...[/info]", spinner="dots"):
             frames = extract_keyframes(video_path, duration, workdir)
@@ -2547,11 +2933,11 @@ def analyze_video_visuals(video_path: str, duration: float, workdir: str,
     if not frames:
         if use_rich:
             console.print("[warning]Nessun fotogramma significativo individuato.[/warning]")
-        _report(None, None, "Nessun fotogramma significativo individuato")
+        _report(None, None, msg("vis_noframes", lang))
         return []
     if use_rich:
         console.print(f"  {SYM_OK} [info]{len(frames)}[/info] fotogrammi da analizzare ({label})")
-    _report(0, len(frames), f"{len(frames)} fotogrammi da analizzare ({label})")
+    _report(0, len(frames), msg("vis_toanalyze", lang, n=len(frames), label=label))
 
     notes: list[dict] = []
 
@@ -2567,7 +2953,7 @@ def analyze_video_visuals(video_path: str, duration: float, workdir: str,
                     if use_rich:
                         console.print("[warning]Crediti Groq esauriti durante l'analisi visiva: "
                                       "proseguo con i fotogrammi già letti.[/warning]")
-                    _report(i, len(frames), "Crediti Groq esauriti durante l'analisi visiva")
+                    _report(i, len(frames), msg("vis_ratelimit", lang))
                     _stat("rate_limited", True)
                     _stat("last_error", str(e))
                     break
@@ -2592,7 +2978,7 @@ def analyze_video_visuals(video_path: str, duration: float, workdir: str,
             task_id = progress.add_task("Analizzo i fotogrammi", total=len(frames))
             _process(lambda i: progress.update(task_id, completed=i))
     else:
-        _process(lambda i: _report(i, len(frames), f"Analizzo fotogramma {i}/{len(frames)}"))
+        _process(lambda i: _report(i, len(frames), msg("vis_analyzing", lang, i=i, n=len(frames))))
 
     raw = len(notes)
     notes = _dedup_visual_notes(notes)  # scarta slide ripetute (stesso contenuto a schermo)
@@ -2616,7 +3002,7 @@ def analyze_video_visuals(video_path: str, duration: float, workdir: str,
     if use_rich:
         dropped = f" ([dim]{raw - len(notes)} duplicati scartati[/dim])" if raw != len(notes) else ""
         console.print(f"  {SYM_OK} Contenuti visivi estratti: [info]{len(notes)}[/info] su {len(frames)} fotogrammi{dropped}")
-    _report(len(frames), len(frames), f"{len(notes)} contenuti visivi estratti su {len(frames)} fotogrammi")
+    _report(len(frames), len(frames), msg("vis_extracted", lang, k=len(notes), n=len(frames)))
     return notes
 
 
@@ -3048,6 +3434,22 @@ def translate_existing(out_root: str, title: str, target: str = "it",
     meta, segments, _ = existing
     sections = _build_sections(meta, segments)
 
+    # Resume: se una precedente traduzione si era interrotta a metà, ricarica le
+    # sezioni già tradotte dallo stato e riparti da lì (a patto che la lingua di
+    # destinazione coincida). 'on_section' salva il parziale dopo ogni sezione.
+    _state = load_state(meta)
+    _tr_stage = (_state or {}).get("stages", {}).get("translation", {})
+    done_secs = stage_sections(_state, "translation")
+    if _tr_stage.get("target") and _tr_stage.get("target") != target:
+        done_secs = []  # target cambiato: il parziale non è riutilizzabile
+    if len(done_secs) > len(sections):
+        done_secs = done_secs[:len(sections)]
+
+    def _persist_translation(done_list):
+        update_stage(meta, "translation", status=STAGE_PARTIAL,
+                     done=len(done_list), total=len(sections),
+                     sections=done_list, extra={"target": target})
+
     safe_title = _safe_filename(meta["title"])
     video_dir = os.path.join(out_root, safe_title)
     trad_dir = os.path.join(video_dir, transl_subdir(ui_lang))
@@ -3058,6 +3460,9 @@ def translate_existing(out_root: str, title: str, target: str = "it",
     # Traduzione con barra di avanzamento (una tacca per sezione).
     console.print()
     console.rule(f"[phase]🌐 Traduzione → {lang_label}[/phase]", style="bright_blue")
+    if done_secs:
+        console.print(f"  [dim]↻ Riprendo la traduzione dalla sezione "
+                      f"{len(done_secs) + 1}/{len(sections)}.[/dim]")
     progress = Progress(
         SpinnerColumn("dots", style="bright_blue"),
         TextColumn("[phase]{task.description}"),
@@ -3069,12 +3474,18 @@ def translate_existing(out_root: str, title: str, target: str = "it",
             task_id = progress.add_task("Traduco le sezioni", total=len(sections))
             translated = translate_sections(
                 sections, target, local=local,
-                on_progress=lambda i, n: progress.update(task_id, completed=i))
+                on_progress=lambda i, n: progress.update(task_id, completed=i),
+                done_sections=done_secs, on_section=_persist_translation)
     except RuntimeError as e:  # deep_translator mancante o Ollama non raggiungibile
         console.print(f"[error]{e}[/error]")
         return None
     except Exception as e:
-        console.print(f"[error]Traduzione fallita: {e}[/error]")
+        # Il parziale è già stato salvato da 'on_section': si potrà riprendere.
+        if _is_rate_limit(str(e)):
+            console.print("[warning]Limite raggiunto: traduzione parziale salvata, "
+                          "potrai riprendere.[/warning]")
+        else:
+            console.print(f"[error]Traduzione fallita: {e}[/error]")
         return None
 
     engine_label = _translate_engine_label(target, local)
@@ -3092,6 +3503,9 @@ def translate_existing(out_root: str, title: str, target: str = "it",
     # traduzione (non l'originale) anche in una sessione successiva.
     _save(f"{base}.json",
           json.dumps({"target": target, "sections": translated}, ensure_ascii=False, indent=2))
+    # Traduzione conclusa e salvata: segna la fase come completata nello stato.
+    update_stage(meta, "translation", status=STAGE_DONE, done=len(translated),
+                 total=len(sections), sections=translated, extra={"target": target})
     if do_export:
         with console.status("[info]Creo il PDF (traduzione)...[/info]", spinner="dots"):
             ok = _save_pdf(meta, translated, f"{base}.pdf", with_timestamps=False,
@@ -3197,14 +3611,103 @@ _SUMMARY_VISUAL_NOMAP = (
 )
 _SUMMARY_SYSTEM_PROMPT_VISUAL = _SUMMARY_SYSTEM_PROMPT + _SUMMARY_VISUAL_BASE + _SUMMARY_VISUAL_NOMAP
 _SUMMARY_SYSTEM_PROMPT_VISUAL_MAP = _SUMMARY_SYSTEM_PROMPT + _SUMMARY_VISUAL_BASE + _SUMMARY_VISUAL_MAP
+
+# --- Versione INGLESE dei prompt (usata quando l'interfaccia è in inglese) ----
+# Un utente con la UI in inglese si aspetta gli output nella sua lingua: il
+# riassunto viene quindi prodotto in inglese, con le stesse regole redazionali.
+_SUMMARY_SYSTEM_PROMPT_EN = (
+    "You are a professional editor specialized in reworking spoken content. You "
+    "receive the transcription of a section of a video and turn it into a "
+    "faithful, detailed and fluent summary, written entirely in English "
+    "according to the following rules.\n"
+    "Text cleanup: remove fillers, hesitations and discourse markers (uh, um, you "
+    "know, like, I mean, so, well) and remove repetitions, interrupted sentences "
+    "and the speaker's self-corrections, keeping only the correct, final version "
+    "of each passage.\n"
+    "Fidelity to content: preserve in full all concepts, data, proper names, "
+    "figures and relevant examples. Do not add information not present in the "
+    "text, do not invent, and do not introduce personal interpretations or "
+    "comments.\n"
+    "Technical terms: keep technical terms, code identifiers, product names and "
+    "established jargon exactly as they appear; do not alter their spelling.\n"
+    "Transcription errors: the text comes from an AUTOMATIC transcription of "
+    "speech and may contain mistakes (garbled words, wrong homophones, spacing or "
+    "agreement errors, a mishandled technical term). When the context lets you "
+    "recognize with reasonable certainty an obvious transcription error, fix it "
+    "silently by restoring the correct word or expression; if the doubt is "
+    "genuine, keep the original text without inventing. Do not flag, list or "
+    "comment on corrections.\n"
+    "Style and structure: write the summary in continuous, articulated prose, "
+    "favoring a discursive text that reconstructs the thread of the discourse "
+    "richly and deepens its passages rather than compressing them. Aim for an "
+    "extended, detailed summary, not a telegraphic synthesis. To aid reading, use "
+    "Markdown bold (**text**) only on key words or very short key phrases — "
+    "central concepts, technical terms, proper names and relevant figures — using "
+    "bold sparingly and never on whole sentences (it must stand out, not saturate "
+    "the text). Resort to bullet lists only when indispensable (for example for "
+    "enumerations of heterogeneous items present in the original) and never as a "
+    "default structure. Keep a professional, clear and cohesive register, with "
+    "smooth transitions between concepts.\n"
+    "Output constraints: reply exclusively with the summary, without preambles, "
+    "headings or comments. Never open the text with phrases like \"Here are the "
+    "key points\", \"In this video we talk about\" or similar: get straight into "
+    "the content."
+)
+_SUMMARY_VISUAL_BASE_EN = (
+    "\nThe text may contain annotations in the format «[ON SCREEN — mm:ss] …» that "
+    "report what was VISIBLE in the video at that moment (code, formulas, charts, "
+    "diagrams, slides). Treat them as a source as reliable as the speech and "
+    "INTEGRATE them into the summary naturally, following these additional rules:\n"
+    "• render CODE in markdown blocks delimited by ``` with the language "
+    "indicated, preserving it faithfully;\n"
+    "• write FORMULAS and their derivations in LaTeX (`$...$` inline, `$$...$$` "
+    "for steps), including all the steps shown;\n"
+    "• describe CHARTS, DIAGRAMS and TABLES reporting their data, axes, "
+    "relationships and conclusion.\n"
+    "Important: if the same slide, definition or diagram appears in multiple "
+    "annotations (because it stayed on screen for a while), treat it ONCE only and "
+    "do not repeat paragraphs or concepts already covered. Do not merely cite the "
+    "annotations: blend them into the discourse as an integral part of the "
+    "explanation."
+)
+_SUMMARY_VISUAL_MAP_EN = (
+    "\nIf (and only if) the content is mostly conceptual or animated, add ONE "
+    "SINGLE overall concept map at the end, in a ```mermaid block with `graph TD` "
+    "syntax and edges in the correct format `A -->|label| B` (NEVER "
+    "`A -->|label|> B`); do not repeat the same diagram multiple times."
+)
+_SUMMARY_VISUAL_NOMAP_EN = (
+    "\nDo NOT generate concept maps, diagrams or ```mermaid blocks: stick to "
+    "prose, essential lists, code and formulas."
+)
+_SUMMARY_SYSTEM_PROMPT_VISUAL_EN = _SUMMARY_SYSTEM_PROMPT_EN + _SUMMARY_VISUAL_BASE_EN + _SUMMARY_VISUAL_NOMAP_EN
+_SUMMARY_SYSTEM_PROMPT_VISUAL_MAP_EN = _SUMMARY_SYSTEM_PROMPT_EN + _SUMMARY_VISUAL_BASE_EN + _SUMMARY_VISUAL_MAP_EN
+
+# Lingua del riassunto prodotto: segue la lingua dell'interfaccia (la CLI è
+# italiano-only, quindi resta "it"). Impostata dai punti d'ingresso del riassunto.
+_SUMMARY_LANG = "it"
 # Override temporaneo del prompt di sistema del riassunto (impostato da
 # summarize_existing quando ci sono note visive da integrare). None = prompt base.
 _SUMMARY_PROMPT_OVERRIDE = None
 
 
+def _summary_base_prompt(lang: str | None = None) -> str:
+    """Prompt base del riassunto nella lingua richiesta (default: _SUMMARY_LANG)."""
+    lang = lang or globals().get("_SUMMARY_LANG", "it")
+    return _SUMMARY_SYSTEM_PROMPT_EN if lang == "en" else _SUMMARY_SYSTEM_PROMPT
+
+
+def _summary_visual_prompt(lang: str, concept_map: bool) -> str:
+    """Prompt «visivo» del riassunto (con/senza mappa) nella lingua richiesta."""
+    if lang == "en":
+        return _SUMMARY_SYSTEM_PROMPT_VISUAL_MAP_EN if concept_map else _SUMMARY_SYSTEM_PROMPT_VISUAL_EN
+    return _SUMMARY_SYSTEM_PROMPT_VISUAL_MAP if concept_map else _SUMMARY_SYSTEM_PROMPT_VISUAL
+
+
 def _active_summary_prompt() -> str:
-    """Prompt di sistema del riassunto attualmente attivo (base o «visivo»)."""
-    return globals().get("_SUMMARY_PROMPT_OVERRIDE") or _SUMMARY_SYSTEM_PROMPT
+    """Prompt di sistema del riassunto attualmente attivo (base o «visivo»),
+    nella lingua corrente (_SUMMARY_LANG)."""
+    return globals().get("_SUMMARY_PROMPT_OVERRIDE") or _summary_base_prompt()
 
 
 # === PDF "RICCO": HTML (MathJax + Mermaid) stampato da un browser headless =====
@@ -3602,18 +4105,31 @@ def _summarize_long(summarize_fn, text: str, section_title: str | None) -> str:
 
 
 def summarize_sections(sections: list[dict], summarize_fn,
-                       on_progress=None) -> list[dict]:
+                       on_progress=None, done_sections: list[dict] | None = None,
+                       on_section=None) -> list[dict]:
     """Riassume ogni sezione (titolo invariato, testo -> riassunto).
 
     'on_progress(i, n)' (opzionale) è chiamato dopo ogni sezione. Restituisce
-    nuove sezioni senza mutare quelle in ingresso."""
-    out: list[dict] = []
+    nuove sezioni senza mutare quelle in ingresso.
+
+    Per il RESUME: 'done_sections' sono le sezioni già riassunte in precedenza
+    (saltate); 'on_section(list)' è chiamato dopo OGNI nuova sezione con l'elenco
+    completo finora, per salvare il parziale — così se i crediti Groq finiscono a
+    metà riassunto si riprende esattamente dalla sezione ferma, senza rispendere
+    crediti su quelle già fatte."""
+    out: list[dict] = list(done_sections or [])
+    start_index = len(out)
     n = len(sections)
-    for i, sec in enumerate(sections, 1):
+    if on_progress and start_index:
+        on_progress(start_index, n)
+    for i in range(start_index, n):
+        sec = sections[i]
         summary = _summarize_long(summarize_fn, sec.get("text", ""), sec.get("title"))
         out.append({"start": sec.get("start"), "title": sec.get("title"), "text": summary})
+        if on_section:
+            on_section(out)
         if on_progress:
-            on_progress(i, n)
+            on_progress(i + 1, n)
     return out
 
 
@@ -3653,6 +4169,22 @@ def summarize_existing(out_root: str, title: str, client=None,
         sections = _merge_visual_into_sections(sections, visual_notes)
         console.print(f"  [dim]👁  Riassunto arricchito con {len(visual_notes)} contenuti visivi a schermo.[/dim]")
 
+    # Resume: riprendi il riassunto dalle sezioni già fatte in una precedente
+    # esecuzione (es. crediti Groq esauriti a metà). 'on_section' salva il
+    # parziale dopo OGNI sezione, così non si rispendono crediti sul già fatto.
+    _state = load_state(meta)
+    done_secs = stage_sections(_state, "summary")
+    _sum_stage = (_state or {}).get("stages", {}).get("summary", {})
+    if _sum_stage.get("lang") and _sum_stage.get("lang") != (ui_lang or "it"):
+        done_secs = []  # lingua del riassunto cambiata: non riusare il parziale
+    if len(done_secs) > len(sections):
+        done_secs = done_secs[:len(sections)]
+
+    def _persist_summary(done_list):
+        update_stage(meta, "summary", status=STAGE_PARTIAL,
+                     done=len(done_list), total=len(sections), sections=done_list,
+                     extra={"lang": ui_lang or "it"})
+
     try:
         summarize_fn, engine_label = _make_summarizer(client)
     except RuntimeError as e:
@@ -3674,29 +4206,35 @@ def summarize_existing(out_root: str, title: str, client=None,
         BarColumn(bar_width=40, style="bar.back", complete_style="bright_magenta", finished_style="bold magenta"),
         TaskProgressColumn(), console=console, expand=False,
     )
-    # Attiva il prompt «visivo» solo durante questo riassunto (reset nel finally,
-    # così un job successivo nel batch senza note visive torna al prompt base).
-    # Con/senza mappa concettuale a seconda di CONCEPT_MAP.
-    if visual_notes:
-        globals()["_SUMMARY_PROMPT_OVERRIDE"] = (
-            _SUMMARY_SYSTEM_PROMPT_VISUAL_MAP if CONCEPT_MAP else _SUMMARY_SYSTEM_PROMPT_VISUAL)
-    else:
-        globals()["_SUMMARY_PROMPT_OVERRIDE"] = None
+    # Lingua del riassunto = lingua dell'interfaccia (la CLI passa "it"). Attiva il
+    # prompt «visivo» solo durante questo riassunto (reset nel finally), nella
+    # lingua giusta e con/senza mappa concettuale a seconda di CONCEPT_MAP.
+    globals()["_SUMMARY_LANG"] = ui_lang or "it"
+    globals()["_SUMMARY_PROMPT_OVERRIDE"] = (
+        _summary_visual_prompt(ui_lang or "it", CONCEPT_MAP) if visual_notes else None)
+    if done_secs:
+        console.print(f"  [dim]↻ Riprendo il riassunto dalla sezione "
+                      f"{len(done_secs) + 1}/{len(sections)}.[/dim]")
     try:
         with progress:
             task_id = progress.add_task("Riassumo le sezioni", total=len(sections))
             summarized = summarize_sections(
                 sections, summarize_fn,
-                on_progress=lambda i, n: progress.update(task_id, completed=i))
+                on_progress=lambda i, n: progress.update(task_id, completed=i),
+                done_sections=done_secs, on_section=_persist_summary)
     except Exception as e:
+        # Il parziale è già salvato da 'on_section': lo stato resta 'partial' e il
+        # riassunto potrà riprendere da lì (anche in locale con Ollama).
         if _is_rate_limit(str(e)):
-            console.print("[warning]Crediti Groq esauriti: riassunto saltato "
-                          "(la trascrizione e la traduzione sono già salvate).[/warning]")
+            console.print("[warning]Crediti Groq esauriti: riassunto interrotto e "
+                          "salvato come parziale — potrai riprendere (anche in "
+                          "locale).[/warning]")
         else:
             console.print(f"[error]Riassunto fallito: {e}[/error]")
         return False
     finally:
         globals()["_SUMMARY_PROMPT_OVERRIDE"] = None
+        globals()["_SUMMARY_LANG"] = "it"
 
     # Pulizia diagrammi: corregge le frecce Mermaid e, se la mappa concettuale è
     # disattivata, rimuove eventuali blocchi mermaid sfuggiti al modello.
@@ -3747,6 +4285,10 @@ def summarize_existing(out_root: str, title: str, client=None,
         title="[bold bright_magenta]✅ Riassunto completato![/bold bright_magenta]",
         border_style="bright_magenta", box=DOUBLE, expand=False, padding=(1, 3),
     ))
+    # Riassunto concluso e salvato: fase completata nello stato.
+    update_stage(meta, "summary", status=STAGE_DONE, done=len(summarized),
+                 total=len(summarized), sections=summarized,
+                 extra={"lang": ui_lang or "it"})
     return True
 
 
@@ -3926,30 +4468,36 @@ def run() -> None:
         also_translate = True
 
         if transcription_exists(out_root, meta["title"]):
-            action = choose_existing_action(meta["title"])
+            can_resume = has_resumable_state(meta)
+            action = choose_existing_action(
+                meta["title"], can_resume=can_resume,
+                resume_info=resume_info_text(meta) if can_resume else "")
+            if action == "resume":
+                # Riprendi da dove si è interrotto: completa le fasi mancanti
+                # (traduzione/riassunto) ripartendo dalla sezione ferma.
+                resume_existing(out_root, meta, client=client, do_export=do_export)
+                continue
             if action == "translate":
-                # Traduzione + riassunto: riusa i file salvati, nessuna
-                # ri-trascrizione e nessun credito di trascrizione. Traduce, poi
-                # riassume la traduzione e passa al prossimo job.
-                translated = translate_existing(out_root, meta["title"], target="it",
-                                                do_export=do_export, local=client is None)
-                if translated:
-                    summarize_existing(out_root, meta["title"], client=client,
-                                       source_sections=translated, do_export=do_export)
+                # Solo traduzione: traduce la trascrizione salvata, niente riassunto
+                # e nessun credito di trascrizione.
+                translate_existing(out_root, meta["title"], target="it",
+                                   do_export=do_export, local=client is None)
                 continue
             if action == "summary":
                 # Solo riassunto: niente ri-trascrizione né traduzione. Riassume la
                 # TRADUZIONE salvata se presente (vedi summarize_existing),
                 # altrimenti la trascrizione originale.
-                summarize_existing(out_root, meta["title"], client=client,
-                                   source_sections=None, do_export=do_export)
+                summarize_with_local_fallback(out_root, meta, client,
+                                              source_sections=None, do_export=do_export)
                 continue
             if action == "both":
-                # Ritrascrivi DA CAPO e poi traduci: butta il parziale.
+                # Trascrivi nuovamente DA CAPO e poi traduci: butta ogni parziale.
                 _drop_cp()
+                delete_state(meta)
                 resume_cp = None
             elif action == "retranscribe":
                 _drop_cp()                 # ritrascrizione completa: butta via ogni parziale
+                delete_state(meta)
                 also_translate = False     # «soltanto»: niente traduzione
                 resume_cp = None
             else:                          # "skip"
@@ -3974,6 +4522,13 @@ def run() -> None:
                 _drop_cp()
                 resume_cp = None
 
+        # Registra il piano della pipeline (per «Riprendi» in una sessione futura):
+        # traduzione prevista salvo «ritrascrivi soltanto»; il riassunto segue
+        # sempre. Non tocca un eventuale resume_cp di trascrizione già in corso.
+        if not resume_cp:
+            init_run_state(meta, backend, want_translate=also_translate,
+                           want_summary=also_translate)
+
         result = _run_pipeline(meta, source, backend, client, local_model,
                                resume_cp, want_visual, out_root)
         if not result or not result[0]:
@@ -3984,6 +4539,12 @@ def run() -> None:
         # stata aggiornata (Groq + Locale); altrimenti vale quella scelta a monte.
         label = meta.pop("engine_label_override", engine_label)
         _save_outputs(meta, segments, label, do_export, out_root)
+        # Trascrizione completata e salvata: aggiorna lo stato della pipeline.
+        # Se l'audio è già in italiano la traduzione non serve (fase → skip),
+        # così un futuro «Riprendi» punterà direttamente al riassunto.
+        update_stage(meta, "transcription", status=STAGE_DONE)
+        if _is_italian(meta.get("detected_language")):
+            update_stage(meta, "translation", status=STAGE_SKIP)
         # Analisi visiva: salva le note (json + md) accanto alla trascrizione, così
         # il riassunto (anche se rigenerato in seguito) le ritrova e le integra.
         if visual_notes:
@@ -4000,14 +4561,15 @@ def run() -> None:
         if also_translate:
             if _is_italian(meta.get("detected_language")):
                 console.print("  [dim]🇮🇹 Audio già in italiano: traduzione saltata, riassumo l'originale.[/dim]")
-                summarize_existing(out_root, meta["title"], client=client,
-                                   source_sections=None, do_export=do_export)
+                summarize_with_local_fallback(out_root, meta, client,
+                                              source_sections=None, do_export=do_export)
             else:
                 translated = translate_existing(out_root, meta["title"], target="it",
                                                 do_export=do_export, local=client is None)
                 if translated:
-                    summarize_existing(out_root, meta["title"], client=client,
-                                       source_sections=translated, do_export=do_export)
+                    summarize_with_local_fallback(out_root, meta, client,
+                                                  source_sections=translated,
+                                                  do_export=do_export)
 
 
 def _probe_duration(audio_path: str) -> float:

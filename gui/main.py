@@ -197,6 +197,22 @@ T = {
         "opt_only_translate": "Solo (ri)traduzione",
         "opt_only_translate_desc": "Riusa la trascrizione esistente e rigenera solo la traduzione "
                                    "(sovrascrive quella vecchia). Non rispende crediti di trascrizione.",
+        # Voci del menu «video già trascritto» (nuove opzioni)
+        "already_opt_retranscribe": "Trascrivi nuovamente",
+        "already_opt_retranscribe_desc": "Rifà tutto da capo: trascrizione, traduzione e riassunto.",
+        "already_opt_resume": "Riprendi da dove si è interrotto",
+        "already_opt_resume_desc": "Continua dalla fase/sezione in cui l'operazione si era fermata.",
+        "already_opt_translate": "Solo traduzione",
+        "already_opt_translate_desc": "Traduce in italiano la trascrizione salvata. Nessun credito di trascrizione.",
+        "already_opt_summary": "Solo riassunto",
+        "already_opt_summary_desc": "Genera solo il riassunto dal testo salvato (la traduzione se c'è, altrimenti l'originale).",
+        # Riassunto interrotto per crediti Groq: offerta di concludere in locale
+        "sum_local_title": "Riassunto interrotto",
+        "sum_local_msg": "I crediti Groq sono terminati durante il riassunto, che è stato salvato "
+                         "come parziale.\n\nVuoi concluderlo ora in locale con Ollama, ripartendo "
+                         "dalla sezione in cui si è fermato?",
+        "sum_local_yes": "Concludi in locale",
+        "sum_local_no": "Riprendo più tardi",
         # "Resume available" dialog
         "resume_title": "Ripresa disponibile",
         "resume_desc": "Una trascrizione di questo video si era interrotta. Cosa vuoi fare?",
@@ -350,15 +366,15 @@ T = {
         "phase_download": "Downloading audio",
         "phase_prepare": "Preparing audio",
         "phase_transcribe": "Transcribing",
-        "phase_translate": "Translating to Italian",
+        "phase_translate": "Translating to English",
         "phase_summarize": "Summarizing",
         "phase_visual": "Visual analysis",
         "phase_export": "Exporting / saving",
         "saving_files": "Saving files",
         # Output options card (translation / summary toggles)
         "opts_title": "Extra outputs",
-        "opt_translate_name": "Translate to Italian",
-        "opt_translate_desc": "Italian translation in /translations (Groq if you have a "
+        "opt_translate_name": "Translate to English",
+        "opt_translate_desc": "English translation in /translations (Groq if you have a "
                               "key, otherwise offline Ollama).",
         "opt_summary_name": "Create summary",
         "opt_summary_desc": "Clean per-section summary in /summaries "
@@ -372,7 +388,7 @@ T = {
         "prog_steps_title": "Steps",
         "prog_plan_label": "Plan:",
         "ov_base": "transcribe the audio",
-        "ov_translate": "translate it to Italian",
+        "ov_translate": "translate it to English",
         "ov_summary": "create the summary",
         "ov_visual": "analyze the video frames",
         "ov_save": "save the files (PDF included)",
@@ -382,7 +398,7 @@ T = {
         "narr_prepare": "Preparing the audio and splitting it into chunks for Groq…",
         "narr_transcribe": "Turning speech into text, chunk by chunk…",
         "narr_export": "Saving the transcription and generating the PDF…",
-        "narr_translate": "Translating the text to Italian, section by section…",
+        "narr_translate": "Translating the text to English, section by section…",
         "narr_summarize": "Creating a clean summary for each section…",
         "narr_visual": "Looking at the frames and extracting code, formulas and charts…",
         "narr_done": "Almost there: finishing the last saves…",
@@ -398,6 +414,22 @@ T = {
         "opt_only_translate": "Translation only",
         "opt_only_translate_desc": "Reuse the existing transcription and regenerate only the translation "
                                    "(overwrites the old one). No transcription credits spent.",
+        # "Video already transcribed" menu (new options)
+        "already_opt_retranscribe": "Transcribe again",
+        "already_opt_retranscribe_desc": "Redo everything from scratch: transcription, translation and summary.",
+        "already_opt_resume": "Resume where it stopped",
+        "already_opt_resume_desc": "Continue from the stage/section where the run was interrupted.",
+        "already_opt_translate": "Translation only",
+        "already_opt_translate_desc": "Translate the saved transcription to English. No transcription credits spent.",
+        "already_opt_summary": "Summary only",
+        "already_opt_summary_desc": "Generate only the summary from the saved text (the translation if present, else the original).",
+        # Summary interrupted by Groq credits: offer to finish locally
+        "sum_local_title": "Summary interrupted",
+        "sum_local_msg": "Groq credits ran out during the summary, which was saved as a partial.\n\n"
+                         "Do you want to finish it now locally with Ollama, resuming from the "
+                         "section where it stopped?",
+        "sum_local_yes": "Finish locally",
+        "sum_local_no": "I'll resume later",
         "resume_title": "Resume available",
         "resume_desc": "A transcription of this video was interrupted. What do you want to do?",
         "resume_opt_resume": "Resume",
@@ -2186,14 +2218,39 @@ class EchoScriptApp:
         self.page.open(dlg)
 
     def _show_already_dialog(self, src, meta: dict) -> None:
-        """Video already in results/: offer to re-transcribe it from scratch."""
+        """Video già in results/: elenco delle azioni possibili senza rispendere
+        crediti di trascrizione.
+
+        Oltre a «Trascrivi nuovamente» (da capo), compaiono «Riprendi da dove si è
+        interrotto» (solo se esiste un parziale salvato di traduzione/riassunto),
+        «Solo traduzione» e «Solo riassunto». Le ultime tre riusano la
+        trascrizione già salvata."""
+        options = [
+            {"icon": ft.Icons.REFRESH, "label": self.t("already_opt_retranscribe"),
+             "desc": self.t("already_opt_retranscribe_desc"), "color": WARN,
+             "action": lambda: self._start_transcription(src, meta, resume=False)},
+        ]
+        # «Riprendi» solo quando c'è davvero un parziale (traduzione/riassunto
+        # interrotti a metà), con l'indicazione di dove riprenderà.
+        if engine.can_resume(meta, self.out_root):
+            hint = engine.resume_hint(meta, self.out_root, self.lang)
+            desc = self.t("already_opt_resume_desc")
+            if hint:
+                desc = f"{desc} ({hint})"
+            options.append(
+                {"icon": ft.Icons.PLAY_CIRCLE_OUTLINE, "label": self.t("already_opt_resume"),
+                 "desc": desc, "color": GREEN_HI,
+                 "action": lambda: self._start_postprocess("resume", src, meta)})
+        options.append(
+            {"icon": ft.Icons.TRANSLATE, "label": self.t("already_opt_translate"),
+             "desc": self.t("already_opt_translate_desc"), "color": GREEN,
+             "action": lambda: self._start_postprocess("translate", src, meta)})
+        options.append(
+            {"icon": ft.Icons.SUMMARIZE, "label": self.t("already_opt_summary"),
+             "desc": self.t("already_opt_summary_desc"), "color": GREEN,
+             "action": lambda: self._start_postprocess("summary", src, meta)})
         self._choice_dialog(
-            ft.Icons.HISTORY, self.t("already_title"), self.t("already_desc"),
-            [
-                {"icon": ft.Icons.REFRESH, "label": self.t("opt_retranscribe"),
-                 "desc": self.t("opt_retranscribe_desc"), "color": GREEN,
-                 "action": lambda: self._start_transcription(src, meta, resume=False)},
-            ])
+            ft.Icons.HISTORY, self.t("already_title"), self.t("already_desc"), options)
 
     def _show_resume_dialog(self, src, meta: dict, cp: dict) -> None:
         """A partial run exists: offer to resume from the checkpoint or start over.
@@ -2274,7 +2331,13 @@ class EchoScriptApp:
                 self.page.update()
                 self._show_progress(False)
                 self._set_busy(False)
-                self._render_result(result)
+                # Riassunto fermato per crediti Groq esauriti: la trascrizione (e
+                # l'eventuale traduzione) sono salvate; offri di concludere il
+                # riassunto in locale, altrimenti mostra il risultato parziale.
+                if result.get("summary_status") == "partial" and self.backend == "groq":
+                    self._offer_summary_local(src, meta, result)
+                else:
+                    self._render_result(result)
             except engine.RateLimitReached as ex:
                 self._fail_ratelimit(ex, src, meta)
             except engine.EngineError as ex:
@@ -2381,6 +2444,107 @@ class EchoScriptApp:
                 self._fail(self.t("err_unexpected").format(e=ex))
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _postprocess_options(self) -> dict:
+        """Opzioni per le fasi di post-produzione (traduzione/riassunto/riprendi).
+
+        Il PDF è sempre generato; la lingua UI decide i nomi delle cartelle; la
+        chiave Groq (se presente) abilita il riassunto in cloud, altrimenti si usa
+        Ollama in locale."""
+        return {
+            "backend": self.backend, "model": self.model_dd.value,
+            "api_key": self.loaded_api_key or "", "export": True,
+            "source_kind": self.source, "ui_lang": self.lang,
+            "translate": True, "summarize": True, "visual": False,
+        }
+
+    def _start_postprocess(self, kind: str, src, meta: dict,
+                           options: dict | None = None) -> None:
+        """Esegue una fase su un video GIÀ trascritto, in background con progress.
+
+        'kind' ∈ {'translate','summary','resume'}. Riusa la trascrizione salvata
+        (nessun credito di trascrizione) e riprende dalle sezioni già fatte. Al
+        termine, se il riassunto è rimasto parziale per crediti Groq esauriti,
+        offre di concluderlo in locale (Ollama)."""
+        options = options or self._postprocess_options()
+        plan = {"translate": ["translate"], "summary": ["summarize"],
+                "resume": ["translate", "summarize"]}.get(kind, ["summarize"])
+        self._plan = ["info"] + plan
+        self._last_g = 0.0
+        self._hide_error()
+        self._set_busy(True)
+        self._set_engine_badge()
+        self._init_progress(options)
+        self._set_phase("info", None, None, "")
+        self._show_progress(True)
+        self.page.update()
+
+        def work():
+            """Background worker: run the chosen post-processing stage, then show it."""
+            try:
+                if kind == "translate":
+                    result = engine.translate_only(meta, options, self.out_root,
+                                                   on_progress=self._on_progress)
+                elif kind == "summary":
+                    result = engine.summary_only(meta, options, self.out_root,
+                                                 on_progress=self._on_progress)
+                else:
+                    result = engine.resume(meta, options, self.out_root,
+                                           on_progress=self._on_progress)
+                self.prog_bar.value = 1.0
+                self.prog_pct.value = "100%"
+                self.page.update()
+                self._show_progress(False)
+                self._set_busy(False)
+                # Riassunto interrotto per crediti Groq: offri di finirlo in locale.
+                if (result.get("summary_status") == "partial"
+                        and self.backend == "groq"):
+                    self._offer_summary_local(src, meta, result)
+                else:
+                    self._render_result(result)
+            except engine.EngineError as ex:
+                self._fail(str(ex))
+            except Exception as ex:
+                self._fail(self.t("err_unexpected").format(e=ex))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _offer_summary_local(self, src, meta: dict, result: dict) -> None:
+        """Il riassunto si è fermato per crediti Groq: proponi di concluderlo in
+        locale (Ollama), ripartendo dalla sezione ferma. Se l'utente rifiuta,
+        mostra comunque il risultato parziale già salvato."""
+        def finish_local(e=None):
+            self.page.close(self._sum_local_dialog)
+            opts = self._postprocess_options()
+            opts["backend"] = "local"          # forza Ollama per il riassunto
+            opts["api_key"] = ""               # niente Groq: usa il locale
+            self._start_postprocess("summary", src, meta, options=opts)
+
+        def later(e=None):
+            self.page.close(self._sum_local_dialog)
+            self._render_result(result)
+
+        yes = ft.FilledButton(
+            self.t("sum_local_yes"), icon=ft.Icons.COMPUTER, on_click=finish_local,
+            style=ft.ButtonStyle(bgcolor=WARN, color="#1A1206",
+                                 shape=ft.RoundedRectangleBorder(radius=10),
+                                 padding=ft.padding.symmetric(horizontal=18, vertical=16)))
+        no = ft.OutlinedButton(
+            self.t("sum_local_no"), icon=ft.Icons.SCHEDULE, on_click=later,
+            style=ft.ButtonStyle(color=MUTED,
+                                 shape=ft.RoundedRectangleBorder(radius=10),
+                                 padding=ft.padding.symmetric(horizontal=16, vertical=16)))
+        self._sum_local_dialog = ft.AlertDialog(
+            modal=True, bgcolor=SURFACE, shape=ft.RoundedRectangleBorder(radius=16),
+            title=ft.Row([ft.Icon(ft.Icons.HOURGLASS_DISABLED, color=WARN, size=22),
+                          ft.Text(self.t("sum_local_title"), size=18,
+                                  weight=ft.FontWeight.W_600, color=WARN)], spacing=10),
+            content=ft.Container(width=460,
+                                 content=ft.Text(self.t("sum_local_msg"), size=13,
+                                                 color=TEXT, no_wrap=False)),
+            actions=[no, yes], actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self.page.open(self._sum_local_dialog)
 
     # --------------------------------------------------------------- PROGRESS UI
     def _on_progress(self, phase, current, total, detail="") -> None:
