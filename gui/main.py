@@ -72,6 +72,13 @@ _LOCAL_MODELS = [
     ("large-v3-turbo", "model_turbo"),
 ]
 
+# Modelli di trascrizione GROQ (cloud) selezionabili: entrambi multilingua.
+# Turbo = default (miglior prezzo/velocità); large-v3 = più accurato ma più caro.
+_GROQ_MODELS = [
+    ("whisper-large-v3-turbo", "groqm_turbo"),
+    ("whisper-large-v3",       "groqm_large"),
+]
+
 # === LOCALIZED STRINGS (it = default, en) ==================================
 # Every user-facing text lives below. self.t("key") returns the version in the
 # current language; the ones with {placeholders} are used with .format().
@@ -85,6 +92,9 @@ T = {
         "backend_groq_name": "Groq",
         "backend_groq_desc": "Velocissimo. L'audio viene inviato ai server Groq.",
         "model_label": "Modello locale",
+        "groq_model_label": "Modello Groq (trascrizione)",
+        "groqm_turbo": "whisper-large-v3-turbo — $0.04/ora · veloce, consigliato",
+        "groqm_large": "whisper-large-v3 — $0.111/ora · più accurato",
         "model_base": "base — veloce, meno accurato",
         "model_small": "small — equilibrio consigliato ★",
         "model_medium": "medium — più accurato, più lento",
@@ -308,6 +318,9 @@ T = {
         "backend_groq_name": "Groq",
         "backend_groq_desc": "Very fast. Audio is sent to Groq servers.",
         "model_label": "Local model",
+        "groq_model_label": "Groq model (transcription)",
+        "groqm_turbo": "whisper-large-v3-turbo — $0.04/hr · fast, recommended",
+        "groqm_large": "whisper-large-v3 — $0.111/hr · more accurate",
         "model_base": "base — fast, less accurate",
         "model_small": "small — recommended balance ★",
         "model_medium": "medium — more accurate, slower",
@@ -1048,6 +1061,19 @@ class EchoScriptApp:
         self._reg(self.model_dd, "label", "model_label")
         self.model_field = ft.Container(content=self.model_dd)
 
+        # Selettore del modello di trascrizione GROQ (cloud): mostrato solo col
+        # backend Groq. La scelta cambia il costo stimato (prezzo per ora diverso).
+        self.groq_model_dd = ft.Dropdown(
+            value=_GROQ_MODELS[0][0],
+            options=[ft.dropdown.Option(k, self.t(tk)) for k, tk in _GROQ_MODELS],
+            on_change=lambda e: self._on_groq_model_change(),
+            border_color=BORDER, focused_border_color=GREEN,
+            color=TEXT, label_style=ft.TextStyle(color=MUTED),
+            bgcolor=SURFACE2, filled=True, border_radius=10,
+        )
+        self._reg(self.groq_model_dd, "label", "groq_model_label")
+        self.groq_model_field = ft.Container(content=self.groq_model_dd, visible=False)
+
         self.key_field = ft.Container(
             visible=False,
             content=ft.Column(
@@ -1064,8 +1090,14 @@ class EchoScriptApp:
             self._card_title("1", "step1_title"),
             ft.Row([self.bc_local, self.bc_groq], spacing=14),
             self.model_field,
+            self.groq_model_field,
             self.key_field,
         )
+
+    def _on_groq_model_change(self) -> None:
+        """Cambiato il modello Groq: aggiorna la stima costo mostrata."""
+        self._refresh_info_boxes()
+        self.page.update()
 
     def _rebuild_model_options(self) -> None:
         """Rewrite the model dropdown descriptions in the current language.
@@ -1075,6 +1107,9 @@ class EchoScriptApp:
         val = self.model_dd.value
         self.model_dd.options = [ft.dropdown.Option(k, self.t(tk)) for k, tk in _LOCAL_MODELS]
         self.model_dd.value = val
+        gval = self.groq_model_dd.value
+        self.groq_model_dd.options = [ft.dropdown.Option(k, self.t(tk)) for k, tk in _GROQ_MODELS]
+        self.groq_model_dd.value = gval
 
     # --- Groq API key loader from a .txt file (TRANSCRIPTION) --------------
     def _key_loader(self) -> ft.Control:
@@ -1564,10 +1599,16 @@ class EchoScriptApp:
         ]
 
     def _estimate_text(self, meta: dict) -> str:
-        """Localized pre-run estimate line (Groq cost or local time) for a source."""
-        est = tx.estimate_job(meta, self.backend, self.model_dd.value)
+        """Localized pre-run estimate line (Groq cost or local time) for a source.
+
+        Con Groq usa il MODELLO scelto nel selettore: prezzo per ora (e quindi
+        costo stimato) diversi tra turbo e large-v3."""
+        model_for_est = (self.groq_model_dd.value if self.backend == "groq"
+                         else self.model_dd.value)
+        est = tx.estimate_job(meta, self.backend, model_for_est)
         if est["backend"] == "groq":
-            return self.t("est_cost").format(c=f"{est['cost_usd']:.3f}", m=tx.GROQ_MODEL)
+            return self.t("est_cost").format(c=f"{est['cost_usd']:.3f}",
+                                             m=self.groq_model_dd.value)
         dev = "GPU" if est.get("device") == "cuda" else "CPU"
         return self.t("est_time").format(t=tx._format_duration(est["seconds"]), d=dev)
 
@@ -1838,7 +1879,7 @@ class EchoScriptApp:
         if self.backend == "groq":
             self.prog_engine_icon.name = ft.Icons.CLOUD_OUTLINED
             self.prog_engine_icon.color = GREEN_HI
-            self.prog_engine_text.value = self.t("engine_groq").format(model=tx.GROQ_MODEL)
+            self.prog_engine_text.value = self.t("engine_groq").format(model=self.groq_model_dd.value)
             self.prog_engine_text.color = GREEN_HI
             self.prog_engine.bgcolor = ft.Colors.with_opacity(0.12, GREEN)
             self.prog_engine.border = ft.border.all(1, ft.Colors.with_opacity(0.35, GREEN))
@@ -1918,6 +1959,7 @@ class EchoScriptApp:
     def _sync_fields(self) -> None:
         """Show only the input fields relevant to the current backend/source."""
         self.model_field.visible = self.backend == "local"
+        self.groq_model_field.visible = self.backend == "groq"
         self.key_field.visible = self.backend == "groq"
         self.yt_panel.visible = self.source == "youtube"
         self.local_panel.visible = self.source == "local"
@@ -2298,6 +2340,8 @@ class EchoScriptApp:
         always produced. On rate limit/error it routes to the dedicated handlers."""
         options = {
             "backend": self.backend, "model": self.model_dd.value,
+            # Modello di trascrizione Groq scelto (usato solo col backend Groq).
+            "groq_model": self.groq_model_dd.value,
             "api_key": self.loaded_api_key or "", "export": True,
             "source_kind": self.source,
             # Folder names follow the interface language (en -> English folders).
@@ -2453,6 +2497,7 @@ class EchoScriptApp:
         Ollama in locale."""
         return {
             "backend": self.backend, "model": self.model_dd.value,
+            "groq_model": self.groq_model_dd.value,
             "api_key": self.loaded_api_key or "", "export": True,
             "source_kind": self.source, "ui_lang": self.lang,
             "translate": True, "summarize": True, "visual": False,

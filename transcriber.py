@@ -170,6 +170,12 @@ _load_env_file()
 # "whisper-large-v3" (more accurate/slower), "distil-whisper-large-v3-en" (EN only).
 GROQ_MODEL = _env_str("ECHOSCRIPT_GROQ_MODEL", "whisper-large-v3-turbo")
 
+# Modelli di trascrizione Groq SELEZIONABILI dall'utente (GUI e CLI): entrambi
+# multilingua. 'turbo' = miglior rapporto prezzo/velocità (default); 'large-v3' =
+# più accurato ma ~2,8× più costoso. Il primo è il default. (Il distil, solo
+# inglese, resta impostabile via ECHOSCRIPT_GROQ_MODEL ma non è nel selettore.)
+GROQ_TRANSCRIBE_MODELS = ("whisper-large-v3-turbo", "whisper-large-v3")
+
 # Audio/video extensions accepted as LOCAL sources (phone recordings, PC files,
 # video files from which ffmpeg extracts the audio track). ffmpeg reads all of
 # these; anything not listed is still attempted but with a gentle warning.
@@ -1001,6 +1007,49 @@ def choose_local_model() -> str | None:
             return None
         if choice in LOCAL_MODELS:
             return LOCAL_MODELS[choice][0]
+        console.print("[warning]Scelta non valida, riprova.[/warning]")
+
+
+def choose_groq_model() -> str | None:
+    """Pannello per scegliere il modello di trascrizione Groq (cloud).
+
+    Mostra i due modelli multilingua col prezzo per ora di audio, così la scelta
+    è consapevole. Chiamato ogni volta che si sceglie il backend Groq. Restituisce
+    il nome del modello (default: turbo) o None se si annulla."""
+    rows = {
+        "1": ("whisper-large-v3-turbo", "$0.04/ora", "▰▰▰▰▱",
+              "miglior rapporto prezzo/velocità · quasi come large-v3", True),
+        "2": ("whisper-large-v3", "$0.111/ora", "▰▰▰▰▰",
+              "massima accuratezza · audio rumorosi/difficili · ~2,8× più caro", False),
+    }
+    table = Table(show_header=True, box=None, expand=False, padding=(0, 2),
+                  header_style="bold dim")
+    table.add_column("#", style="bold bright_white", justify="center")
+    table.add_column("Modello", style="bold bright_cyan", no_wrap=True)
+    table.add_column("Prezzo", style="bold bright_green", no_wrap=True)
+    table.add_column("Qualità / quando", style="info")
+    for key, (name, price, bar, desc, is_default) in rows.items():
+        badge = "  [bold bright_yellow]★ consigliato[/bold bright_yellow]" if is_default else ""
+        table.add_row(key, f"{name}{badge}", price, f"[dim]{bar}[/dim]  {desc}")
+
+    console.print()
+    console.print(Panel(
+        table,
+        title="[title]⚡ Quale modello Groq per la trascrizione?[/title]", title_align="left",
+        subtitle="[dim]la trascrizione si paga a ORA di audio, non a token · invio = turbo[/dim]",
+        border_style="bright_cyan", box=ROUNDED, expand=False, padding=(1, 2),
+    ))
+
+    while True:
+        choice = console.input(
+            "\n[bold bright_cyan]›[/bold bright_cyan] [bold]Modello[/bold] "
+            "[dim](1-2 · invio = turbo · q = annulla)[/dim]: ").strip().lower()
+        if choice == "q":
+            return None
+        if choice == "":
+            return rows["1"][0]
+        if choice in rows:
+            return rows[choice][0]
         console.print("[warning]Scelta non valida, riprova.[/warning]")
 
 
@@ -4316,10 +4365,14 @@ def estimate_job(meta: dict, backend: str, model: str | None = None) -> dict:
     duration = meta.get("duration") or 0
     hours = duration / 3600
     if backend == "groq":
-        price = GROQ_PRICE_PER_HOUR.get(GROQ_MODEL, 0.04)
+        # 'model' (se passato) è il modello Groq scelto dall'utente; altrimenti il
+        # default corrente. Il prezzo/ora dipende dal modello selezionato.
+        gm = model or GROQ_MODEL
+        price = GROQ_PRICE_PER_HOUR.get(gm, 0.04)
         cost = hours * price
         return {"backend": "groq", "duration": duration, "cost_usd": cost,
-                "detail": (f"costo stimato ~${cost:.3f} (Groq {GROQ_MODEL}, "
+                "model": gm,
+                "detail": (f"costo stimato ~${cost:.3f} (Groq {gm}, "
                            f"{_format_duration(duration)} di audio)")}
     device, _ = _resolve_device()
     rt = _LOCAL_REALTIME_CPU.get(model or "small", 0.2)
@@ -4349,12 +4402,19 @@ def run() -> None:
         return
 
     # If local, we choose the model RIGHT AWAY (so that any cancellation happens
-    # before downloading anything).
+    # before downloading anything). If Groq, we pick the CLOUD model here too, so
+    # the cost estimate and the whole run use exactly the model chosen.
     local_model = None
     if backend == "local":
         local_model = choose_local_model()
         if not local_model:
             return
+    else:  # groq: scelta del modello di trascrizione cloud (costo associato)
+        gm = choose_groq_model()
+        if not gm:
+            return
+        global GROQ_MODEL
+        GROQ_MODEL = gm
 
     # --- Source selection: YouTube URL or local file/folder ---
     source_kind = choose_source()

@@ -215,6 +215,15 @@ On startup a panel lets you choose the transcription engine:
 | 🔒 **Local** (faster-whisper) | **Maximum**: audio stays on your PC | 🐢 Slower | **Free** | Private/sensitive audio, no limits |
 | ⚡ **Groq** (cloud) | Audio goes to Groq's servers | ⚡ Very fast | Generous free tier | Public YouTube videos, when in a hurry |
 
+If you choose **Groq**, a panel (in the GUI and CLI) lets you pick the **cloud transcription model** — and the **estimated cost** updates accordingly:
+
+| Groq model | Price /audio hour | Notes |
+|---|---|---|
+| `whisper-large-v3-turbo` ⭐ (default) | **$0.04** | best price/speed ratio, multilingual |
+| `whisper-large-v3` | **$0.111** | top accuracy (noisy/hard audio), ~2.8× more expensive |
+
+> Transcription is billed **per hour of audio** (not per token). The `distil-whisper-large-v3-en` model (English-only, ~$0.02/hr) can still be set via `ECHOSCRIPT_GROQ_MODEL` but isn't in the picker.
+
 If you choose **Local**, a second panel lets you pick the model each time:
 
 | Model | Speed ↔ Accuracy |
@@ -233,6 +242,7 @@ If you choose **Local**, a second panel lets you pick the model each time:
 
 - 🖥️ **Two interfaces**: desktop **GUI** (`gui/main.py`) or **CLI** in the terminal (`transcriber.py`)
 - 🔀 **Two backends** selectable from a panel: Groq (cloud, fast) or faster-whisper (local, private)
+- 🎚️ **Groq transcription model chosen in-app** (GUI and CLI): `whisper-large-v3-turbo` (default, cheap) or `whisper-large-v3` (more accurate); the **estimated cost** follows the chosen model
 - 🎙️ **Two sources**: **YouTube** videos (from URL) or **local audio files** (phone/PC), including **screen recordings** (`mp4`/`mov`/`mkv`…), even a **whole folder** in batch
 - 📋 **Video card** before you start (title, channel, views, **likes, subscribers, category, language**, date, duration, chapters)
 - 🗣️ **Audio language detected** automatically (Whisper) and shown in the summary
@@ -683,7 +693,7 @@ the `.env` file), no code editing needed. Each value has a sensible default:
 | `.env` variable | Default | Description |
 |---|---|---|
 | `GROQ_API_KEY` | — | Groq key (cloud transcription only) |
-| `ECHOSCRIPT_GROQ_MODEL` | `whisper-large-v3-turbo` | Whisper model on Groq (turbo = fast/cheap) |
+| `ECHOSCRIPT_GROQ_MODEL` | `whisper-large-v3-turbo` | Whisper model on Groq. Now also selectable **in-app** (GUI/CLI) between `turbo` and `large-v3`; this variable changes the default (and is the only way to set `distil-whisper-large-v3-en`, English-only) |
 | `ECHOSCRIPT_AUDIO_LANG` | *(empty)* | Audio language: empty = auto-detect; force with `it` / `en` / … |
 | `ECHOSCRIPT_WORD_TIMESTAMPS` | `1` | Word-level timestamps (useful for subtitles) |
 | `ECHOSCRIPT_CHUNK_SECONDS` | `600` | Duration of each audio chunk (Groq only) |

@@ -674,6 +674,10 @@ def transcribe_only(source: str, options: dict, on_progress=_noop, resume: bool 
 
     Returns (meta, segments, engine_label, client)."""
     _set_engine_lang(options)
+    # Modello di trascrizione Groq scelto dall'utente (GUI): diventa quello attivo
+    # per l'intera lavorazione, così API call, etichette e checkpoint lo usano.
+    if options.get("groq_model"):
+        tx.GROQ_MODEL = options["groq_model"]
     backend = options.get("backend", "groq")
     model = options.get("model")
     source_kind = options.get("source_kind", "youtube")
