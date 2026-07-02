@@ -187,6 +187,8 @@ Si apre una **finestra dedicata** con l'avanzamento (niente animazioni finte):
 - un **elenco dei passaggi** che si spunta man mano (Trascrizione → eventuale Traduzione → eventuale Riassunto → Salvataggio): rispecchia esattamente le opzioni che hai scelto;
 - una **breve frase** che racconta cosa sta avvenendo in quel momento e il **piano completo** del lavoro.
 
+> 🌍 **Tutto nella lingua dell'interfaccia.** Non solo le etichette: anche i **messaggi di avanzamento** (es. *«Sezione 3/10 tradotta»*, *«Riassumo le sezioni»*) e gli **avvisi** (crediti esauriti, PDF non creato, analisi visiva saltata…) sono mostrati in italiano o in inglese a seconda della lingua scelta.
+
 ### A fine trascrizione
 Il **PDF viene creato sempre**, in automatico, e i file vengono salvati senza ulteriori domande.
 

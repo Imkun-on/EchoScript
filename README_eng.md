@@ -189,6 +189,8 @@ A **dedicated window** opens with the progress (no fake animations):
 - a **checklist of steps** that ticks off as it goes (Transcription → optional Translation → optional Summary → Saving): it mirrors exactly the options you chose;
 - a **short sentence** narrating what's happening right now, plus the **full plan** of the job.
 
+> 🌍 **Everything in the interface language.** Not just the labels: the **progress messages** (e.g. *"Section 3/10 translated"*, *"Summarizing sections"*) and the **warnings** (credits exhausted, PDF not created, visual analysis skipped…) are shown in Italian or English depending on the chosen language.
+
 ### At the end of transcription
 The **PDF is always created**, automatically, and the files are saved with no further prompts.
 
