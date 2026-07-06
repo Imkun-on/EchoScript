@@ -74,6 +74,7 @@ L'idea nasce da un bisogno concreto: i video formativi (su **RAG**, **fine-tunin
 Puoi scegliere **cosa** trascrivere:
 
 - 📺 **un video YouTube**, da URL (scarica audio, info e capitoli);
+- ▶️ **un'intera playlist YouTube**: incolli il link della playlist e trascrive **tutti** i suoi video in sequenza, salvandoli in una cartella con il nome della playlist (una sottocartella per ogni video);
 - 🎙️ **un file audio locale** (note vocali del telefono, registrazioni del PC: `m4a`, `mp3`, `wav`, `ogg`, `opus`, anche video `mp4`/`mov`…), oppure **un'intera cartella** per trascriverli tutti in sequenza (batch).
 
 E puoi scegliere **come** trascrivere:
@@ -161,13 +162,16 @@ Due riquadri da scegliere (si illuminano di verde quando selezionati):
 > A fine trascrizione, nella finestra **"Completato!"** compaiono anche i **crediti Groq usati** (audio trascritto) e quelli **residui per oggi**.
 
 ### Passo 2 — "Cosa vuoi trascrivere?"
-- 📺 **YouTube**: incolla il **link** del video nel campo e clicca **"Carica info"**.
+- 📺 **YouTube**: incolla il **link** del video (o di una **playlist**) nel campo e clicca **"Carica info"**.
 - 🎙️ **File locale**: clicca **"Scegli file audio…"** e prendi un file dal computer (vanno bene anche **video** e **registrazioni schermo**).
 
 ### La finestra di conferma del video (YouTube)
 Dopo **"Carica info"** si apre una finestra con la **copertina** del video e i suoi dati (canale, visualizzazioni, mi piace, iscritti, durata, lingua…). Ti chiede: *è questo il video giusto?*
 - **Conferma** → accetti il video (sotto compare *"✓ Video confermato"*).
 - **Annulla** → lo scarti e puoi incollarne un altro.
+
+### Le playlist YouTube
+Se incolli il link di una **playlist** (URL con `list=`, playlist **pubblica** o **non in elenco**), dopo *"Carica info"* si apre una finestra dedicata che mostra il **nome della playlist**, il **canale**, la **durata totale** e l'**elenco numerato dei video**. Alla conferma parte il **batch**: i video vengono trascritti **uno alla volta** e salvati in un'unica cartella con il nome della playlist, con **una sottocartella per ogni video**. Durante il lavoro, in cima alla finestra di avanzamento compare *"Video 2/5"* per farti seguire il progresso, e alla fine un riepilogo con i video **trascritti / già presenti (saltati) / non riusciti**. Regole del batch: un video **già trascritto** viene saltato (non rispende crediti), un video **non disponibile** (privato/rimosso) viene saltato senza fermare gli altri, e se i **crediti Groq finiscono** il batch si ferma salvando quanto già fatto (riprendibile in seguito).
 
 ### Passo 3 — "Output aggiuntivi" (opzionale)
 Sotto i due riquadri c'è una card con **tre interruttori**, tutti **spenti** di default (così una trascrizione semplice resta tale):
@@ -422,7 +426,7 @@ Flusso tipico:
 
 › Scelta (1 = YouTube · 2 = File locale · q = annulla): 1
 
-› Incolla l'URL del video YouTube (q per uscire): https://www.youtube.com/watch?v=...
+› Incolla l'URL del video o della playlist YouTube (q per uscire): https://www.youtube.com/watch?v=...
 
 ┌─ 🎬 RAG è già vecchio? ... ──────────────────────┐
 │  📺  Canale           Simone Rizzo               │
@@ -514,6 +518,8 @@ results/
 ```
 
 > Per i **file locali** `<Nome>` è il nome del file (senza estensione); per i video YouTube è il titolo. In **batch** ogni file produce la sua cartella `results/<nome file>/`. Le cartelle `traduzioni/`, `riassunti/` e `analisi_visiva/` compaiono solo quando quei passaggi vengono eseguiti.
+
+> ▶️ **Playlist YouTube.** Quando trascrivi una **playlist**, i suoi video finiscono tutti in una cartella dedicata `results/<nome playlist>/` (in mancanza del titolo si usa il **nome del canale**), con **una sottocartella per ogni video** — es. `results/Corso di Python/Lezione 1/trascrizioni/…`. Ogni video mantiene i suoi file (e le eventuali cartelle `traduzioni/`, `riassunti/`, `analisi_visiva/`) separati.
 
 > 🌍 **Nomi cartelle secondo la lingua del tool.** Con l'interfaccia in **inglese** le sottocartelle prendono il nome inglese — `transcriptions/`, `translations/`, `summaries/`, `visual_analysis/` — e la traduzione usa il suffisso `_en` (es. `<Nome>_en.md`). Con l'interfaccia in italiano restano quelle mostrate sopra.
 

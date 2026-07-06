@@ -1309,6 +1309,31 @@ def display_local_sources(metas: list[dict]) -> None:
     ))
 
 
+def display_playlist_sources(pl: dict, metas: list[dict]) -> None:
+    """Mostra il nome della playlist, il canale e la tabella dei video da trascrivere.
+
+    Serve a far vedere all'utente COSA verrà trascritto (e sotto quale cartella)
+    prima di confermare: titolo playlist -> cartella in results/, elenco numerato
+    dei video con la loro durata e la durata totale stimata."""
+    table = Table(show_header=True, box=None, expand=False, padding=(0, 2), header_style="bold dim")
+    table.add_column("#", style="bold bright_white", justify="center")
+    table.add_column("Video", style="bold bright_green", overflow="fold")
+    table.add_column("Durata", style="info", justify="right", no_wrap=True)
+    total = 0.0
+    for i, m in enumerate(metas, 1):
+        total += m["duration"] or 0
+        table.add_row(str(i), m["title"], _format_duration(m["duration"]))
+    sub = (f"[dim]canale: {pl.get('channel') or '?'} · "
+           f"durata totale ~{_format_duration(total)}[/dim]")
+    console.print()
+    console.print(Panel(
+        table,
+        title=f"[title]▶ Playlist «{pl.get('title') or '?'}» — {len(metas)} video[/title]",
+        title_align="left", subtitle=sub,
+        border_style="bright_magenta", box=ROUNDED, expand=False, padding=(1, 2),
+    ))
+
+
 # === PROMPT (user input with a consistent style) ===
 
 def _prompt(label: str, hint: str = "", accent: str = "bright_blue") -> str:
@@ -1367,6 +1392,53 @@ def get_video_info(url: str) -> dict | None:
         # Lingua dichiarata da YouTube (spesso assente). Quella "vera" dall'audio
         # viene rilevata da Whisper durante la trascrizione (detected_language).
         "language": info.get("language"),
+    }
+
+
+def get_playlist_info(url: str) -> dict | None:
+    """Se l'URL è una PLAYLIST YouTube, restituisce nome/canale + elenco dei video.
+
+    Usa yt-dlp in modalità "flat" (extract_flat="in_playlist"): NON risolve i
+    metadati di ogni singolo video, legge soltanto l'elenco — quindi è veloce
+    anche con playlist lunghe. Restituisce None se l'URL non è una playlist
+    (video singolo) o in caso di errore. La chiave 'entries' è la lista degli URL
+    dei video nell'ordine della playlist; 'title' è il nome della playlist (con
+    fallback al canale) usato per la sottocartella in results/."""
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "extract_flat": "in_playlist",  # non scaricare i metadati di ogni video
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception as e:
+        console.print(f"[error]Impossibile leggere la playlist: {e}[/error]")
+        return None
+
+    if not info or info.get("_type") != "playlist":
+        return None  # non è una playlist: si prosegue come video singolo
+
+    entries: list[str] = []
+    for e in (info.get("entries") or []):
+        if not e:
+            continue
+        vid = e.get("id")
+        vurl = e.get("url") or e.get("webpage_url")
+        if vid:
+            entries.append(f"https://www.youtube.com/watch?v={vid}")
+        elif vurl:
+            entries.append(vurl)
+    if not entries:
+        return None
+
+    channel = info.get("channel") or info.get("uploader")
+    return {
+        "title": info.get("title") or channel,
+        "channel": channel,
+        "count": len(entries),
+        "entries": entries,
     }
 
 
@@ -4424,20 +4496,60 @@ def run() -> None:
     # Each job is (meta, (kind, ref)). YouTube yields exactly one job; a local
     # folder yields one job per audio file found (batch).
     jobs: list[tuple[dict, tuple[str, str]]] = []
+    # Se la sorgente è una playlist YouTube, tutti i suoi video finiscono in una
+    # sottocartella dedicata di results/ (nome = titolo playlist, o canale).
+    playlist_subdir: str | None = None
     if source_kind == "youtube":
-        url = _prompt("Incolla l'URL del video YouTube", "(q per uscire)", accent="bright_magenta")
+        url = _prompt("Incolla l'URL del video o della playlist YouTube",
+                      "(q per uscire)", accent="bright_magenta")
         if not url or url.lower() == "q":
             return
-        with console.status("[info]Leggo le informazioni del video...[/info]", spinner="dots"):
-            meta = get_video_info(url)
-        if not meta:
-            return
-        display_video_info(meta)
-        console.print(f"  [dim]💡 {estimate_job(meta, backend, local_model)['detail']}[/dim]")
-        if not _confirm("Procedo con la trascrizione di questo video?", accent="bright_cyan"):
-            console.print("[warning]Operazione annullata.[/warning]")
-            return
-        jobs.append((meta, ("youtube", url)))
+
+        # Un URL con "list=" PUÒ essere una playlist: lo verifichiamo con una
+        # lettura veloce (flat). Se lo è, trascriviamo TUTTI i suoi video.
+        pl = None
+        if "list=" in url:
+            with console.status("[info]Leggo la playlist...[/info]", spinner="dots"):
+                pl = get_playlist_info(url)
+
+        if pl and pl["count"] >= 1:
+            # --- Sorgente PLAYLIST: un job per video, tutti sotto results/<playlist> ---
+            collected: list[tuple[dict, str]] = []  # (meta, url) dei video disponibili
+            with console.status("[info]Leggo le informazioni dei video...[/info]",
+                                spinner="dots") as st:
+                for i, vurl in enumerate(pl["entries"], 1):
+                    st.update(f"[info]Leggo le informazioni dei video... ({i}/{pl['count']})[/info]")
+                    m = get_video_info(vurl)
+                    if not m:
+                        # Video privato/rimosso/non disponibile: lo saltiamo e proseguiamo.
+                        console.print(f"  [warning]Video {i}/{pl['count']} non disponibile: saltato.[/warning]")
+                        continue
+                    collected.append((m, vurl))
+            if not collected:
+                console.print("[error]Nessun video disponibile nella playlist.[/error]")
+                return
+            display_playlist_sources(pl, [m for m, _ in collected])
+            total_dur = sum((m["duration"] or 0) for m, _ in collected)
+            console.print(f"  [dim]💡 {estimate_job({'duration': total_dur}, backend, local_model)['detail']}[/dim]")
+            n = len(collected)
+            if not _confirm(f"Procedo con la trascrizione dei {n} video della playlist?",
+                            accent="bright_cyan"):
+                console.print("[warning]Operazione annullata.[/warning]")
+                return
+            jobs = [(m, ("youtube", vurl)) for m, vurl in collected]
+            playlist_subdir = _safe_filename(pl["title"] or pl["channel"] or "playlist")
+        else:
+            # --- Video singolo (comportamento invariato) ---
+            with console.status("[info]Leggo le informazioni del video...[/info]", spinner="dots"):
+                meta = get_video_info(url)
+            if not meta:
+                return
+            display_video_info(meta)
+            console.print(f"  [dim]💡 {estimate_job(meta, backend, local_model)['detail']}[/dim]")
+            if not _confirm("Procedo con la trascrizione di questo video?", accent="bright_cyan"):
+                console.print("[warning]Operazione annullata.[/warning]")
+                return
+            jobs.append((meta, ("youtube", url)))
     else:
         path = _prompt("Incolla il percorso del file o della cartella audio",
                        "(q per uscire)", accent="bright_magenta")
@@ -4500,6 +4612,10 @@ def run() -> None:
                   f"verrà generata in automatico ({_tr_engine}).")
 
     out_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
+    # Playlist: tutti i video vanno in results/<nome playlist>/<titolo video>/...
+    if playlist_subdir:
+        out_root = os.path.join(out_root, playlist_subdir)
+        os.makedirs(out_root, exist_ok=True)
 
     # --- Process each job (one for YouTube, one per file in a batch) ---
     total = len(jobs)

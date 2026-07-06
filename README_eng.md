@@ -76,6 +76,7 @@ The idea comes from a real need: educational videos (about **RAG**, **fine-tunin
 You choose **what** to transcribe:
 
 - 📺 **a YouTube video**, from its URL (downloads audio, info and chapters);
+- ▶️ **a whole YouTube playlist**: paste the playlist link and it transcribes **all** its videos in sequence, saving them into one folder named after the playlist (a subfolder per video);
 - 🎙️ **a local audio file** (phone voice memos, PC recordings: `m4a`, `mp3`, `wav`, `ogg`, `opus`, even `mp4`/`mov` video…), or **a whole folder** to transcribe them all in sequence (batch).
 
 And you choose **how** to transcribe:
@@ -163,13 +164,16 @@ Two cards to choose from (they glow green when selected):
 > When transcription finishes, the **"Done!"** window also shows the **Groq credits used** (audio transcribed) and those **left for today**.
 
 ### Step 2 — "What do you want to transcribe?"
-- 📺 **YouTube**: paste the video **link** in the field and click **"Load info"**.
+- 📺 **YouTube**: paste the video (or **playlist**) **link** in the field and click **"Load info"**.
 - 🎙️ **Local file**: click **"Choose audio file…"** and pick a file from your computer (**videos** and **screen recordings** work too).
 
 ### The video confirmation window (YouTube)
 After **"Load info"** a window opens with the video's **cover** and details (channel, views, likes, subscribers, duration, language…). It asks: *is this the right video?*
 - **Confirm** → accept the video (a *"✓ Video confirmed"* line appears below).
 - **Cancel** → discard it and paste another one.
+
+### YouTube playlists
+If you paste a **playlist** link (a URL with `list=`, either **public** or **unlisted**), after *"Load info"* a dedicated window shows the **playlist name**, the **channel**, the **total duration** and the **numbered list of videos**. On confirm the **batch** starts: videos are transcribed **one at a time** and saved into a single folder named after the playlist, with **one subfolder per video**. While it runs, a *"Video 2/5"* banner at the top of the progress window tracks the batch, and at the end a summary reports the videos **transcribed / already present (skipped) / failed**. Batch rules: an **already-transcribed** video is skipped (no credits spent), an **unavailable** video (private/removed) is skipped without stopping the others, and if **Groq credits run out** the batch stops, keeping everything already done (resumable later).
 
 ### Step 3 — "Extra outputs" (optional)
 Below the two tiles there's a card with **three switches**, all **off** by default (so a plain transcription stays plain):
@@ -494,6 +498,8 @@ results/
 ```
 
 > For **local files** `<Name>` is the file name (without extension); for YouTube videos it's the title. In **batch**, each file gets its own `results/<file name>/` folder. The `traduzioni/`, `riassunti/` and `analisi_visiva/` folders appear only when those steps run. (Folder names are in Italian to match the app's interface; in the GUI they follow the chosen UI language, e.g. `transcriptions/`, `translations/`, `summaries/` in English, and the translation uses the `_en` suffix.)
+
+> ▶️ **YouTube playlists.** When you transcribe a **playlist**, its videos all go into a dedicated `results/<playlist name>/` folder (if the title is missing, the **channel name** is used), with **one subfolder per video** — e.g. `results/Python Course/Lesson 1/transcriptions/…`. Each video keeps its own files (and any `translations/`, `summaries/`, `visual_analysis/` folders) separate.
 
 > ♻️ **State for "Resume".** In `results/.checkpoints/` the app keeps a small per-video **state** file (JSON) tracking stage progress and the sections already done for translation/summary: that's what enables **resuming from the exact point** after an interruption. It's a service folder, you can ignore it.
 

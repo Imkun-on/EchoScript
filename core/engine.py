@@ -144,6 +144,48 @@ def get_video_info(url: str) -> dict:
     }
 
 
+def get_playlist_info(url: str) -> dict | None:
+    """Se l'URL è una PLAYLIST YouTube, ne legge nome/canale + elenco dei video.
+
+    Usa yt-dlp in modalità "flat" (extract_flat="in_playlist"): NON risolve i
+    metadati di ogni singolo video, legge solo l'elenco — quindi è veloce anche
+    con playlist lunghe. Restituisce None se l'URL NON è una playlist (video
+    singolo); solleva EngineError su errore di rete/lettura. La chiave 'entries'
+    è la lista degli URL dei video nell'ordine della playlist; 'title' (con
+    fallback al canale) diventa il nome della sottocartella in results/."""
+    ydl_opts = {"quiet": True, "no_warnings": True, "skip_download": True,
+                "extract_flat": "in_playlist"}
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception as e:
+        raise EngineError(f"Impossibile leggere la playlist: {e}")
+
+    if not info or info.get("_type") != "playlist":
+        return None  # non è una playlist: si prosegue come video singolo
+
+    entries: list[str] = []
+    for e in (info.get("entries") or []):
+        if not e:
+            continue
+        vid = e.get("id")
+        vurl = e.get("url") or e.get("webpage_url")
+        if vid:
+            entries.append(f"https://www.youtube.com/watch?v={vid}")
+        elif vurl:
+            entries.append(vurl)
+    if not entries:
+        return None
+
+    channel = info.get("channel") or info.get("uploader")
+    return {
+        "title": info.get("title") or channel,
+        "channel": channel,
+        "count": len(entries),
+        "entries": entries,
+    }
+
+
 def _best_thumbnail(info: dict) -> str | None:
     """Pick the best still image (cover) for a video.
 

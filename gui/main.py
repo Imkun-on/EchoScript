@@ -122,6 +122,21 @@ T = {
         "btn_confirm": "Conferma",
         "btn_cancel": "Annulla",
         "yt_confirmed": "✓ Video confermato: {title}",
+        # Playlist (batch di più video)
+        "playlist_loading_videos": "Leggo i video della playlist…",
+        "playlist_confirm_title": "Conferma la playlist",
+        "playlist_confirm_question": "Trascrivo tutti i {n} video di questa playlist?",
+        "playlist_channel": "Canale: {channel}",
+        "playlist_confirmed": "✓ Playlist «{title}» — {n} video",
+        "playlist_none": "Nessun video disponibile nella playlist.",
+        "playlist_batch": "Video {i}/{n}",
+        "playlist_res_title": "Playlist completata",
+        "playlist_res_done": "{n} trascritti",
+        "playlist_res_skipped": "{n} già presenti (saltati)",
+        "playlist_res_failed": "{n} non riusciti",
+        "playlist_res_folder": "Cartella della playlist",
+        "playlist_stopped_credits": "Batch interrotto: crediti Groq esauriti. "
+                                    "I video già trascritti sono salvati; riprendi domani.",
         "pick_file": "Scegli file audio…",
         "pick_file_dialog": "Scegli un file audio o video",
         # Info box
@@ -347,6 +362,21 @@ T = {
         "btn_confirm": "Confirm",
         "btn_cancel": "Cancel",
         "yt_confirmed": "✓ Video confirmed: {title}",
+        # Playlist (batch of multiple videos)
+        "playlist_loading_videos": "Reading playlist videos…",
+        "playlist_confirm_title": "Confirm the playlist",
+        "playlist_confirm_question": "Transcribe all {n} videos in this playlist?",
+        "playlist_channel": "Channel: {channel}",
+        "playlist_confirmed": "✓ Playlist «{title}» — {n} videos",
+        "playlist_none": "No available videos in the playlist.",
+        "playlist_batch": "Video {i}/{n}",
+        "playlist_res_title": "Playlist complete",
+        "playlist_res_done": "{n} transcribed",
+        "playlist_res_skipped": "{n} already present (skipped)",
+        "playlist_res_failed": "{n} failed",
+        "playlist_res_folder": "Playlist folder",
+        "playlist_stopped_credits": "Batch stopped: Groq credits exhausted. "
+                                    "Completed videos are saved; resume tomorrow.",
         "pick_file": "Choose audio file…",
         "pick_file_dialog": "Choose an audio or video file",
         "info_channel": "Channel",
@@ -549,6 +579,9 @@ class EchoScriptApp:
         self._key_status_labels = []    # Groq status labels to refresh once a key loads
         self._yt_meta = None        # last YouTube meta loaded (for language re-fill)
         self._yt_ok = False         # True only after confirming the YouTube video
+        # Playlist confermata: {"title","channel","subdir","items":[meta,...]}.
+        # None per un video singolo. Se valorizzata, «Trascrivi» avvia il batch.
+        self._yt_playlist = None
         self._local_meta = None     # last local-file meta loaded
         self._cur_phase = "info"    # current phase (for re-translating the label on lang change)
         self._plan = []             # phase sequence of the current run (for "Phase i/n")
@@ -1628,7 +1661,12 @@ class EchoScriptApp:
 
         Only touches boxes that currently hold data, so a language switch before
         anything is loaded is a no-op."""
-        if self._yt_meta and self.yt_confirmed.visible:
+        if self._yt_playlist and self.yt_confirmed.visible:
+            pl = self._yt_playlist
+            self.yt_confirmed.value = self.t("playlist_confirmed").format(
+                title=pl.get("title") or pl.get("channel") or "?",
+                n=len(pl.get("items") or []))
+        elif self._yt_meta and self.yt_confirmed.visible:
             self.yt_confirmed.value = self.t("yt_confirmed").format(
                 title=self._yt_meta["title"])
         if self._local_meta and self.local_path:
@@ -1752,6 +1790,19 @@ class EchoScriptApp:
             content=ft.Row([self.prog_engine_icon, self.prog_engine_text], spacing=8,
                            tight=True))
         self.prog_engine_hint = ft.Text("", size=11, color=WARN, visible=False, no_wrap=False)
+        # Banner di batch playlist ("Video 2/5: titolo"): nascosto per i run singoli,
+        # mostrato e aggiornato da _start_playlist a ogni video.
+        self.prog_batch_text = ft.Text("", size=12, color=GREEN_HI, weight=ft.FontWeight.W_700,
+                                       no_wrap=False)
+        self.prog_batch = ft.Container(
+            visible=False, border_radius=10,
+            padding=ft.padding.symmetric(horizontal=12, vertical=8),
+            bgcolor=ft.Colors.with_opacity(0.10, GREEN),
+            border=ft.border.all(1, ft.Colors.with_opacity(0.30, GREEN)),
+            content=ft.Row(spacing=8, tight=True, controls=[
+                ft.Icon(ft.Icons.PLAYLIST_PLAY, size=16, color=GREEN_HI),
+                self.prog_batch_text,
+            ]))
 
         # Step checklist + narration (filled per run by _init_progress).
         self.prog_steps_col = ft.Column(spacing=8, tight=True)
@@ -1782,6 +1833,7 @@ class EchoScriptApp:
                     controls=[
                         ft.Row([self.prog_engine], tight=True),
                         self.prog_engine_hint,
+                        self.prog_batch,
                         ft.Row([
                             ft.ProgressRing(width=18, height=18, stroke_width=2.5, color=GREEN),
                             self.prog_phase,
@@ -2019,6 +2071,7 @@ class EchoScriptApp:
         """If the URL changes, a previous confirmation no longer holds: it must be reloaded."""
         self.yt_confirmed.visible = False
         self._yt_ok = False
+        self._yt_playlist = None      # una nuova URL annulla una playlist confermata
         self._update_run_state()
         self.page.update()
 
@@ -2037,10 +2090,29 @@ class EchoScriptApp:
         self.page.update()
 
         def work():
-            """Background worker: fetch info, then open the confirm dialog or show an error."""
+            """Background worker: fetch info, then open the confirm dialog or show an error.
+
+            Se l'URL è una playlist (contiene 'list='), legge l'elenco dei video e
+            i metadati di ciascuno (saltando i non disponibili), poi apre la
+            conferma della playlist; altrimenti il consueto flusso a video singolo."""
             try:
-                meta = engine.get_video_info(url)
-                self._show_yt_confirm(meta)
+                pl = engine.get_playlist_info(url) if "list=" in url else None
+                if pl and pl["count"] >= 1:
+                    items = []
+                    for vurl in pl["entries"]:
+                        self.load_btn.text = self.t("playlist_loading_videos")
+                        self.page.update()
+                        try:
+                            items.append(engine.get_video_info(vurl))
+                        except Exception:
+                            pass  # video privato/rimosso/non disponibile: saltato
+                    if not items:
+                        self._show_error(self.t("playlist_none"))
+                    else:
+                        self._show_playlist_confirm(pl, items)
+                else:
+                    meta = engine.get_video_info(url)
+                    self._show_yt_confirm(meta)
             except Exception as ex:
                 self._show_error(str(ex))
             finally:
@@ -2139,6 +2211,104 @@ class EchoScriptApp:
         self._update_run_state()
         self.page.update()
 
+    def _show_playlist_confirm(self, pl: dict, items: list[dict]) -> None:
+        """Finestra di conferma di una PLAYLIST: nome, canale e l'elenco dei video.
+
+        Costruita al volo dai metadati letti. Mostra dove verranno salvati (una
+        sottocartella per la playlist) e la durata totale, e chiede conferma prima
+        di avviare il batch — che con Groq consuma crediti su più video."""
+        total = sum((m.get("duration") or 0) for m in items)
+        header = [
+            ft.Row(spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER, controls=[
+                ft.Icon(ft.Icons.PERSON_OUTLINE, size=15, color=GREEN_HI),
+                ft.Text(self.t("playlist_channel").format(channel=pl.get("channel") or "?"),
+                        size=12, color=TEXT, weight=ft.FontWeight.W_500),
+            ]),
+            ft.Row(spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER, controls=[
+                ft.Icon(ft.Icons.SCHEDULE, size=15, color=GREEN_HI),
+                ft.Text(tx._format_duration(total), size=12, color=TEXT,
+                        weight=ft.FontWeight.W_500),
+            ]),
+        ]
+        # Elenco numerato dei video (scrollabile) con la loro durata.
+        rows = []
+        for i, m in enumerate(items, 1):
+            rows.append(ft.Row(
+                spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER, controls=[
+                    ft.Text(f"{i}.", size=12, color=MUTED, width=24),
+                    ft.Text(m.get("title") or "?", size=12, color=TEXT, expand=True,
+                            no_wrap=False),
+                    ft.Text(tx._format_duration(m.get("duration")), size=11, color=MUTED),
+                ]))
+        video_list = ft.Container(
+            height=min(260, 34 * len(rows) + 8), border_radius=10, padding=10,
+            bgcolor=SURFACE2, border=ft.border.all(1, BORDER),
+            content=ft.Column(rows, spacing=6, tight=True, scroll=ft.ScrollMode.AUTO))
+
+        body = [
+            ft.Text(f"«{pl.get('title') or '?'}»", size=15, weight=ft.FontWeight.W_700,
+                    color=TEXT, no_wrap=False),
+            ft.Column(header, spacing=6, tight=True),
+            self._estimate_chip({"duration": total}),
+            ft.Divider(height=1, color=BORDER),
+            video_list,
+            ft.Text(self.t("playlist_confirm_question").format(n=len(items)),
+                    size=13, color=MUTED),
+        ]
+
+        cancel_btn = ft.OutlinedButton(
+            self.t("btn_cancel"), icon=ft.Icons.CLOSE,
+            on_click=lambda e: self._yt_playlist_cancel(),
+            style=ft.ButtonStyle(color=MUTED, side=ft.BorderSide(1, BORDER),
+                                 shape=ft.RoundedRectangleBorder(radius=10),
+                                 padding=ft.padding.symmetric(horizontal=16, vertical=16)))
+        confirm_btn = ft.FilledButton(
+            self.t("btn_confirm"), icon=ft.Icons.CHECK,
+            on_click=lambda e: self._yt_playlist_confirm(pl, items),
+            style=ft.ButtonStyle(bgcolor=GREEN, color="#06140C",
+                                 shape=ft.RoundedRectangleBorder(radius=10),
+                                 padding=ft.padding.symmetric(horizontal=18, vertical=16)))
+
+        self.yt_dialog = ft.AlertDialog(
+            modal=True, bgcolor=SURFACE, shape=ft.RoundedRectangleBorder(radius=16),
+            title=ft.Row([
+                ft.Icon(ft.Icons.PLAYLIST_PLAY, color=GREEN_HI, size=22),
+                ft.Text(self.t("playlist_confirm_title"), size=18,
+                        weight=ft.FontWeight.W_600, color=TEXT),
+            ], spacing=10),
+            content=ft.Container(
+                width=460,
+                content=ft.Column(body, spacing=12, tight=True, scroll=ft.ScrollMode.AUTO)),
+            actions=[cancel_btn, confirm_btn],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self.page.open(self.yt_dialog)
+
+    def _yt_playlist_confirm(self, pl: dict, items: list[dict]) -> None:
+        """Playlist confermata: memorizza la lista e abilita «Trascrivi» (batch)."""
+        subdir = tx._safe_filename(pl.get("title") or pl.get("channel") or "playlist")
+        self._yt_playlist = {"title": pl.get("title"), "channel": pl.get("channel"),
+                             "subdir": subdir, "items": items}
+        self._yt_meta = items[0]        # per l'eventuale re-fill della lingua
+        self._yt_ok = True
+        self.yt_confirmed.value = self.t("playlist_confirmed").format(
+            title=pl.get("title") or pl.get("channel") or "?", n=len(items))
+        self.yt_confirmed.visible = True
+        self.page.close(self.yt_dialog)
+        self._update_run_state()
+        self.page.update()
+
+    def _yt_playlist_cancel(self) -> None:
+        """Playlist annullata: pulisce URL e stato così si può inserirne un'altra."""
+        self._yt_playlist = None
+        self._yt_meta = None
+        self._yt_ok = False
+        self.url_tf.value = ""
+        self.yt_confirmed.visible = False
+        self.page.close(self.yt_dialog)
+        self._update_run_state()
+        self.page.update()
+
     def _pick_file(self) -> None:
         """Open the file picker for a local audio/video file.
 
@@ -2179,6 +2349,10 @@ class EchoScriptApp:
             return
         # Source + metadata already loaded/confirmed.
         if self.source == "youtube":
+            # Playlist confermata: avvia il batch (un video alla volta) e basta.
+            if self._yt_playlist:
+                self._start_playlist(self._yt_playlist)
+                return
             src, meta = (self.url_tf.value or "").strip(), self._yt_meta
             if not src or not meta:
                 self._show_error(self.t("err_paste_url"))
@@ -2390,6 +2564,175 @@ class EchoScriptApp:
                 self._fail(self.t("err_unexpected").format(e=ex))
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _start_playlist(self, pl: dict) -> None:
+        """Trascrive in sequenza TUTTI i video di una playlist confermata.
+
+        Un solo thread di sfondo scorre i video uno alla volta e riusa, per
+        ciascuno, la stessa pipeline del singolo video (transcribe_only +
+        save_results). Tutto finisce sotto results/<playlist>/<titolo video>/.
+        Regole del batch:
+          • un video GIÀ presente sotto la playlist viene saltato (nessun credito);
+          • un video che fallisce non ferma il batch: si prosegue col successivo;
+          • se Groq esaurisce i crediti il batch si ferma qui (i video già fatti
+            restano salvati e si può riprendere domani)."""
+        items = pl["items"]
+        n = len(items)
+        out_root = os.path.join(self.out_root, pl["subdir"])
+
+        options = {
+            "backend": self.backend, "model": self.model_dd.value,
+            "groq_model": self.groq_model_dd.value,
+            "api_key": self.loaded_api_key or "", "export": True,
+            "source_kind": "youtube", "ui_lang": self.lang,
+            "translate": self.sw_translate.value,
+            "summarize": self.sw_summary.value,
+            "visual": self.sw_visual.value,
+        }
+        self._hide_error()
+        self._set_busy(True)
+        self._set_engine_badge()
+        self._show_progress(True)
+        self.prog_batch.visible = True
+        self.page.update()
+
+        def work():
+            """Worker: scorre i video della playlist, uno alla volta."""
+            done: list[dict] = []       # risultati di save_results (video trascritti)
+            skipped: list[str] = []     # titoli dei video già presenti
+            failed: list[str] = []      # titoli dei video andati in errore
+            stopped_credits = False
+            for i, meta in enumerate(items, 1):
+                # Banner "Video i/n · titolo" in cima alla finestra di progresso.
+                self.prog_batch_text.value = (
+                    f"{self.t('playlist_batch').format(i=i, n=n)} · {meta['title']}")
+                # Progresso azzerato per ogni video (piano/checklist/barra da capo).
+                self._plan = self._phase_plan(self.backend, "youtube", options)
+                self._last_g = 0.0
+                self._init_progress(options)
+                self._set_phase("info", None, None, "")
+                self.page.update()
+
+                # Già trascritto sotto questa playlist? Salta (nessun credito speso).
+                if tx.transcription_exists(out_root, meta["title"]):
+                    skipped.append(meta["title"])
+                    continue
+
+                src = meta.get("webpage_url") or ""
+                try:
+                    meta2, segments, engine_label, client = engine.transcribe_only(
+                        src, options, on_progress=self._on_progress, resume=False)
+                    self.last_thumb = meta2.get("thumbnail")
+                    result = engine.save_results(
+                        meta2, segments, engine_label, options, out_root,
+                        client, on_progress=self._on_progress)
+                    done.append(result)
+                except engine.RateLimitReached:
+                    # Crediti Groq esauriti: fermiamo il batch (il parziale è salvato).
+                    stopped_credits = True
+                    break
+                except Exception:
+                    # Un video rotto non deve fermare la playlist: si prosegue.
+                    failed.append(meta["title"])
+                    continue
+
+            self.prog_batch.visible = False
+            self._show_progress(False)
+            self._set_busy(False)
+            self._render_playlist_result(pl, out_root, done, skipped, failed,
+                                         stopped_credits)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _render_playlist_result(self, pl: dict, out_root: str, done: list,
+                                skipped: list, failed: list,
+                                stopped_credits: bool) -> None:
+        """Riepilogo finale del batch playlist: conteggi, cartella e esito per video."""
+        self.last_dir = out_root
+
+        body: list[ft.Control] = []
+        if stopped_credits:
+            body.append(ft.Container(
+                border_radius=10, padding=12,
+                bgcolor=ft.Colors.with_opacity(0.10, WARN),
+                content=ft.Text("⚠ " + self.t("playlist_stopped_credits"),
+                                size=12, color=WARN, no_wrap=False)))
+
+        def chip(icon, label, color):
+            return ft.Row(spacing=6, tight=True, controls=[
+                ft.Icon(icon, size=15, color=color),
+                ft.Text(label, size=12, color=TEXT, weight=ft.FontWeight.W_600)])
+
+        chips = [chip(ft.Icons.CHECK_CIRCLE,
+                      self.t("playlist_res_done").format(n=len(done)), GREEN_HI)]
+        if skipped:
+            chips.append(chip(ft.Icons.REMOVE_DONE,
+                              self.t("playlist_res_skipped").format(n=len(skipped)), MUTED))
+        if failed:
+            chips.append(chip(ft.Icons.ERROR_OUTLINE,
+                              self.t("playlist_res_failed").format(n=len(failed)), WARN))
+        body.append(ft.Row(wrap=True, spacing=20, run_spacing=8, controls=chips))
+
+        body.append(ft.Container(
+            bgcolor=ft.Colors.with_opacity(0.05, GREEN),
+            border=ft.border.all(1, ft.Colors.with_opacity(0.2, GREEN)),
+            border_radius=10, padding=12,
+            content=ft.Column(spacing=4, tight=True, controls=[
+                ft.Row([ft.Icon(ft.Icons.FOLDER_OPEN, size=15, color=GREEN_HI),
+                        ft.Text(self.t("playlist_res_folder"), size=12, color=MUTED)],
+                       spacing=6),
+                ft.Text(out_root, size=12, color=TEXT, weight=ft.FontWeight.W_500,
+                        selectable=True),
+            ])))
+
+        # Esito per singolo video (fatti · saltati · falliti).
+        rows: list[ft.Control] = []
+
+        def vrow(icon, color, title):
+            return ft.Row(spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                          controls=[ft.Icon(icon, size=14, color=color),
+                                    ft.Text(title, size=12, color=TEXT, expand=True,
+                                            no_wrap=False)])
+        for r in done:
+            rows.append(vrow(ft.Icons.CHECK, GREEN_HI, r.get("title", "?")))
+        for t in skipped:
+            rows.append(vrow(ft.Icons.REMOVE_DONE, MUTED, t))
+        for t in failed:
+            rows.append(vrow(ft.Icons.CLOSE, WARN, t))
+        if rows:
+            body.append(ft.Divider(height=1, color=BORDER))
+            body.append(ft.Container(
+                height=min(240, 30 * len(rows) + 8),
+                content=ft.Column(rows, spacing=6, tight=True, scroll=ft.ScrollMode.AUTO)))
+
+        open_btn = ft.OutlinedButton(
+            self.t("btn_open_folder"), icon=ft.Icons.FOLDER_OPEN,
+            on_click=lambda e: self._open_folder(),
+            style=ft.ButtonStyle(color=GREEN_HI, side=ft.BorderSide(1, BORDER_HI),
+                                 shape=ft.RoundedRectangleBorder(radius=10),
+                                 padding=ft.padding.symmetric(horizontal=16, vertical=16)))
+        close_btn = ft.FilledButton(
+            self.t("btn_close"), icon=ft.Icons.CHECK,
+            on_click=lambda e: self.page.close(self.result_dialog),
+            style=ft.ButtonStyle(bgcolor=GREEN, color="#06140C",
+                                 shape=ft.RoundedRectangleBorder(radius=10),
+                                 padding=ft.padding.symmetric(horizontal=18, vertical=16)))
+
+        self.result_dialog = ft.AlertDialog(
+            modal=True, bgcolor=SURFACE, shape=ft.RoundedRectangleBorder(radius=16),
+            title=ft.Row([
+                ft.Icon(ft.Icons.PLAYLIST_ADD_CHECK, color=GREEN_HI, size=22),
+                ft.Text(self.t("playlist_res_title"), size=18,
+                        weight=ft.FontWeight.W_600, color=TEXT),
+            ], spacing=10),
+            content=ft.Container(
+                width=460,
+                content=ft.Column(body, spacing=14, tight=True, scroll=ft.ScrollMode.AUTO)),
+            actions=[open_btn, close_btn],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self.page.update()
+        self.page.open(self.result_dialog)
 
     def _fail_ratelimit(self, ex, src=None, meta: dict | None = None) -> None:
         """Groq credits exhausted: a dedicated (amber) notice, not a red error.
