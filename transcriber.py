@@ -872,8 +872,8 @@ def transcription_exists(out_root: str, title: str) -> bool:
     base = os.path.join(out_root, _safe_filename(title))
     for sub in TRANS_SUBDIRS.values():
         d = os.path.join(base, sub)
-        if os.path.isdir(d) and any(
-                n.lower().endswith((".md", ".txt", ".json", ".pdf")) for n in os.listdir(d)):
+        if os.path.isdir(_lp(d)) and any(
+                n.lower().endswith((".md", ".txt", ".json", ".pdf")) for n in os.listdir(_lp(d))):
             return True
     return False
 
@@ -888,13 +888,13 @@ def load_existing_transcript(out_root: str, title: str):
     p = None
     for sub in TRANS_SUBDIRS.values():
         cand = os.path.join(out_root, safe, sub, safe + ".json")
-        if os.path.isfile(cand):
+        if os.path.isfile(_lp(cand)):
             p = cand
             break
     if not p:
         return None
     try:
-        with open(p, "r", encoding="utf-8") as f:
+        with open(_lp(p), "r", encoding="utf-8") as f:
             d = json.load(f)
     except Exception:
         return None
@@ -921,9 +921,9 @@ def load_existing_translation(out_root: str, title: str, target: str = "it"):
     safe = _safe_filename(title)
     for sub in TRANSL_SUBDIRS.values():
         p = os.path.join(out_root, safe, sub, f"{safe}_{target}.json")
-        if os.path.isfile(p):
+        if os.path.isfile(_lp(p)):
             try:
-                with open(p, "r", encoding="utf-8") as f:
+                with open(_lp(p), "r", encoding="utf-8") as f:
                     data = json.load(f)
             except Exception:
                 continue
@@ -3267,9 +3267,9 @@ def load_visual_notes(out_root: str, title: str) -> list[dict]:
     safe = _safe_filename(title)
     for sub in VISUAL_SUBDIRS.values():
         p = os.path.join(out_root, safe, sub, f"{safe}_visivo.json")
-        if os.path.isfile(p):
+        if os.path.isfile(_lp(p)):
             try:
-                with open(p, "r", encoding="utf-8") as f:
+                with open(_lp(p), "r", encoding="utf-8") as f:
                     d = json.load(f)
                 # Pulizia difensiva anche in lettura: toglie eventuale ragionamento
                 # <think> e le note duplicate (così il riassunto resta pulito anche
