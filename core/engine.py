@@ -1211,7 +1211,8 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
                 visual_notes = tx.analyze_video_visuals(
                     meta["_video_path"], meta.get("duration") or 0.0, vwork,
                     client=chat_client, frames_out_dir=frames_out,
-                    on_progress=on_progress, stats=vstats, lang=_ENGINE_LANG)
+                    on_progress=on_progress, stats=vstats, lang=_ENGINE_LANG,
+                    segments=segments)
             if visual_notes:
                 tx.save_visual_notes(out_root, meta, visual_notes, vis_label,
                                      do_export, options.get("ui_lang", "it"), quiet=True)

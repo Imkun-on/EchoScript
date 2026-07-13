@@ -2868,6 +2868,40 @@ _VISION_SYSTEM_PROMPT = (
 _VISION_USER_PROMPT = "Estrai il contenuto tecnico/informativo visibile in questo fotogramma."
 
 
+def _vision_user_prompt(context: str = "") -> str:
+    """Prompt utente per il modello vision. Se 'context' (il parlato attorno a
+    questo punto del video) è disponibile, lo antepone: dà al modello il CONTESTO
+    di ciò di cui si sta parlando, così interpreta meglio sigle, nomi di variabili,
+    simboli e formule ambigue a schermo. Vincolo esplicito: usare il contesto solo
+    per INTERPRETARE, mai per inventare — si trascrive solo ciò che è VISIBILE."""
+    if not context:
+        return _VISION_USER_PROMPT
+    return (
+        "CONTESTO AUDIO — ciò che l'oratore sta dicendo intorno a questo punto del "
+        f"video:\n«{context}»\n\n"
+        "Usa questo contesto SOLO per interpretare correttamente ciò che vedi "
+        "(sigle, nomi di variabili, simboli, formule, termini ambigui). NON "
+        "aggiungere nulla che non sia effettivamente a schermo: trascrivi "
+        "esclusivamente il contenuto VISIBILE nel fotogramma.\n\n"
+        + _VISION_USER_PROMPT)
+
+
+def _audio_context_near(segments: list[dict] | None, ts: float,
+                        window: float = 25.0, max_chars: int = 700) -> str:
+    """Testo trascritto attorno al timestamp 'ts' (± 'window' secondi), da passare
+    al modello vision come contesto del fotogramma. Restituisce stringa vuota se
+    non ci sono segmenti utili. Troncato a 'max_chars' per non gonfiare i token."""
+    if not segments:
+        return ""
+    lo, hi = ts - window, ts + window
+    parts = [(s.get("text") or "").strip() for s in segments
+             if s.get("start") is not None and lo <= s["start"] <= hi]
+    ctx = " ".join(p for p in parts if p).strip()
+    if len(ctx) > max_chars:
+        ctx = ctx[:max_chars].rstrip() + "…"
+    return ctx
+
+
 def _strip_think(text: str) -> str:
     """Rimuove il ragionamento <think>…</think> dei modelli "reasoning".
 
@@ -2931,8 +2965,11 @@ def _encode_image_b64(path: str) -> str:
         return base64.b64encode(f.read()).decode("ascii")
 
 
-def _vision_groq(client, b64: str) -> str:
+def _vision_groq(client, b64: str, context: str = "") -> str:
     """Analizza un fotogramma con un modello multimodale di Groq.
+
+    'context' (opzionale): il parlato trascritto attorno a questo fotogramma, per
+    aiutare il modello a interpretare ciò che vede (vedi _vision_user_prompt).
 
     I modelli "reasoning" (es. qwen3) antepongono un blocco <think>…</think>:
     proviamo a disattivarlo a monte (reasoning_effort, per non sprecare token) e
@@ -2941,7 +2978,7 @@ def _vision_groq(client, b64: str) -> str:
     messages = [
         {"role": "system", "content": _VISION_SYSTEM_PROMPT},
         {"role": "user", "content": [
-            {"type": "text", "text": _VISION_USER_PROMPT},
+            {"type": "text", "text": _vision_user_prompt(context)},
             {"type": "image_url", "image_url": {"url": data_url}},
         ]},
     ]
@@ -2958,14 +2995,17 @@ def _vision_groq(client, b64: str) -> str:
     return _strip_think(resp.choices[0].message.content or "")
 
 
-def _vision_ollama(b64: str) -> str:
-    """Analizza un fotogramma con un modello vision locale via Ollama (HTTP)."""
+def _vision_ollama(b64: str, context: str = "") -> str:
+    """Analizza un fotogramma con un modello vision locale via Ollama (HTTP).
+
+    'context' (opzionale): il parlato attorno al fotogramma, per aiutare il
+    modello a interpretare ciò che vede (vedi _vision_user_prompt)."""
     import urllib.request
     payload = {
         "model": OLLAMA_VISION_MODEL,
         "messages": [
             {"role": "system", "content": _VISION_SYSTEM_PROMPT},
-            {"role": "user", "content": _VISION_USER_PROMPT, "images": [b64]},
+            {"role": "user", "content": _vision_user_prompt(context), "images": [b64]},
         ],
         "stream": False,
         "options": {"temperature": 0.2, "num_ctx": OLLAMA_NUM_CTX},
@@ -3005,9 +3045,9 @@ def _make_vision_analyzer(client=None):
     (100% offline). RuntimeError se nessuno è utilizzabile (il chiamante può così
     saltare l'analisi senza bloccare il resto)."""
     if client is not None:
-        return (lambda b64: _vision_groq(client, b64)), f"Groq · {GROQ_VISION_MODEL}"
+        return (lambda b64, ctx="": _vision_groq(client, b64, ctx)), f"Groq · {GROQ_VISION_MODEL}"
     _check_ollama_vision()
-    return (lambda b64: _vision_ollama(b64)), f"locale · Ollama {OLLAMA_VISION_MODEL}"
+    return (lambda b64, ctx="": _vision_ollama(b64, ctx)), f"locale · Ollama {OLLAMA_VISION_MODEL}"
 
 
 def _is_empty_visual(text: str) -> bool:
@@ -3021,8 +3061,14 @@ def _is_empty_visual(text: str) -> bool:
 def analyze_video_visuals(video_path: str, duration: float, workdir: str,
                           client=None, frames_out_dir: str | None = None,
                           on_progress=None, quiet: bool = False,
-                          stats: dict | None = None, lang: str = "it") -> list[dict]:
+                          stats: dict | None = None, lang: str = "it",
+                          segments: list[dict] | None = None) -> list[dict]:
     """Estrae i fotogrammi chiave del video e li "legge" con un modello vision.
+
+    'segments' (opzionale): la trascrizione audio già pronta. Se presente, per ogni
+    fotogramma passa al modello il parlato attorno a quel timestamp come CONTESTO,
+    così legge meglio ciò che vede (sigle, variabili, formule ambigue). Vedi
+    _vision_user_prompt / _audio_context_near.
 
     Restituisce una lista di NOTE VISIVE {'start': sec, 'text': str, 'image': str},
     una per fotogramma con informazione (i "vuoti" — volti, transizioni — vengono
@@ -3087,7 +3133,8 @@ def analyze_video_visuals(video_path: str, duration: float, workdir: str,
             if _interrupted:
                 break
             try:
-                text = analyze_fn(_encode_image_b64(path))
+                text = analyze_fn(_encode_image_b64(path),
+                                  _audio_context_near(segments, ts))
             except Exception as e:
                 if _is_rate_limit(str(e)):
                     if use_rich:
@@ -3467,7 +3514,8 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
                 frames_out_dir = os.path.join(out_root, _safe_filename(meta["title"]),
                                               visual_subdir(), "frames")
             visual_notes = analyze_video_visuals(media_path, duration, workdir, client,
-                                                 frames_out_dir=frames_out_dir)
+                                                 frames_out_dir=frames_out_dir,
+                                                 segments=segments)
 
     # (Here the temporary folder has already been deleted: the data we need
     #  — segments and visual notes — is already in memory.)
