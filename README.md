@@ -604,8 +604,10 @@ Riassumere non è trascrivere: serve un **LLM** (un modello di linguaggio), perc
 
 | Backend | Motore del riassunto | Modello (default) | Perché |
 |---|---|---|---|
-| ⚡ **Groq (cloud)** | API di chat Groq | `llama-3.3-70b-versatile` | Gira sui server Groq: puoi permetterti un modello **grande da 70B** → riassunti di qualità, **velocissimi**, con la chiave gratuita che usi già per la trascrizione |
-| 🔒 **Locale** | **Ollama** (offline) | `qwen2.5:7b` | Resta **100% offline**. **Qwen 2.5 7B** è leggero (~4,7 GB), **veloce su CPU** e particolarmente bravo **in italiano** e nel seguire istruzioni strutturate (meglio di Llama 3.1 8B di pari taglia) |
+| ⚡ **Groq (cloud)** | API di chat Groq | 🤖 `openai/gpt-oss-120b` | Gira sui server Groq: puoi permetterti un modello **grande da 120B** → riassunti di qualità, **velocissimi** ed economici, con la chiave gratuita che usi già per la trascrizione |
+| 🔒 **Locale** | **Ollama** (offline) | 🦙 `qwen2.5:7b` | Resta **100% offline**. **Qwen 2.5 7B** è leggero (~4,7 GB), **veloce su CPU** e particolarmente bravo **in italiano** e nel seguire istruzioni strutturate (meglio di Llama 3.1 8B di pari taglia) |
+
+> 🔄 **Perché `openai/gpt-oss-120b` (e non più `llama-3.3-70b-versatile`)?** Groq ha messo in **deprecazione** `llama-3.3-70b-versatile`, con **spegnimento il 16 agosto 2026** per i piani free/developer: dopo quella data avrebbe smesso di funzionare. Il sostituto consigliato, `openai/gpt-oss-120b`, è **più grande** (120B contro 70B), **più economico** (**$0.15/$0.60** per 1M token contro $0.59/$0.79) ed è un modello **Production** (stabile). Puoi comunque cambiarlo con `ECHOSCRIPT_GROQ_SUMMARY_MODEL`.
 
 > **Ollama** è il *programma* che fa girare il modello in locale (come un "lettore" per i modelli); **Qwen** è il *modello*. In locale serve installare Ollama una volta (https://ollama.com) e scaricare il modello: `ollama pull qwen2.5:7b`. Nessuna dipendenza pip aggiuntiva: EchoScript parla con Ollama via HTTP. Con **Groq** non serve nulla di tutto questo.
 
@@ -727,7 +729,7 @@ il file `.env`), senza toccare il codice. Ogni valore ha un default sensato:
 | `ECHOSCRIPT_CHUNK_SECONDS` | `600` | Durata di ogni blocco audio (solo Groq) |
 | `ECHOSCRIPT_DEVICE` | `auto` | Backend locale: `auto` (GPU se c'è) / `cpu` / `cuda` |
 | `ECHOSCRIPT_COMPUTE_TYPE` | *(auto)* | Precisione locale: vuoto = `float16` su GPU, `int8` su CPU |
-| `ECHOSCRIPT_GROQ_SUMMARY_MODEL` | `llama-3.3-70b-versatile` | Modello di **chat Groq** per il riassunto (cloud) |
+| `ECHOSCRIPT_GROQ_SUMMARY_MODEL` | `openai/gpt-oss-120b` | Modello di **chat Groq** per il riassunto (cloud) |
 | `ECHOSCRIPT_OLLAMA_MODEL` | `qwen2.5:7b` | Modello **Ollama** per il riassunto in locale |
 | `ECHOSCRIPT_OLLAMA_TRANSLATE_MODEL` | *(= `OLLAMA_MODEL`)* | Modello **Ollama** per la **traduzione** in locale (di default lo stesso del riassunto) |
 | `ECHOSCRIPT_OLLAMA_HOST` | `http://localhost:11434` | Indirizzo del server Ollama |

@@ -582,8 +582,10 @@ Summarizing isn't transcribing: it needs an **LLM** (a language model), because 
 
 | Backend | Summary engine | Model (default) | Why |
 |---|---|---|---|
-| ⚡ **Groq (cloud)** | Groq chat API | `llama-3.3-70b-versatile` | Runs on Groq's servers: you can afford a **large 70B** model → high-quality summaries, **very fast**, using the free key you already use for transcription |
-| 🔒 **Local** | **Ollama** (offline) | `qwen2.5:7b` | Stays **100% offline**. **Qwen 2.5 7B** is light (~4.7 GB), **fast on CPU** and especially good **in Italian** and at following structured instructions (better than Llama 3.1 8B at the same size) |
+| ⚡ **Groq (cloud)** | Groq chat API | 🤖 `openai/gpt-oss-120b` | Runs on Groq's servers: you can afford a **large 120B** model → high-quality summaries, **very fast** and cheap, using the free key you already use for transcription |
+| 🔒 **Local** | **Ollama** (offline) | 🦙 `qwen2.5:7b` | Stays **100% offline**. **Qwen 2.5 7B** is light (~4.7 GB), **fast on CPU** and especially good **in Italian** and at following structured instructions (better than Llama 3.1 8B at the same size) |
+
+> 🔄 **Why `openai/gpt-oss-120b` (and no longer `llama-3.3-70b-versatile`)?** Groq **deprecated** `llama-3.3-70b-versatile`, with **shutdown on August 16, 2026** for free/developer plans: after that date it would stop working. The recommended replacement, `openai/gpt-oss-120b`, is **larger** (120B vs 70B), **cheaper** (**$0.15/$0.60** per 1M tokens vs $0.59/$0.79) and is a **Production** (stable) model. You can still change it via `ECHOSCRIPT_GROQ_SUMMARY_MODEL`.
 
 > **Ollama** is the *program* that runs the model locally (like a "player" for models); **Qwen** is the *model*. Locally you install Ollama once (https://ollama.com) and pull the model: `ollama pull qwen2.5:7b`. No extra pip dependency: EchoScript talks to Ollama over HTTP. With **Groq** none of this is needed.
 
@@ -707,7 +709,7 @@ the `.env` file), no code editing needed. Each value has a sensible default:
 | `ECHOSCRIPT_CHUNK_SECONDS` | `600` | Duration of each audio chunk (Groq only) |
 | `ECHOSCRIPT_DEVICE` | `auto` | Local backend: `auto` (GPU if present) / `cpu` / `cuda` |
 | `ECHOSCRIPT_COMPUTE_TYPE` | *(auto)* | Local precision: empty = `float16` on GPU, `int8` on CPU |
-| `ECHOSCRIPT_GROQ_SUMMARY_MODEL` | `llama-3.3-70b-versatile` | **Groq chat** model used for the summary (cloud) |
+| `ECHOSCRIPT_GROQ_SUMMARY_MODEL` | `openai/gpt-oss-120b` | **Groq chat** model used for the summary (cloud) |
 | `ECHOSCRIPT_OLLAMA_MODEL` | `qwen2.5:7b` | **Ollama** model for the local summary |
 | `ECHOSCRIPT_OLLAMA_TRANSLATE_MODEL` | *(= `OLLAMA_MODEL`)* | **Ollama** model for the local **translation** (defaults to the summary one) |
 | `ECHOSCRIPT_OLLAMA_HOST` | `http://localhost:11434` | Ollama server address |

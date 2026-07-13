@@ -220,7 +220,9 @@ LOCAL_MODELS = {
 #   • Ollama (locale): usato quando il backend è locale, per restare 100%
 #     offline. Richiede Ollama installato e avviato (https://ollama.com) con un
 #     modello scaricato (es. `ollama pull llama3.1:8b`).
-GROQ_SUMMARY_MODEL = _env_str("ECHOSCRIPT_GROQ_SUMMARY_MODEL", "llama-3.3-70b-versatile")
+# Default: gpt-oss-120b (Production; sostituto del deprecato llama-3.3-70b-versatile,
+# spento da Groq il 16 ago 2026 per i tier free/developer). Più economico e stabile.
+GROQ_SUMMARY_MODEL = _env_str("ECHOSCRIPT_GROQ_SUMMARY_MODEL", "openai/gpt-oss-120b")
 OLLAMA_MODEL = _env_str("ECHOSCRIPT_OLLAMA_MODEL", "qwen2.5:7b")
 # Modello Ollama per la TRADUZIONE locale (vedi più sotto). Di default riusa lo
 # stesso del riassunto, così basta scaricarne uno solo per restare 100% offline.
@@ -402,6 +404,23 @@ def _safe_filename(name: str) -> str:
     return name.strip()[:120] or "trascrizione"
 
 
+def _lp(path: str) -> str:
+    """Restituisce il percorso in forma 'extended-length' (prefisso \\\\?\\) su
+    Windows, così le operazioni su file non incappano nel vecchio limite di 260
+    caratteri (MAX_PATH): con titoli lunghi il percorso completo può superarlo e
+    open()/makedirs falliscono con FileNotFoundError. No-op su altri sistemi o se
+    il prefisso è già presente. Richiede un percorso ASSOLUTO con backslash, che
+    os.path.abspath garantisce su Windows."""
+    if os.name != "nt":
+        return path
+    abs_path = os.path.abspath(path)
+    if abs_path.startswith("\\\\?\\"):
+        return abs_path
+    if abs_path.startswith("\\\\"):          # percorso di rete \\server\share
+        return "\\\\?\\UNC" + abs_path[1:]   # -> \\?\UNC\server\share
+    return "\\\\?\\" + abs_path
+
+
 # === RATE LIMIT + CHECKPOINT (ripresa dei video lunghi su Groq) =============
 
 class GroqRateLimit(Exception):
@@ -432,7 +451,7 @@ def _is_rate_limit(msg: str) -> bool:
 # === CREDITI GROQ: CACHE DEI RATE-LIMIT PER MODELLO ==========================
 # Groq non espone un endpoint "saldo": il budget del piano free arriva SOLO
 # negli header x-ratelimit-* di ogni risposta, e sono PER MODELLO (whisper per
-# la trascrizione, llama per il riassunto, qwen per la visiva). Invece di
+# la trascrizione, gpt-oss per il riassunto, qwen per la visiva). Invece di
 # sprecare una chiamata vera — e quindi un credito — ad ogni clic sul pulsante
 # "crediti", registriamo qui gli header che le richieste REALI già producono:
 # il pulsante legge questa cache, a costo zero. La cache vive per la sessione.
@@ -2356,7 +2375,7 @@ def build_pdf(title: str, meta: dict, sections: list[dict], out_path: str,
             cell(6, sec["text"], md=markdown)
         pdf.ln(3)
 
-    pdf.output(out_path)
+    pdf.output(_lp(out_path))
 
 
 # === TRADUZIONE (Google Translate in cloud · Ollama in locale) ==============
@@ -3109,12 +3128,12 @@ def analyze_video_visuals(video_path: str, duration: float, workdir: str,
     # Solo se c'è davvero qualcosa da salvare: niente cartella 'frames' vuota.
     if frames_out_dir and notes:
         try:
-            os.makedirs(frames_out_dir, exist_ok=True)
+            os.makedirs(_lp(frames_out_dir), exist_ok=True)
             for idx, note in enumerate(notes):
                 src = note.get("_frame")
                 if src and os.path.isfile(src):
                     name = f"frame_{idx:03d}_{int(note['start'])}s.jpg"
-                    shutil.copyfile(src, os.path.join(frames_out_dir, name))
+                    shutil.copyfile(src, _lp(os.path.join(frames_out_dir, name)))
                     note["image"] = name
         except OSError:
             pass
@@ -3142,7 +3161,7 @@ def save_visual_notes(out_root: str, meta: dict, notes: list[dict],
     video_dir = os.path.join(out_root, safe)
     vdir = os.path.join(video_dir, visual_subdir(ui_lang))
     frames_dir = os.path.join(vdir, "frames")
-    os.makedirs(vdir, exist_ok=True)
+    os.makedirs(_lp(vdir), exist_ok=True)
     base = os.path.join(vdir, f"{safe}_visivo")
     payload = {
         "title": meta["title"],
@@ -3153,7 +3172,7 @@ def save_visual_notes(out_root: str, meta: dict, notes: list[dict],
                    "image": n.get("image"),
                    "text": n["text"]} for n in notes],
     }
-    with open(base + ".json", "w", encoding="utf-8") as f:
+    with open(_lp(base + ".json"), "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
     # Markdown del documento: fotogramma (se presente) + testo, per ogni nota.
@@ -3175,7 +3194,7 @@ def save_visual_notes(out_root: str, meta: dict, notes: list[dict],
             out.append("")
         return "\n".join(out)
 
-    with open(base + ".md", "w", encoding="utf-8") as f:
+    with open(_lp(base + ".md"), "w", encoding="utf-8") as f:
         f.write(_companion_md("frames/"))
     if not quiet:
         console.print(f"  {SYM_OK} Analisi visiva salvata in [info]{visual_subdir(ui_lang)}/[/info]")
@@ -3470,7 +3489,7 @@ def _save_outputs(meta: dict, segments: list[dict], engine_label: str,
     safe_title = _safe_filename(meta["title"])
     video_dir = os.path.join(out_root, safe_title)
     trans_dir = os.path.join(video_dir, trans_subdir())
-    os.makedirs(trans_dir, exist_ok=True)
+    os.makedirs(_lp(trans_dir), exist_ok=True)
     base_orig = os.path.join(trans_dir, safe_title)  # base path (without extension) of the originals
 
     # Common basis (sections) used by all text formats and by the export.
@@ -3478,7 +3497,7 @@ def _save_outputs(meta: dict, segments: list[dict], engine_label: str,
     created: list[str] = []  # paths (relative to the video folder) of generated files, for the summary
 
     def _save(path: str, content: str) -> None:
-        with open(path, "w", encoding="utf-8") as f:
+        with open(_lp(path), "w", encoding="utf-8") as f:
             f.write(content)
         created.append(os.path.relpath(path, video_dir).replace("\\", "/"))
 
@@ -3574,7 +3593,7 @@ def translate_existing(out_root: str, title: str, target: str = "it",
     safe_title = _safe_filename(meta["title"])
     video_dir = os.path.join(out_root, safe_title)
     trad_dir = os.path.join(video_dir, transl_subdir(ui_lang))
-    os.makedirs(trad_dir, exist_ok=True)
+    os.makedirs(_lp(trad_dir), exist_ok=True)
     base = os.path.join(trad_dir, f"{safe_title}_{target}")
     lang_label = _lang_name(target) or target
 
@@ -3613,7 +3632,7 @@ def translate_existing(out_root: str, title: str, target: str = "it",
     created: list[str] = []
 
     def _save(path: str, content: str) -> None:
-        with open(path, "w", encoding="utf-8") as f:
+        with open(_lp(path), "w", encoding="utf-8") as f:
             f.write(content)
         created.append(os.path.relpath(path, video_dir).replace("\\", "/"))
 
@@ -4069,6 +4088,10 @@ def build_pdf_rich(md_text: str, out_path: str) -> bool:
         html_path = os.path.join(td, "doc.html")
         with open(html_path, "w", encoding="utf-8") as f:
             f.write(html_doc)
+        # Chrome NON gestisce i percorsi lunghi (>260) né il prefisso \\?\: stampa
+        # su un file temporaneo dal nome corto e poi lo copiamo nella destinazione
+        # definitiva (che può essere lunga) tramite _lp().
+        tmp_pdf = os.path.join(td, "out.pdf")
         cmd = [
             browser, "--headless=new", "--disable-gpu", "--no-sandbox",
             "--no-first-run", "--no-default-browser-check", "--disable-extensions",
@@ -4080,13 +4103,19 @@ def build_pdf_rich(md_text: str, out_path: str) -> bool:
             # rimanda a ogni capitolo. Flag ignorato dai browser troppo vecchi
             # (nessun errore: in tal caso il PDF esce semplicemente senza outline).
             "--generate-pdf-document-outline",
-            f"--print-to-pdf={out_path}", pathlib.Path(html_path).as_uri(),
+            f"--print-to-pdf={tmp_pdf}", pathlib.Path(html_path).as_uri(),
         ]
         try:
             subprocess.run(cmd, capture_output=True, timeout=120)
         except Exception:
             return False
-    return os.path.isfile(out_path) and os.path.getsize(out_path) > 1500
+        if not (os.path.isfile(tmp_pdf) and os.path.getsize(tmp_pdf) > 1500):
+            return False
+        try:
+            shutil.copyfile(tmp_pdf, _lp(out_path))
+        except OSError:
+            return False
+    return os.path.isfile(_lp(out_path)) and os.path.getsize(_lp(out_path)) > 1500
 
 
 def _save_pdf(meta: dict, sections: list[dict], out_path: str, with_timestamps: bool,
@@ -4315,7 +4344,7 @@ def summarize_existing(out_root: str, title: str, client=None,
     safe_title = _safe_filename(meta["title"])
     video_dir = os.path.join(out_root, safe_title)
     sum_dir = os.path.join(video_dir, summary_subdir(ui_lang))
-    os.makedirs(sum_dir, exist_ok=True)
+    os.makedirs(_lp(sum_dir), exist_ok=True)
     suffix = SUMMARY_SUFFIX.get(ui_lang or "it", SUMMARY_SUFFIX["it"])
     base = os.path.join(sum_dir, f"{safe_title}_{suffix}")
 
@@ -4368,7 +4397,7 @@ def summarize_existing(out_root: str, title: str, client=None,
     created: list[str] = []
 
     def _save(path: str, content: str) -> None:
-        with open(path, "w", encoding="utf-8") as f:
+        with open(_lp(path), "w", encoding="utf-8") as f:
             f.write(content)
         created.append(os.path.relpath(path, video_dir).replace("\\", "/"))
 
