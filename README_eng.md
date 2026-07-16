@@ -41,29 +41,93 @@ python transcriber.py     # terminal interface (CLI)
 
 ---
 
-## Table of Contents
+## 📖 Table of Contents
 
-- [📋 Project description](#-project-description)
-- [🆚 Why EchoScript instead of the usual "free" tools](#-why-echoscript-instead-of-the-usual-free-tools)
-- [🖥️ Two interfaces: GUI or terminal](#️-two-interfaces-gui-or-terminal)
-- [🖱️ Desktop app guide (for everyone)](#️-desktop-app-guide-for-everyone)
-- [🔀 The two backends: cloud or local](#-the-two-backends-cloud-or-local)
-- [✨ Features](#-features)
-- [⬇️ Download the ready-to-use app (.exe)](#️-download-the-ready-to-use-app-exe)
-- [📦 Install from source (developers)](#-install-from-source-developers)
-- [🔑 How to get a Groq API key](#-how-to-get-a-groq-api-key)
-- [📚 Libraries used and why](#-libraries-used-and-why)
-- [🚀 Usage & examples](#-usage--examples)
-- [⚙️ How it works (the phases)](#️-how-it-works-the-phases)
-- [💾 Output file structure](#-output-file-structure)
-- [📄 PDF export](#-pdf-export)
-- [🌐 Automatic translation](#-automatic-translation)
-- [🧠 Automatic summary](#-automatic-summary)
-- [👁️ Visual analysis of the video](#️-visual-analysis-of-the-video)
-- [🛠️ Configuration](#️-configuration)
-- [🔒 Privacy](#-privacy)
-- [⚖️ Legal notice](#️-legal-notice)
-- [📄 License](#-license)
+**Chapter 1 — [📋 Project description](#-project-description)**
+
+**Chapter 2 — [🆚 Why EchoScript instead of the usual "free" tools](#-why-echoscript-instead-of-the-usual-free-tools)**
+
+**Chapter 3 — [🖥️ Two interfaces: GUI or terminal](#️-two-interfaces-gui-or-terminal)**
+
+**Chapter 4 — [🖱️ Desktop app guide (for everyone)](#️-desktop-app-guide-for-everyone)**
+- 4.1 [Top bar: language and window buttons](#top-bar-language-and-window-buttons)
+- 4.2 [Step 1 — "How do you want to transcribe?"](#step-1--how-do-you-want-to-transcribe)
+- 4.3 [Step 2 — "What do you want to transcribe?"](#step-2--what-do-you-want-to-transcribe)
+- 4.4 [The video confirmation window (YouTube)](#the-video-confirmation-window-youtube)
+- 4.5 [YouTube playlists](#youtube-playlists)
+- 4.6 [Step 3 — "Extra outputs" (optional)](#step-3--extra-outputs-optional)
+- 4.7 [The "Transcribe" button](#the-transcribe-button)
+- 4.8 [During transcription](#during-transcription)
+- 4.9 [At the end of transcription](#at-the-end-of-transcription)
+- 4.10 [The result](#the-result)
+- 4.11 [Special messages (long or already-done video)](#special-messages-long-or-already-done-video)
+
+**Chapter 5 — [🔀 The two backends: cloud or local](#-the-two-backends-cloud-or-local)**
+
+**Chapter 6 — [🧬 The models used (complete guide)](#-the-models-used-complete-guide)**
+- 6.1 [The model icons](#the-model-icons)
+- 6.2 [Parameters, quantization, context: the minimal glossary](#parameters-quantization-context-the-minimal-glossary)
+- 6.3 [🎙️ Transcription — the Whisper family](#️-transcription--the-whisper-family)
+- 6.4 [🧠 Summary and translation — the text models](#-summary-and-translation--the-text-models)
+- 6.5 [👁️ Visual analysis — the vision models](#️-visual-analysis--the-vision-models)
+- 6.6 [How to read the "RAM" column](#how-to-read-the-ram-column)
+
+**Chapter 7 — [✨ Features](#-features)**
+
+**Chapter 8 — [⬇️ Download the ready-to-use app (.exe)](#️-download-the-ready-to-use-app-exe)**
+
+**Chapter 9 — [📦 Install from source (developers)](#-install-from-source-developers)**
+- 9.1 [Requirements](#requirements)
+- 9.2 [Steps](#steps)
+
+**Chapter 10 — [🔑 How to get a Groq API key](#-how-to-get-a-groq-api-key)**
+
+**Chapter 11 — [📚 Libraries used and why](#-libraries-used-and-why)**
+- 11.1 [External dependencies (pip)](#external-dependencies-pip)
+- 11.2 [External tool (not pip)](#external-tool-not-pip)
+- 11.3 [Standard library (no installation)](#standard-library-no-installation)
+
+**Chapter 12 — [🚀 Usage & examples](#-usage--examples)**
+- 12.1 [Example: Groq backend](#example-groq-backend)
+- 12.2 [Example: local audio file (folder batch)](#example-local-audio-file-folder-batch)
+- 12.3 [Use case: build a RAG from videos](#use-case-build-a-rag-from-videos)
+- 12.4 [Use case: read a talk instead of watching it](#use-case-read-a-talk-instead-of-watching-it)
+
+**Chapter 13 — [⚙️ How it works (the phases)](#️-how-it-works-the-phases)**
+
+**Chapter 14 — [💾 Output file structure](#-output-file-structure)**
+- 14.1 [Why three (actually four) formats, and what they're for](#why-three-actually-four-formats-and-what-theyre-for)
+
+**Chapter 15 — [📄 PDF export](#-pdf-export)**
+
+**Chapter 16 — [🌐 Automatic translation](#-automatic-translation)**
+- 16.1 [How long videos are handled (in blocks)](#how-long-videos-are-handled-in-blocks)
+
+**Chapter 17 — [🧠 Automatic summary](#-automatic-summary)**
+- 17.1 [Why a summary is needed too](#why-a-summary-is-needed-too)
+- 17.2 [Which models were introduced and why](#which-models-were-introduced-and-why)
+- 17.3 [Choosing the local model (CLI and GUI)](#choosing-the-local-model-cli-and-gui)
+- 17.4 [Handling long videos: map-reduce + context](#handling-long-videos-map-reduce--context)
+- 17.5 [The prompt used (identical for Groq and Ollama)](#the-prompt-used-identical-for-groq-and-ollama)
+- 17.6 [On an already-transcribed video (regenerate without re-spending)](#on-an-already-transcribed-video-regenerate-without-re-spending)
+
+**Chapter 18 — [👁️ Visual analysis of the video](#️-visual-analysis-of-the-video)**
+- 18.1 [What it's for](#what-its-for)
+- 18.2 [How it works (in 4 steps)](#how-it-works-in-4-steps)
+- 18.3 [Why this way (and not a "generated image")](#why-this-way-and-not-a-generated-image)
+- 18.4 [What you get](#what-you-get)
+- 18.5 [Cost, requirements and limits (in the open)](#cost-requirements-and-limits-in-the-open)
+- 18.6 [Configuration](#configuration)
+
+**Chapter 19 — [🛠️ Configuration](#️-configuration)**
+
+**Chapter 20 — [🔒 Privacy](#-privacy)**
+
+**Chapter 21 — [💬 Feedback](#-feedback)**
+
+**Chapter 22 — [⚖️ Legal notice](#️-legal-notice)**
+
+**Chapter 23 — [📄 License](#-license)**
 
 ---
 
@@ -158,7 +222,7 @@ This section is written for **non-technical users**: we explain every screen, ev
 
 ### Step 1 — "How do you want to transcribe?"
 Two cards to choose from (they glow green when selected):
-- 🔒 **Local**: transcribes **on your computer**, **offline**, sending nothing. Below you can pick the **model** (more accurate = slower). Best with a GPU; slower on CPU.
+- 🔒 **Local**: transcribes **on your computer**, **offline**, sending nothing. Clicking it opens the **"Local models" window** with the three choices: **Whisper** model (transcription, more accurate = slower), **Ollama** model for summary/translation and **Ollama vision** model for visual analysis (with a ✓ on the ones already pulled). A **summary row** in the card shows the chosen models and, when clicked, reopens the window. Best with a GPU; slower on CPU.
 - ⚡ **Groq (cloud)**: **very fast**, but the audio is sent to Groq's servers. Needs a **free key**: click **"Load key from .txt file"** and select your key file. The **"Show Groq API credits"** button opens a window that, **for each model** used by the app (transcription, summary, visual analysis), lists the **credits used**, the **remaining** ones (audio seconds, requests, tokens) and the **reset** time; models not used yet this session are still listed. It's all read from a **passive cache**: the window **doesn't contact Groq and spends no credits**, so you can open it as often as you like. **"Get a key →"** opens the site to create one.
 
 > When transcription finishes, the **"Done!"** window also shows the **Groq credits used** (audio transcribed) and those **left for today**.
@@ -242,6 +306,99 @@ If you choose **Local**, a second panel lets you pick the model each time:
 
 > On first use of a local model, `faster-whisper` downloads its **weights** from HuggingFace (once). The **audio**, however, is never sent anywhere.
 
+Still with the **Local** backend, the same window/panel also lets you pick the **Ollama models** for summary/translation and visual analysis: all the details are in the next chapter.
+
+---
+
+## 🧬 The models used (complete guide)
+
+EchoScript is not a model: it is an **orchestra conductor**. Depending on the phase (transcribe, translate, summarize, "look at" frames) and the backend (cloud or local) it calls the right model. This chapter introduces **all of them**: who develops them, how big they are, what they are good at and why they were chosen.
+
+### The model icons
+
+Every model **family** has its own icon, used throughout the README:
+
+| Icon | Family | Developed by | Used for |
+|---|---|---|---|
+| 🎙️ | **Whisper** | OpenAI | Transcription (cloud and local) |
+| 🤖 | **gpt-oss** | OpenAI (open-weight) | Summary (cloud and local) |
+| 🐉 | **Qwen / Qwen-VL** | Alibaba | Summary/translation and vision (local), vision (cloud) |
+| 💎 | **Gemma** | Google | Summary/translation and vision (local) |
+| 🦙 | **Llama** | Meta | Vision (local) |
+| 🌐 | **Google Translate** | Google | Translation (when a Groq key is present) — *not an LLM* |
+
+### Parameters, quantization, context: the minimal glossary
+
+Three concepts are enough to read the tables below:
+
+- **Parameters** (M = millions, B = billions): the "adjustable neurons" learned during training — the standard way to measure a model's **size**. As a first approximation: more parameters = more capability (and more RAM and slowness). `qwen3:4b` has ~4 billion parameters; `gpt-oss-120b` ~117 billion.
+- **Quantization**: the original weights (16 bits per parameter) are compressed to ~4 bits so they fit in a normal PC's RAM. It's Ollama's standard (Q4): you lose very little quality and a 7B model goes from ~15 GB down to **~4.7 GB** on disk. That's why the "RAM" column in the tables is much smaller than "parameters × 2 bytes".
+- **Context** (context window): how many **tokens** the model can "keep in mind" in one request (input + output). EchoScript raises Ollama's context to **8,192 tokens** and uses **map-reduce** for texts that don't fit (see the Summary chapter).
+- **MoE** (*Mixture of Experts*): an architecture where each token activates only a **fraction** of the parameters. It's the `gpt-oss` trick: lots of total knowledge, per-token cost of a small model.
+
+### 🎙️ Transcription — the Whisper family
+
+**Whisper** is OpenAI's speech-recognition model (2022, open source), trained on ~680,000 hours of multilingual audio: the de-facto standard for transcription. EchoScript uses it **always**, in two ways: on Groq's servers (cloud) or on your PC via `faster-whisper` (local). **It's the same model**: for a given variant, cloud and local quality are identical — only who does the math changes.
+
+| Model | Parameters | Where | Notes |
+|---|---|---|---|
+| 🎙️ `base` | 74 M | local | the lightest, for quick tests |
+| 🎙️ `small` ⭐ | 244 M | local | the recommended balance on CPU |
+| 🎙️ `medium` | 769 M | local | more accurate, noticeably slower |
+| 🎙️ `large-v3` | 1.55 B | local + cloud (`whisper-large-v3`) | top accuracy, the reference |
+| 🎙️ `large-v3-turbo` | 809 M | local + cloud (`whisper-large-v3-turbo` ⭐) | distilled "large": nearly the same quality, much faster |
+
+> 💡 `large-v3-turbo` is a **distilled** version of `large-v3`: the decoder is cut from 32 layers down to 4. That's why it costs/weighs half as much with a minimal quality loss — and why it's both the Groq default and the local "good compromise".
+
+### 🧠 Summary and translation — the text models
+
+This is **LLM** territory (language models): they receive the transcription and produce the summary and the translation. In the **cloud** the model is fixed (it runs on Groq's servers, so you can afford a giant); **locally** you pick it from the panel/window on every run.
+
+**Cloud (with a Groq key):**
+
+| Model | Parameters | Context | Role |
+|---|---|---|---|
+| 🤖 `openai/gpt-oss-120b` | 117 B (MoE, ~5 B active) | 131k | Summary. OpenAI's open-weight model (2025), flagship-class quality at $0.15/$0.60 per 1M tokens |
+| 🌐 Google Translate | — | — | Translation: not an LLM but Google's service (via `deep-translator`), free and with no dedicated key |
+
+**Local (Ollama) — the 5 in the picker:**
+
+| Model | Parameters | RAM | Strengths |
+|---|---|---|---|
+| 🐉 `qwen3:4b` | 4 B | ~4 GB | The newest of the small ones (2025): "thinks" before answering, strong multilingual. Ideal with 8 GB of RAM |
+| 🐉 `qwen2.5:7b` ⭐ | 7.6 B | ~6 GB | The long-time default: excellent at following structured instructions |
+| 🐉 `qwen3:8b` | 8.2 B | ~7 GB | Like `qwen3:4b` but roomier: more faithful summaries on technical content |
+| 💎 `gemma3:12b` | 12 B | ~10 GB | Google's multilingual model (140+ languages), very natural style |
+| 🤖 `gpt-oss:20b` | 21 B (MoE, ~3.6 B active) | ~16 GB | The cloud model's little brother: the local quality closest to Groq |
+
+> **Local translation** reuses the same model as the summary (so you only pull one), unless you force a different one with `ECHOSCRIPT_OLLAMA_TRANSLATE_MODEL`.
+
+### 👁️ Visual analysis — the vision models
+
+**Multimodal** (vision) models receive a **frame** + the speech around that moment and transcribe what is **written on screen** (code, formulas, diagrams). They need weights trained on images too: a text-only LLM can't do this.
+
+**Cloud:** 🐉 `qwen/qwen3.6-27b` on Groq (multimodal, 27 B) — fast, uses credits per frame.
+
+**Local (Ollama) — the 5 in the picker:**
+
+| Model | Parameters | RAM | Strengths |
+|---|---|---|---|
+| 🐉 `qwen2.5vl:3b` | 3.8 B | ~4 GB | Small but with **excellent OCR** (Qwen2.5-VL is the open state of the art at reading text in images). Ideal with 8 GB of RAM |
+| 💎 `gemma3:4b` | 4.3 B | ~4 GB | Google's small one is **natively multimodal**: a good text+vision compromise |
+| 🐉 `qwen2.5vl:7b` | 8.3 B | ~7 GB | Same top-tier OCR, more capacity to reason about what it sees |
+| 🦙 `llama3.2-vision` | 11 B | ~9 GB | EchoScript's long-time default (Meta): solid, but heavier |
+| 🐉 `qwen2.5vl:32b` | 33 B | ~24 GB | The local quality closest to the cloud: needs a workstation (32 GB+ or GPU) |
+
+### How to read the "RAM" column
+
+The RAM shown is what the **model** occupies while running: quantized weights **+** context window. You must **add** Windows and your other open apps on top. Rule of thumb:
+
+- **8 GB total** → pick the ~4 GB models (`qwen3:4b`, `qwen2.5vl:3b`, `gemma3:4b`) and close the browser;
+- **16 GB total** → everything up to ~10 GB (`gemma3:12b`, `llama3.2-vision`) runs comfortably;
+- **24-32 GB (or a dedicated GPU)** → `gpt-oss:20b` and `qwen2.5vl:32b` too, with quality approaching the cloud.
+
+If a model doesn't fit in RAM, Ollama falls back to disk (swap) and becomes **very** slow: better to go down a size. The picker shows the RAM precisely so you can decide at a glance.
+
 ---
 
 ## ✨ Features
@@ -249,6 +406,7 @@ If you choose **Local**, a second panel lets you pick the model each time:
 - 🖥️ **Two interfaces**: desktop **GUI** (`gui/main.py`) or **CLI** in the terminal (`transcriber.py`)
 - 🔀 **Two backends** selectable from a panel: Groq (cloud, fast) or faster-whisper (local, private)
 - 🎚️ **Groq transcription model chosen in-app** (GUI and CLI): `whisper-large-v3-turbo` (default, cheap) or `whisper-large-v3` (more accurate); the **estimated cost** follows the chosen model
+- 🦙 **Local models chosen in-app** (GUI and CLI): a dedicated window/panel with the Whisper model + the **Ollama** models for summary/translation and visual analysis, required RAM and a **✓ on the models already pulled** (see [chapter 6](#-the-models-used-complete-guide))
 - 🎙️ **Two sources**: **YouTube** videos (from URL) or **local audio files** (phone/PC), including **screen recordings** (`mp4`/`mov`/`mkv`…), even a **whole folder** in batch
 - 📋 **Video card** before you start (title, channel, views, **likes, subscribers, category, language**, date, duration, chapters)
 - 🗣️ **Audio language detected** automatically (Whisper) and shown in the summary
@@ -375,7 +533,7 @@ The key is needed **only** if you use the **Groq** (cloud) backend. It is **free
 
 | Tool | What it's for | Notes |
 |---|---|---|
-| **[Ollama](https://ollama.com)** | **Local summary** (100% offline) | A separate program to install once; talked to over HTTP (no pip library). Not needed if you use Groq for the summary. Recommended model: `qwen2.5:7b` |
+| **[Ollama](https://ollama.com)** | **Local summary** (100% offline) | A separate program to install once; talked to over HTTP (no pip library). Not needed if you use Groq for the summary. The model **is chosen from the CLI/GUI** (default: `qwen2.5:7b`; see the table in the Summary section) |
 
 > For the **cloud** summary the existing **`groq`** client is reused (with a chat model, not Whisper): no extra dependency.
 
@@ -583,11 +741,39 @@ Summarizing isn't transcribing: it needs an **LLM** (a language model), because 
 | Backend | Summary engine | Model (default) | Why |
 |---|---|---|---|
 | ⚡ **Groq (cloud)** | Groq chat API | 🤖 `openai/gpt-oss-120b` | Runs on Groq's servers: you can afford a **large 120B** model → high-quality summaries, **very fast** and cheap, using the free key you already use for transcription |
-| 🔒 **Local** | **Ollama** (offline) | 🦙 `qwen2.5:7b` | Stays **100% offline**. **Qwen 2.5 7B** is light (~4.7 GB), **fast on CPU** and especially good **in Italian** and at following structured instructions (better than Llama 3.1 8B at the same size) |
+| 🔒 **Local** | **Ollama** (offline) | 🐉 `qwen2.5:7b` | Stays **100% offline**. **Qwen 2.5 7B** is light (~4.7 GB), **fast on CPU** and especially good **in Italian** and at following structured instructions (better than Llama 3.1 8B at the same size) |
 
 > 🔄 **Why `openai/gpt-oss-120b` (and no longer `llama-3.3-70b-versatile`)?** Groq **deprecated** `llama-3.3-70b-versatile`, with **shutdown on August 16, 2026** for free/developer plans: after that date it would stop working. The recommended replacement, `openai/gpt-oss-120b`, is **larger** (120B vs 70B), **cheaper** (**$0.15/$0.60** per 1M tokens vs $0.59/$0.79) and is a **Production** (stable) model. You can still change it via `ECHOSCRIPT_GROQ_SUMMARY_MODEL`.
 
 > **Ollama** is the *program* that runs the model locally (like a "player" for models); **Qwen** is the *model*. Locally you install Ollama once (https://ollama.com) and pull the model: `ollama pull qwen2.5:7b`. No extra pip dependency: EchoScript talks to Ollama over HTTP. With **Groq** none of this is needed.
+
+### Choosing the local model (CLI and GUI)
+
+With the **local backend** you are not locked to the default. In the **GUI**, clicking «Local» opens the **"Local models" window** with the three choices together — the **Whisper** model (transcription), the **Ollama** model for **summary + translation**, the **Ollama vision** model for **visual analysis** — and a summary row in the card reopens it at any time. The **CLI** shows the same pickers step by step. Both display the **approximate RAM** required and a **✓ next to models already pulled** (read from Ollama); in the CLI you can also type any model name (e.g. `mistral:7b`), while `.env` remains the way to force an out-of-catalog model in the GUI.
+
+**Summary + translation** (`ollama pull <name>`):
+
+| # | Model | RAM | When to pick it |
+|---|---|---|---|
+| 1 | 🐉 `qwen3:4b` | ~4 GB | light & modern: ideal with 8 GB of RAM |
+| 2 | 🐉 `qwen2.5:7b` ⭐ | ~6 GB | quality/size balance (default) |
+| 3 | 🐉 `qwen3:8b` | ~7 GB | more accurate (12-16 GB of RAM) |
+| 4 | 💎 `gemma3:12b` | ~10 GB | great multilingual (16 GB of RAM) |
+| 5 | 🤖 `gpt-oss:20b` | ~16 GB | near-cloud quality (24 GB+ or GPU) |
+
+**Visual analysis** (*vision* models):
+
+| # | Model | RAM | When to pick it |
+|---|---|---|---|
+| 1 | 🐉 `qwen2.5vl:3b` | ~4 GB | light, great OCR: ideal with 8 GB of RAM |
+| 2 | 💎 `gemma3:4b` | ~4 GB | light multimodal, good multilingual |
+| 3 | 🐉 `qwen2.5vl:7b` | ~7 GB | good balance (12-16 GB of RAM) |
+| 4 | 🦙 `llama3.2-vision` ⭐ | ~9 GB | long-time default (16 GB of RAM) |
+| 5 | 🐉 `qwen2.5vl:32b` | ~24 GB | near-cloud quality (32 GB+ or GPU) |
+
+> 🧬 Who these models are, who develops them and what "parameters" and "RAM" mean: it's all in [chapter 6 — The models used](#-the-models-used-complete-guide).
+
+> 💡 The RAM shown is what the *model* needs while running (weights + context): add your system's own usage on top. If a chosen model is not pulled yet, EchoScript tells you and suggests the right `ollama pull` command.
 
 ### Handling long videos: map-reduce + context
 
@@ -686,7 +872,7 @@ And in the **summary** you'll find code and formulas woven into the text, with f
 
 ### Cost, requirements and limits (in the open)
 
-- **Cost.** Visual analysis is the **heaviest** part: images "cost" many tokens. On **Groq** it uses more credits than the rest (in dollars it stays low — a few cents per video — but on the **free tier** it limits how many you can do per day). **Locally** with Ollama it's **free and offline**, just slower, and needs a vision model installed (`ollama pull llama3.2-vision`).
+- **Cost.** Visual analysis is the **heaviest** part: images "cost" many tokens. On **Groq** it uses more credits than the rest (in dollars it stays low — a few cents per video — but on the **free tier** it limits how many you can do per day). **Locally** with Ollama it's **free and offline**, just slower, and needs a vision model installed: **you pick it from the CLI/GUI** among the suggested ones (see the table in the Summary section), e.g. `ollama pull qwen2.5vl:3b`.
 - **Showing the frames costs nothing**: the cost is only *reading* the frames; attaching and laying them out in the PDF is all local.
 - **Honest limits.** Code is "almost always right", but a single wrong character would break it: the attached frame is exactly what lets you check. Code that **scrolls** across multiple screens isn't yet stitched back into a single file.
 
@@ -711,13 +897,13 @@ the `.env` file), no code editing needed. Each value has a sensible default:
 | `ECHOSCRIPT_DEVICE` | `auto` | Local backend: `auto` (GPU if present) / `cpu` / `cuda` |
 | `ECHOSCRIPT_COMPUTE_TYPE` | *(auto)* | Local precision: empty = `float16` on GPU, `int8` on CPU |
 | `ECHOSCRIPT_GROQ_SUMMARY_MODEL` | `openai/gpt-oss-120b` | **Groq chat** model used for the summary (cloud) |
-| `ECHOSCRIPT_OLLAMA_MODEL` | `qwen2.5:7b` | **Ollama** model for the local summary |
+| `ECHOSCRIPT_OLLAMA_MODEL` | `qwen2.5:7b` | **Ollama** model for the local summary (this is the proposed default: **each run can change it from the picker** in CLI/GUI) |
 | `ECHOSCRIPT_OLLAMA_TRANSLATE_MODEL` | *(= `OLLAMA_MODEL`)* | **Ollama** model for the local **translation** (defaults to the summary one) |
 | `ECHOSCRIPT_OLLAMA_HOST` | `http://localhost:11434` | Ollama server address |
 | `ECHOSCRIPT_OLLAMA_NUM_CTX` | `8192` | Ollama context window (avoids truncating long blocks) |
 | `ECHOSCRIPT_SUMMARY_MAX_CHARS` | `12000` | Threshold above which a section is summarized in blocks (map-reduce) |
 | `ECHOSCRIPT_GROQ_VISION_MODEL` | `qwen/qwen3.6-27b` | **Vision** model on Groq (visual analysis, cloud) |
-| `ECHOSCRIPT_OLLAMA_VISION_MODEL` | `llama3.2-vision` | **Vision** model on Ollama (visual analysis, local) |
+| `ECHOSCRIPT_OLLAMA_VISION_MODEL` | `llama3.2-vision` | **Vision** model on Ollama (visual analysis, local; this too **can be changed from the picker** in CLI/GUI) |
 | `ECHOSCRIPT_VISION_SCENE` | `0.4` | Scene-change threshold for picking frames (lower = more frames) |
 | `ECHOSCRIPT_VISION_MAX_FRAMES` | `60` | Max frames analyzed per video (cost/time) |
 | `ECHOSCRIPT_SUMMARY_FRAMES` | `1` | Show frames in the summary too (0 = only in the dedicated document) |
@@ -742,7 +928,7 @@ the `.env` file), no code editing needed. Each value has a sensible default:
 - **Translation**: with a **Groq key** it uses **Google Translate** (text is sent to Google's servers); **without a key**, locally, it translates with **Ollama on your PC** → **100% offline**.
 - **Summary**: with the **Groq** backend the text goes to Groq's servers; with the **local** backend it uses **Ollama on your PC**, so it **stays 100% offline** (nothing leaves the computer).
 
-> 🔒 **Fully offline.** With the **local backend and no Groq key** the whole pipeline — transcription, translation and summary — runs **on your PC**: no data leaves the computer. It needs [Ollama](https://ollama.com) installed and running with the model pulled (`ollama pull qwen2.5:7b`), used for both translation and summary.
+> 🔒 **Fully offline.** With the **local backend and no Groq key** the whole pipeline — transcription, translation and summary — runs **on your PC**: no data leaves the computer. It needs [Ollama](https://ollama.com) installed and running with a model pulled (e.g. `ollama pull qwen2.5:7b`, or one of those offered in the picker), used for both translation and summary.
 
 The **API key** is never written in the code: it is read from `.env` or an environment variable, and excluded from version control via `.gitignore`.
 
