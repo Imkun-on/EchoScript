@@ -264,6 +264,12 @@ VISION_MAX_FRAMES = _env_int("ECHOSCRIPT_VISION_MAX_FRAMES", 60)
 # Se il rilevamento scene trova troppi pochi fotogrammi (video con un'unica
 # inquadratura fissa), si campiona a intervalli regolari ogni N secondi.
 VISION_FALLBACK_INTERVAL = _env_int("ECHOSCRIPT_VISION_INTERVAL", 45)
+# Distanza minima (secondi) tra due fotogrammi chiave. Il rilevamento scene di
+# ffmpeg spesso scatta DUE volte sulla stessa transizione (un frame a metà stacco
+# + uno assestato), generando coppie ravvicinate ridondanti — spesso una è lo
+# shot largo "dove non si vede nulla". Raggruppiamo i frame entro questa finestra
+# e teniamo l'ULTIMO del gruppo (lo stato assestato, più leggibile). 0 disattiva.
+VISION_MIN_GAP = _env_int("ECHOSCRIPT_VISION_MIN_GAP", 8)
 # Risoluzione massima del video scaricato da YouTube per l'analisi visiva (più
 # bassa = download più leggero). Usata solo quando l'analisi è attiva.
 VISION_YT_MAX_HEIGHT = _env_int("ECHOSCRIPT_VISION_YT_HEIGHT", 720)
@@ -2780,6 +2786,29 @@ def _parse_showinfo_times(stderr: str) -> list[float]:
     return times
 
 
+def _collapse_close_frames(frames: list[tuple[float, str]],
+                           min_gap: float) -> list[tuple[float, str]]:
+    """Raggruppa i fotogrammi entro 'min_gap' secondi (finestra a partire dal
+    primo del gruppo) e tiene l'ULTIMO di ogni gruppo. Serve a eliminare le coppie
+    ravvicinate che il rilevamento scene produce sulle transizioni (un frame a
+    metà stacco + uno assestato): l'ultimo è di norma quello leggibile/ravvicinato.
+    'frames' = [(timestamp, percorso)] ordinati per tempo. Non tocca i file."""
+    if min_gap <= 0 or len(frames) < 2:
+        return frames
+    kept: list[tuple[float, str]] = []
+    cluster_start = frames[0][0]
+    last = frames[0]
+    for t, p in frames[1:]:
+        if t - cluster_start <= min_gap:
+            last = (t, p)              # stesso gruppo: l'ultimo vince
+        else:
+            kept.append(last)
+            cluster_start = t
+            last = (t, p)
+    kept.append(last)
+    return kept
+
+
 def extract_keyframes(video_path: str, duration: float, workdir: str) -> list[tuple[float, str]]:
     """Estrae i FOTOGRAMMI CHIAVE di un video, con il loro timestamp (secondi).
 
@@ -2808,6 +2837,10 @@ def extract_keyframes(video_path: str, duration: float, workdir: str) -> list[tu
     files = sorted(os.path.join(frames_dir, n) for n in os.listdir(frames_dir)
                    if n.startswith("kf_"))
     frames = list(zip(times, files))  # l'ordine di showinfo coincide con quello dei file
+    # Elimina le coppie ravvicinate (doppio scatto sulla stessa transizione): tiene
+    # un solo fotogramma per finestra, così non finiscono nel riassunto due frame
+    # quasi identici (uno spesso "vuoto") e si risparmiano chiamate al modello.
+    frames = _collapse_close_frames(frames, VISION_MIN_GAP)
 
     # 2) Fallback: video quasi statico o senza stacchi netti -> pochi cambi scena.
     # Campiona a intervalli regolari, con un passo ADATTIVO alla durata così anche
@@ -3286,16 +3319,42 @@ def load_visual_notes(out_root: str, title: str) -> list[dict]:
     return []
 
 
+def _split_md_blocks(text: str) -> list[str]:
+    """Spezza il testo in blocchi separati da riga vuota, MA tiene interi i
+    recinti di codice ``` ``` (che possono contenere righe vuote): così un
+    fotogramma non finisce mai in mezzo a un blocco di codice."""
+    blocks: list[str] = []
+    cur: list[str] = []
+    in_fence = False
+    for ln in text.split("\n"):
+        if ln.lstrip().startswith("```"):
+            in_fence = not in_fence
+            cur.append(ln)
+            continue
+        if not ln.strip() and not in_fence:
+            if cur:
+                blocks.append("\n".join(cur))
+                cur = []
+        else:
+            cur.append(ln)
+    if cur:
+        blocks.append("\n".join(cur))
+    return [b for b in blocks if b.strip()]
+
+
 def _append_frames_to_sections(sections: list[dict], notes: list[dict], img_path_fn) -> list[dict]:
-    """Aggiunge in coda a OGNI sezione i suoi FOTOGRAMMI (per timestamp) come
-    immagini markdown. 'img_path_fn(nome_immagine) -> percorso' consente link
-    relativi (per il .md, portabile) o assoluti (per il PDF). Non muta gli input."""
+    """INTERLACCIA i FOTOGRAMMI nel testo di ogni sezione, inserendoli TRA i
+    paragrafi in base al loro timestamp (posizione relativa nella finestra
+    temporale della sezione), invece di accodarli tutti in fondo. Così le
+    immagini seguono il discorso e non formano un «muro» a fine sezione.
+    'img_path_fn(nome_immagine) -> percorso' consente link relativi (per il .md,
+    portabile) o assoluti (per il PDF). Non muta gli input."""
     notes = sorted([n for n in notes if n.get("image")], key=lambda n: n["start"])
     if not notes:
         return sections
     out = [dict(s) for s in sections]
+    bounds: list[tuple[float, float]] = []
     if any(s.get("start") is not None for s in out):
-        bounds = []
         for i, s in enumerate(out):
             st = s.get("start") or 0
             nxt = out[i + 1].get("start") if i + 1 < len(out) else None
@@ -3311,13 +3370,39 @@ def _append_frames_to_sections(sections: list[dict], notes: list[dict], img_path
             if not placed:
                 buckets[-1].append(note)
     else:
+        bounds = [(0.0, float("inf"))] + [(0.0, float("inf")) for _ in out[1:]]
         buckets = [list(notes)] + [[] for _ in out[1:]]
+
+    def _img_md(n: dict) -> str:
+        return f"![Fotogramma {_format_timestamp(n['start'])}]({img_path_fn(n['image'])})"
+
     for i, s in enumerate(out):
-        if buckets[i]:
-            gallery = "\n\n".join(
-                f"![Fotogramma {_format_timestamp(n['start'])}]({img_path_fn(n['image'])})"
-                for n in buckets[i])
-            s["text"] = s.get("text", "").rstrip() + "\n\n**📷 Fotogrammi dal video:**\n\n" + gallery
+        bucket = buckets[i]
+        if not bucket:
+            continue
+        text = (s.get("text") or "").rstrip()
+        paras = _split_md_blocks(text)
+        if not paras:  # sezione senza testo: accoda le immagini
+            s["text"] = "\n\n".join(_img_md(n) for n in bucket)
+            continue
+        st, en = bounds[i]
+        span = (en - st) if (en != float("inf") and en > st) else None
+        # Per ogni paragrafo, i fotogrammi da inserire SUBITO DOPO di esso.
+        after: list[list[dict]] = [[] for _ in paras]
+        n_para = len(paras)
+        for j, note in enumerate(bucket):
+            if span:
+                frac = (note["start"] - st) / span
+            else:  # senza timestamp affidabili: distribuzione uniforme
+                frac = (j + 0.5) / len(bucket)
+            frac = min(1.0, max(0.0, frac))
+            idx = min(n_para - 1, int(frac * n_para))
+            after[idx].append(note)
+        pieces: list[str] = []
+        for k, p in enumerate(paras):
+            pieces.append(p)
+            pieces.extend(_img_md(n) for n in after[k])
+        s["text"] = "\n\n".join(pieces)
     return out
 
 
@@ -3941,7 +4026,8 @@ _PDF_HTML_TEMPLATE = """<!doctype html>
   img { max-width: 100%; max-height: 15cm; display: block; margin: 8px 0 12px;
         border: 1px solid #e3e7e4; border-radius: 8px; }
 </style>
-<script>window.MathJax = {tex: {inlineMath: [['$','$']], displayMath: [['$$','$$']]},
+<script>window.MathJax = {tex: {inlineMath: [['$','$'], ['\\\\(','\\\\)']],
+    displayMath: [['$$','$$'], ['\\\\[','\\\\]']]},
   svg: {fontCache: 'global'}};</script>
 <script src="__MATHJAX__"></script>
 <script src="__MERMAID__"></script>
@@ -4012,8 +4098,14 @@ def _md_to_html(md: str) -> str:
 
     md = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", _img, md)
     # 2) Formule: lasciate grezze (MathJax le legge dal testo), ma messe da parte
-    # così l'escape non tocca eventuali < > al loro interno.
+    # così l'escape non tocca eventuali < > al loro interno e un'eventuale riga
+    # vuota interna non spezzi il blocco display in due <p>. Si accettano ENTRAMBI
+    # gli stili di delimitatori: $$…$$ / $…$ e \[…\] / \(…\) (il modello usa l'uno
+    # o l'altro indistintamente). I display (\[…\], $$…$$) vanno stashati PRIMA
+    # degli inline per non spezzarli.
     md = re.sub(r"\$\$(.+?)\$\$", lambda m: _stash(f"$${m.group(1)}$$"), md, flags=re.S)
+    md = re.sub(r"\\\[(.+?)\\\]", lambda m: _stash(f"\\[{m.group(1)}\\]"), md, flags=re.S)
+    md = re.sub(r"\\\((.+?)\\\)", lambda m: _stash(f"\\({m.group(1)}\\)"), md, flags=re.S)
     md = re.sub(r"\$(.+?)\$", lambda m: _stash(f"${m.group(1)}$"), md)
     # 3) Codice inline `…`
     md = re.sub(r"`([^`]+)`", lambda m: _stash(f"<code>{_html.escape(m.group(1))}</code>"), md)
