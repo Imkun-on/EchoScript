@@ -26,6 +26,10 @@
   <b>No subscriptions, no daily limits, no reduced minutes.</b>
 </p>
 
+<img src="docs/Eng.png" alt="EchoScript — the desktop app: backend choice (local/Groq), source (YouTube/file), extra outputs and the Transcribe button" width="920">
+
+<p align="center"><i>The desktop app: pick the engine, paste a link (or a file) and hit <b>Transcribe</b>.</i></p>
+
 </div>
 
 ```bash
