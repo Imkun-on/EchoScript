@@ -79,6 +79,19 @@ _GROQ_MODELS = [
     ("whisper-large-v3",       "groqm_large"),
 ]
 
+# Modelli OLLAMA (locale) selezionabili: riassunto/traduzione ("text") e analisi
+# visiva ("vision"). Nomi e RAM indicativa vengono dal catalogo di transcriber.py
+# (così CLI e GUI restano allineate); la descrizione usa la chiave i18n derivata
+# dal numero di catalogo ("om_text_1", "om_vis_1", ...).
+_OLLAMA_TEXT_MODELS = [
+    (name, ram, f"om_text_{k}")
+    for k, (name, ram, _d) in tx.OLLAMA_TEXT_MODELS.items()
+]
+_OLLAMA_VISION_MODELS = [
+    (name, ram, f"om_vis_{k}")
+    for k, (name, ram, _d) in tx.OLLAMA_VISION_MODELS.items()
+]
+
 # === LOCALIZED STRINGS (it = default, en) ==================================
 # Every user-facing text lives below. self.t("key") returns the version in the
 # current language; the ones with {placeholders} are used with .format().
@@ -100,6 +113,26 @@ T = {
         "model_medium": "medium — più accurato, più lento",
         "model_largev3": "large-v3 — massima accuratezza, molto lento",
         "model_turbo": "large-v3-turbo — quasi large, più rapido",
+        # Finestra "Modelli locali" (Whisper + Ollama) + riga riepilogo in card 1.
+        "local_models_title": "Modelli locali",
+        "local_models_hint": "Scegli i modelli che girano sul tuo PC: trascrizione "
+                             "(Whisper), riassunto e traduzione (Ollama), analisi "
+                             "visiva (Ollama vision). ✓ = già scaricato in Ollama.",
+        "local_models_btn": "Modelli locali — clicca per cambiare",
+        "btn_done": "Fatto",
+        # Dropdown dei modelli Ollama (backend locale): etichette + descrizioni.
+        "ollama_model_label": "Modello Ollama — riassunto e traduzione (locale)",
+        "ollama_vision_label": "Modello Ollama — analisi visiva (locale)",
+        "om_text_1": "leggero e moderno · ideale con 8 GB di RAM",
+        "om_text_2": "equilibrio qualità/peso (default)",
+        "om_text_3": "più accurato · 12-16 GB di RAM",
+        "om_text_4": "ottimo multilingua · 16 GB di RAM",
+        "om_text_5": "qualità vicina al cloud · 24 GB+ o GPU",
+        "om_vis_1": "leggero, ottimo OCR · ideale con 8 GB di RAM",
+        "om_vis_2": "multimodale leggero, buon multilingua",
+        "om_vis_3": "buon equilibrio · 12-16 GB di RAM",
+        "om_vis_4": "default storico · 16 GB di RAM",
+        "om_vis_5": "qualità vicina al cloud · 32 GB+ o GPU",
         "key_field_label": "Chiave API Groq",
         "load_key": "Carica chiave da file .txt",
         "limits_btn": "Mostra crediti API Groq",
@@ -341,6 +374,26 @@ T = {
         "model_medium": "medium — more accurate, slower",
         "model_largev3": "large-v3 — top accuracy, very slow",
         "model_turbo": "large-v3-turbo — near large, faster",
+        # "Local models" window (Whisper + Ollama) + summary row in card 1.
+        "local_models_title": "Local models",
+        "local_models_hint": "Pick the models that run on your PC: transcription "
+                             "(Whisper), summary & translation (Ollama), visual "
+                             "analysis (Ollama vision). ✓ = already pulled in Ollama.",
+        "local_models_btn": "Local models — click to change",
+        "btn_done": "Done",
+        # Ollama model dropdowns (local backend): labels + descriptions.
+        "ollama_model_label": "Ollama model — summary & translation (local)",
+        "ollama_vision_label": "Ollama model — visual analysis (local)",
+        "om_text_1": "light & modern · ideal with 8 GB of RAM",
+        "om_text_2": "quality/size balance (default)",
+        "om_text_3": "more accurate · 12-16 GB of RAM",
+        "om_text_4": "great multilingual · 16 GB of RAM",
+        "om_text_5": "near-cloud quality · 24 GB+ or GPU",
+        "om_vis_1": "light, great OCR · ideal with 8 GB of RAM",
+        "om_vis_2": "light multimodal, good multilingual",
+        "om_vis_3": "good balance · 12-16 GB of RAM",
+        "om_vis_4": "long-time default · 16 GB of RAM",
+        "om_vis_5": "near-cloud quality · 32 GB+ or GPU",
         "key_field_label": "Groq API key",
         "load_key": "Load key from .txt file",
         "limits_btn": "Show Groq API credits",
@@ -587,6 +640,7 @@ class EchoScriptApp:
         self._plan = []             # phase sequence of the current run (for "Phase i/n")
         self._last_g = 0.0          # highest global progress reached (anti-regress bar)
         self._i18n = []             # [(control, attribute, key)] to re-translate
+        self._ollama_installed = None   # modelli già scaricati in Ollama (None = ignoto)
 
         # FIXED output folder: results/ next to the project (like the CLI). This
         # lets us check BEFORE transcribing whether the video is already done or
@@ -599,6 +653,19 @@ class EchoScriptApp:
         page.overlay.extend([self.file_picker, self.key_picker])
 
         self._build_ui()
+
+        # Legge in sottofondo quali modelli sono GIÀ scaricati in Ollama (per i
+        # ✓ nei dropdown): non blocca l'avvio e resta muto se Ollama è spento.
+        threading.Thread(target=self._fetch_ollama_tags, daemon=True).start()
+
+    def _fetch_ollama_tags(self) -> None:
+        """Background: interroga /api/tags di Ollama e aggiorna i ✓ nei dropdown."""
+        installed = tx._ollama_installed_models()
+        if not installed:
+            return
+        self._ollama_installed = installed
+        self._rebuild_ollama_options()
+        self.page.update()
 
     # -------------------------------------------------------------- I18N HELPERS
     def t(self, key: str) -> str:
@@ -1087,12 +1154,38 @@ class EchoScriptApp:
         self.model_dd = ft.Dropdown(
             value="small",
             options=[ft.dropdown.Option(k, self.t(tk)) for k, tk in _LOCAL_MODELS],
+            on_change=lambda e: self._on_local_model_change(),
             border_color=BORDER, focused_border_color=GREEN,
             color=TEXT, label_style=ft.TextStyle(color=MUTED),
             bgcolor=SURFACE2, filled=True, border_radius=10,
         )
         self._reg(self.model_dd, "label", "model_label")
-        self.model_field = ft.Container(content=self.model_dd)
+        # Modelli Ollama del backend locale (riassunto/traduzione e vision):
+        # vivono nella FINESTRA "Modelli locali" insieme al modello Whisper
+        # (si apre cliccando «Locale» o la riga riepilogo qui sotto).
+        self.ollama_dd = self._ollama_dropdown("text")
+        self._reg(self.ollama_dd, "label", "ollama_model_label")
+        self.ollama_vision_dd = self._ollama_dropdown("vision")
+        self._reg(self.ollama_vision_dd, "label", "ollama_vision_label")
+        self._build_models_dialog()
+        # Riga compatta nella card: riepilogo dei tre modelli scelti; il click
+        # riapre la finestra di scelta.
+        self.models_summary = ft.Text("", size=12, color=GREEN_HI)
+        self.model_field = ft.Container(
+            on_click=lambda e: self._open_models_dialog(),
+            border_radius=10, ink=True, bgcolor=SURFACE2,
+            border=ft.border.all(1, BORDER), padding=12,
+            content=ft.Row([
+                ft.Icon(ft.Icons.TUNE, color=GREEN_HI, size=18),
+                ft.Column([
+                    self._T("local_models_btn", size=13, color=MUTED,
+                            weight=ft.FontWeight.W_500),
+                    self.models_summary,
+                ], spacing=2, expand=True),
+                ft.Icon(ft.Icons.EDIT_OUTLINED, color=MUTED, size=16),
+            ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+        )
+        self._refresh_local_models_summary()
 
         # Selettore del modello di trascrizione GROQ (cloud): mostrato solo col
         # backend Groq. La scelta cambia il costo stimato (prezzo per ora diverso).
@@ -1132,6 +1225,57 @@ class EchoScriptApp:
         self._refresh_info_boxes()
         self.page.update()
 
+    # ------------------------------------------- FINESTRA "MODELLI LOCALI"
+    def _build_models_dialog(self) -> None:
+        """Finestra modale con i TRE modelli dell'elaborazione locale:
+        trascrizione (Whisper) + riassunto/traduzione e analisi visiva (Ollama).
+
+        Si apre quando si sceglie il backend «Locale» (e dalla riga riepilogo
+        nella card 1), così la scelta dei modelli non affolla la home."""
+        done = ft.FilledButton(
+            on_click=lambda e: self._close_models_dialog(),
+            style=ft.ButtonStyle(bgcolor=GREEN, color="#06140C",
+                                 shape=ft.RoundedRectangleBorder(radius=10),
+                                 padding=ft.padding.symmetric(horizontal=18, vertical=16)))
+        self._reg(done, "text", "btn_done")
+        self.models_dialog = ft.AlertDialog(
+            modal=True, bgcolor=SURFACE, shape=ft.RoundedRectangleBorder(radius=16),
+            title=ft.Row([ft.Icon(ft.Icons.TUNE, color=GREEN_HI, size=22),
+                          self._T("local_models_title", size=18,
+                                  weight=ft.FontWeight.W_600, color=TEXT)], spacing=10),
+            content=ft.Container(
+                width=500,
+                content=ft.Column([
+                    self._T("local_models_hint", size=12, color=MUTED),
+                    self.model_dd,
+                    self.ollama_dd,
+                    self.ollama_vision_dd,
+                ], spacing=14, tight=True, scroll=ft.ScrollMode.AUTO)),
+            actions=[done], actions_alignment=ft.MainAxisAlignment.END,
+        )
+
+    def _open_models_dialog(self) -> None:
+        """Apre la finestra dei modelli locali (mai durante una lavorazione)."""
+        if self.busy:
+            return
+        self.page.open(self.models_dialog)
+
+    def _close_models_dialog(self) -> None:
+        """Chiude la finestra e riporta la scelta nella riga riepilogo."""
+        self.page.close(self.models_dialog)
+        self._refresh_local_models_summary()
+        self.page.update()
+
+    def _refresh_local_models_summary(self) -> None:
+        """Riscrive la riga riepilogo dei modelli locali (card 1)."""
+        self.models_summary.value = (f"{self.model_dd.value}  ·  {self.ollama_dd.value}"
+                                     f"  ·  {self.ollama_vision_dd.value}")
+
+    def _on_local_model_change(self) -> None:
+        """Cambiato un modello nella finestra: aggiorna subito il riepilogo."""
+        self._refresh_local_models_summary()
+        self.page.update()
+
     def _rebuild_model_options(self) -> None:
         """Rewrite the model dropdown descriptions in the current language.
 
@@ -1143,6 +1287,7 @@ class EchoScriptApp:
         gval = self.groq_model_dd.value
         self.groq_model_dd.options = [ft.dropdown.Option(k, self.t(tk)) for k, tk in _GROQ_MODELS]
         self.groq_model_dd.value = gval
+        self._rebuild_ollama_options()
 
     # --- Groq API key loader from a .txt file (TRANSCRIPTION) --------------
     def _key_loader(self) -> ft.Control:
@@ -1463,6 +1608,43 @@ class EchoScriptApp:
             self._toggle_row(ft.Icons.VISIBILITY, "opt_visual_name",
                              "opt_visual_desc", self.sw_visual),
         )
+
+    def _ollama_options(self, kind: str) -> list[ft.dropdown.Option]:
+        """Opzioni del dropdown Ollama ('text' o 'vision') nella lingua corrente.
+
+        Segna con ✓ i modelli già scaricati (quando noti, vedi _fetch_ollama_tags)
+        e aggiunge in testa l'eventuale modello forzato da .env se non è già nel
+        catalogo, così il valore selezionato esiste sempre tra le opzioni."""
+        catalog = _OLLAMA_TEXT_MODELS if kind == "text" else _OLLAMA_VISION_MODELS
+        current = tx.OLLAMA_MODEL if kind == "text" else tx.OLLAMA_VISION_MODEL
+        opts = []
+        for name, ram, desc_key in catalog:
+            mark = (" ✓" if self._ollama_installed is not None
+                    and tx._ollama_has_model(name, self._ollama_installed) else "")
+            opts.append(ft.dropdown.Option(
+                name, f"{name}{mark} — {ram} · {self.t(desc_key)}"))
+        if current not in [n for n, _r, _k in catalog]:
+            opts.insert(0, ft.dropdown.Option(current, f"{current} — .env"))
+        return opts
+
+    def _ollama_dropdown(self, kind: str) -> ft.Dropdown:
+        """Dropdown di scelta del modello Ollama, con lo stile degli altri."""
+        return ft.Dropdown(
+            value=tx.OLLAMA_MODEL if kind == "text" else tx.OLLAMA_VISION_MODEL,
+            options=self._ollama_options(kind),
+            on_change=lambda e: self._on_local_model_change(),
+            border_color=BORDER, focused_border_color=GREEN,
+            color=TEXT, label_style=ft.TextStyle(color=MUTED),
+            bgcolor=SURFACE2, filled=True, border_radius=10,
+        )
+
+    def _rebuild_ollama_options(self) -> None:
+        """Riscrive le opzioni dei dropdown Ollama (cambio lingua o ✓ arrivati),
+        preservando la selezione corrente."""
+        for dd, kind in ((self.ollama_dd, "text"), (self.ollama_vision_dd, "vision")):
+            val = dd.value
+            dd.options = self._ollama_options(kind)
+            dd.value = val
 
     def _step_source(self) -> ft.Control:
         """Step 2 card: choose the source (YouTube URL vs local file) + its inputs.
@@ -1992,6 +2174,11 @@ class EchoScriptApp:
         self._sync_fields()
         self._update_run_state()
         self.page.update()
+        # Scelto «Locale»: la selezione dei modelli (Whisper + Ollama) avviene
+        # in una finestra dedicata, aperta subito. Un nuovo click su «Locale»
+        # (o sulla riga riepilogo della card) la riapre.
+        if d["group"] == "backend" and self.backend == "local":
+            self._open_models_dialog()
 
     def _sync_select_visuals(self) -> None:
         """Repaint the four option cards so the selected one is highlighted."""
@@ -2516,6 +2703,9 @@ class EchoScriptApp:
             "backend": self.backend, "model": self.model_dd.value,
             # Modello di trascrizione Groq scelto (usato solo col backend Groq).
             "groq_model": self.groq_model_dd.value,
+            # Modelli Ollama scelti (usati solo dal backend locale).
+            "ollama_model": self.ollama_dd.value,
+            "ollama_vision_model": self.ollama_vision_dd.value,
             "api_key": self.loaded_api_key or "", "export": True,
             "source_kind": self.source,
             # Folder names follow the interface language (en -> English folders).
@@ -2583,6 +2773,8 @@ class EchoScriptApp:
         options = {
             "backend": self.backend, "model": self.model_dd.value,
             "groq_model": self.groq_model_dd.value,
+            "ollama_model": self.ollama_dd.value,
+            "ollama_vision_model": self.ollama_vision_dd.value,
             "api_key": self.loaded_api_key or "", "export": True,
             "source_kind": "youtube", "ui_lang": self.lang,
             "translate": self.sw_translate.value,
@@ -2790,6 +2982,9 @@ class EchoScriptApp:
 
         options = {
             "backend": "local", "model": self.model_dd.value or "small",
+            # Si prosegue in locale: valgono i modelli Ollama scelti nella card.
+            "ollama_model": self.ollama_dd.value,
+            "ollama_vision_model": self.ollama_vision_dd.value,
             "api_key": self.loaded_api_key or "", "export": True,
             "source_kind": self.source,
             # Folder names follow the interface language (en -> English folders).
@@ -2841,6 +3036,8 @@ class EchoScriptApp:
         return {
             "backend": self.backend, "model": self.model_dd.value,
             "groq_model": self.groq_model_dd.value,
+            "ollama_model": self.ollama_dd.value,
+            "ollama_vision_model": self.ollama_vision_dd.value,
             "api_key": self.loaded_api_key or "", "export": True,
             "source_kind": self.source, "ui_lang": self.lang,
             "translate": True, "summarize": True, "visual": False,

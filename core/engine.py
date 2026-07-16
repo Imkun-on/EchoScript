@@ -97,8 +97,22 @@ _ENGINE_LANG = "it"
 
 
 def _set_engine_lang(options: dict) -> None:
+    """Applica a inizio lavorazione le opzioni per-run: lingua dei messaggi e
+    modelli Ollama scelti dall'utente (GUI). Chiamata da OGNI punto d'ingresso
+    del motore, così gli override valgono per l'intera lavorazione."""
     global _ENGINE_LANG
     _ENGINE_LANG = options.get("ui_lang") or "it"
+    # Modelli Ollama (locale) scelti in GUI: diventano quelli attivi in
+    # transcriber per riassunto/traduzione e analisi visiva.
+    m = options.get("ollama_model")
+    if m:
+        tx.OLLAMA_MODEL = m
+        # La traduzione riusa il modello del riassunto, salvo .env esplicito.
+        if not os.environ.get("ECHOSCRIPT_OLLAMA_TRANSLATE_MODEL", "").strip():
+            tx.OLLAMA_TRANSLATE_MODEL = m
+    vm = options.get("ollama_vision_model")
+    if vm:
+        tx.OLLAMA_VISION_MODEL = vm
 
 
 def _L(key: str, **fmt) -> str:

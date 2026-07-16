@@ -252,6 +252,27 @@ VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
 GROQ_VISION_MODEL = _env_str("ECHOSCRIPT_GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
 # Modello vision su Ollama (locale). Scaricalo con: ollama pull llama3.2-vision
 OLLAMA_VISION_MODEL = _env_str("ECHOSCRIPT_OLLAMA_VISION_MODEL", "llama3.2-vision")
+
+# --- Modelli Ollama proposti nei pannelli di scelta (CLI e GUI) ---
+# Numero -> (nome modello, RAM indicativa richiesta, descrizione). Il pannello
+# segna quelli GIÀ scaricati (letti da /api/tags) e accetta anche un nome
+# digitato a mano; .env resta la via per forzare un modello qualunque.
+# TESTO = riassunto + traduzione in locale (backend locale, niente chiave Groq).
+OLLAMA_TEXT_MODELS = {
+    "1": ("qwen3:4b",    "~4 GB",  "leggero e moderno: ideale con 8 GB di RAM"),
+    "2": ("qwen2.5:7b",  "~6 GB",  "equilibrio qualità/peso (default)"),
+    "3": ("qwen3:8b",    "~7 GB",  "più accurato (12-16 GB di RAM)"),
+    "4": ("gemma3:12b",  "~10 GB", "ottimo multilingua (16 GB di RAM)"),
+    "5": ("gpt-oss:20b", "~16 GB", "qualità vicina al cloud (24 GB+ o GPU)"),
+}
+# VISION = analisi visiva dei fotogrammi in locale.
+OLLAMA_VISION_MODELS = {
+    "1": ("qwen2.5vl:3b",    "~4 GB",  "leggero, ottimo OCR: ideale con 8 GB di RAM"),
+    "2": ("gemma3:4b",       "~4 GB",  "multimodale leggero, buon multilingua"),
+    "3": ("qwen2.5vl:7b",    "~7 GB",  "buon equilibrio (12-16 GB di RAM)"),
+    "4": ("llama3.2-vision", "~9 GB",  "default storico (16 GB di RAM)"),
+    "5": ("qwen2.5vl:32b",   "~24 GB", "qualità vicina al cloud (32 GB+ o GPU)"),
+}
 # Soglia di "cambio scena" (0..1) per scegliere i fotogrammi: più è bassa, più
 # fotogrammi (e più analisi/costo). 0.4 cattura bene i cambi di slide/codice.
 VISION_SCENE_THRESHOLD = float(_env_str("ECHOSCRIPT_VISION_SCENE", "0.4"))
@@ -1076,6 +1097,63 @@ def choose_groq_model() -> str | None:
         if choice in rows:
             return rows[choice][0]
         console.print("[warning]Scelta non valida, riprova.[/warning]")
+
+
+def choose_ollama_model(kind: str) -> str | None:
+    """Pannello per scegliere il modello OLLAMA (locale): 'text' per il
+    riassunto/traduzione, 'vision' per l'analisi visiva dei fotogrammi.
+
+    Mostra i modelli consigliati con la RAM indicativa richiesta e segna con ✓
+    quelli GIÀ scaricati in Ollama (letti da /api/tags; nessun segno se Ollama
+    è spento). Si può anche digitare un nome qualunque (es. mistral:7b).
+    Invio = modello attuale (da .env o default). None se si annulla."""
+    is_text = kind == "text"
+    catalog = OLLAMA_TEXT_MODELS if is_text else OLLAMA_VISION_MODELS
+    current = OLLAMA_MODEL if is_text else OLLAMA_VISION_MODEL
+    installed = _ollama_installed_models()
+
+    table = Table(show_header=True, box=None, expand=False, padding=(0, 2),
+                  header_style="bold dim")
+    table.add_column("#", style="bold bright_white", justify="center")
+    table.add_column("Modello", style="bold bright_green", no_wrap=True)
+    table.add_column("RAM", style="info", no_wrap=True)
+    table.add_column("Note", style="info")
+    for key, (name, ram, desc) in catalog.items():
+        marks = ""
+        if name == current:
+            marks += "  [bold bright_yellow]★ attuale[/bold bright_yellow]"
+        if installed is not None:
+            marks += ("  [bold bright_green]✓ scaricato[/bold bright_green]"
+                      if _ollama_has_model(name, installed)
+                      else "  [dim]↓ da scaricare[/dim]")
+        table.add_row(key, f"{name}{marks}", ram, desc)
+
+    what = ("riassunto e traduzione" if is_text else "analisi visiva")
+    console.print()
+    console.print(Panel(
+        table,
+        title=f"[title]🦙 Quale modello Ollama per {what}?[/title]", title_align="left",
+        subtitle="[dim]si può anche digitare un altro nome (es. mistral:7b) · "
+                 f"invio = {current}[/dim]",
+        border_style="bright_green", box=ROUNDED, expand=False, padding=(1, 2),
+    ))
+    if installed is None:
+        console.print("  [dim]⚠ Ollama non raggiungibile ora: non so quali modelli "
+                      "siano già scaricati (l'app lo verificherà al momento dell'uso).[/dim]")
+
+    while True:
+        choice = console.input(
+            "\n[bold bright_green]›[/bold bright_green] [bold]Modello[/bold] "
+            f"[dim](1-{len(catalog)} · nome · invio = attuale · q = annulla)[/dim]: ").strip()
+        if choice.lower() == "q":
+            return None
+        if choice == "":
+            return current
+        name = catalog[choice][0] if choice in catalog else choice
+        if installed is not None and not _ollama_has_model(name, installed):
+            console.print(f"  [warning]⚠ '{name}' non è ancora scaricato: prima che "
+                          f"serva, esegui  [bold]ollama pull {name}[/bold][/warning]")
+        return name
 
 
 # Actions offered when a video is ALREADY transcribed (numbered panel below).
@@ -3052,20 +3130,38 @@ def _vision_ollama(b64: str, context: str = "") -> str:
     return _strip_think(data.get("message", {}).get("content") or "")
 
 
-def _check_ollama_vision() -> None:
-    """Verifica Ollama + presenza di un modello vision; spiega come rimediare."""
+def _ollama_installed_models(timeout: float = 3) -> set[str] | None:
+    """Nomi dei modelli GIÀ scaricati in Ollama (da /api/tags).
+
+    None se Ollama non è raggiungibile (spento/non installato): chi chiama può
+    così distinguere «nessun modello» da «nessuna informazione»."""
     import urllib.request
     try:
-        with urllib.request.urlopen(OLLAMA_HOST + "/api/tags", timeout=5) as r:
+        with urllib.request.urlopen(OLLAMA_HOST + "/api/tags", timeout=timeout) as r:
             tags = json.loads(r.read().decode("utf-8"))
+        return {m.get("name", "") for m in tags.get("models", [])}
     except Exception:
+        return None
+
+
+def _ollama_has_model(name: str, installed: set[str]) -> bool:
+    """True se 'name' risulta scaricato. Con il tag esplicito (qwen2.5vl:3b) il
+    confronto è esatto; senza tag (llama3.2-vision) basta lo stesso nome base
+    (llama3.2-vision:latest conta)."""
+    if ":" in name:
+        return name in installed or name + ":latest" in installed
+    return any(n.split(":")[0] == name for n in installed)
+
+
+def _check_ollama_vision() -> None:
+    """Verifica Ollama + presenza di un modello vision; spiega come rimediare."""
+    installed = _ollama_installed_models(timeout=5)
+    if installed is None:
         raise RuntimeError(
             f"Ollama non raggiungibile su {OLLAMA_HOST}. Per l'analisi visiva in "
             "locale installa Ollama (https://ollama.com), avvialo e scarica un "
             f"modello vision, es:  ollama pull {OLLAMA_VISION_MODEL}")
-    names = [m.get("name", "") for m in tags.get("models", [])]
-    base = OLLAMA_VISION_MODEL.split(":")[0]
-    if not any(n.split(":")[0] == base for n in names):
+    if not _ollama_has_model(OLLAMA_VISION_MODEL, installed):
         raise RuntimeError(
             f"Modello vision '{OLLAMA_VISION_MODEL}' non presente in Ollama. "
             f"Scaricalo con:  ollama pull {OLLAMA_VISION_MODEL}")
@@ -4650,6 +4746,16 @@ def run() -> None:
         local_model = choose_local_model()
         if not local_model:
             return
+        # Backend locale ⇒ traduzione e riassunto girano su Ollama: si sceglie
+        # qui anche quel modello (invio = attuale), come per il modello Whisper.
+        om = choose_ollama_model("text")
+        if not om:
+            return
+        global OLLAMA_MODEL, OLLAMA_TRANSLATE_MODEL
+        OLLAMA_MODEL = om
+        # La traduzione riusa il modello del riassunto, salvo .env esplicito.
+        if not _env_str("ECHOSCRIPT_OLLAMA_TRANSLATE_MODEL", ""):
+            OLLAMA_TRANSLATE_MODEL = om
     else:  # groq: scelta del modello di trascrizione cloud (costo associato)
         gm = choose_groq_model()
         if not gm:
@@ -4757,8 +4863,18 @@ def run() -> None:
         console.print("  [dim]Oltre all'audio, EchoScript può «guardare» i fotogrammi ed estrarre ciò che è[/dim]")
         console.print("  [dim]scritto a schermo — codice, formule, grafici, diagrammi — per includerlo nel[/dim]")
         console.print("  [dim]riassunto. È più lento e, con Groq, consuma crediti per ogni fotogramma.[/dim]")
-        v_eng = "Groq cloud" if backend == "groq" else f"Ollama locale ({OLLAMA_VISION_MODEL})"
+        v_eng = "Groq cloud" if backend == "groq" else "Ollama locale"
         want_visual = _confirm(f"Attivo l'analisi visiva? (motore: {v_eng})", accent="bright_yellow")
+        # In locale la vision passa da Ollama: si sceglie qui il modello.
+        # Annullare il pannello disattiva SOLO l'analisi visiva, non la run.
+        if want_visual and backend != "groq":
+            vm = choose_ollama_model("vision")
+            if not vm:
+                want_visual = False
+                console.print("  [dim]Analisi visiva disattivata.[/dim]")
+            else:
+                global OLLAMA_VISION_MODEL
+                OLLAMA_VISION_MODEL = vm
 
     # We initialize the Groq client only if it is really needed (cloud backend),
     # and only after the user's confirmation.
