@@ -42,6 +42,18 @@ class EngineError(Exception):
     the app's interface)."""
 
 
+def _shared(fn, *args, **kwargs):
+    """Chiama una funzione media condivisa di transcriber.py traducendone l'errore.
+
+    Le funzioni core stanno in transcriber.py (che il motore importa già) e
+    segnalano i guasti con tx.MediaError. La GUI però cattura EngineError: qui
+    la riavvolgiamo, così il contratto verso l'alto non cambia."""
+    try:
+        return fn(*args, **kwargs)
+    except tx.MediaError as e:
+        raise EngineError(str(e)) from e
+
+
 class RateLimitReached(EngineError):
     """Trascrizione Groq interrotta dal limite (429 / token-al-giorno).
 
@@ -121,98 +133,20 @@ def _L(key: str, **fmt) -> str:
 
 
 # === VIDEO METADATA ===
+# get_video_info / get_playlist_info vivono in transcriber.py (funzioni core,
+# senza interfaccia) e sono usate identiche da CLI e GUI: qui restano solo i
+# ponti che traducono tx.MediaError in EngineError.
 
 def get_video_info(url: str) -> dict:
-    """Fetch ONLY the video metadata (no download). Raises EngineError on failure.
-
-    Returns the same clean dict shape used across EchoScript (title, channel,
-    views, upload_date, duration, chapters, webpage_url)."""
-    ydl_opts = {"quiet": True, "no_warnings": True, "skip_download": True}
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-    except Exception as e:
-        raise EngineError(f"Impossibile leggere il video: {e}")
-
-    if info.get("_type") == "playlist" and info.get("entries"):
-        info = info["entries"][0]
-
-    categories = info.get("categories") or []
-    return {
-        "id": info.get("id", ""),
-        "title": info.get("title", "Senza titolo"),
-        "channel": info.get("channel") or info.get("uploader") or "?",
-        "views": info.get("view_count"),
-        "upload_date": info.get("upload_date"),
-        "duration": info.get("duration"),
-        "chapters": info.get("chapters") or [],
-        "webpage_url": info.get("webpage_url", url),
-        "thumbnail": _best_thumbnail(info),
-        # Metadati extra mostrati nella GUI (possono mancare: restano None).
-        "likes": info.get("like_count"),
-        "subscribers": info.get("channel_follower_count"),
-        "category": categories[0] if categories else None,
-        # Lingua dichiarata da YouTube (best effort: spesso assente). La lingua
-        # "vera" dall'audio viene poi rilevata da Whisper durante la trascrizione.
-        "language": info.get("language"),
-    }
+    """Metadati del video (senza scaricarlo). Raises EngineError on failure."""
+    return _shared(tx.get_video_info, url)
 
 
 def get_playlist_info(url: str) -> dict | None:
-    """Se l'URL è una PLAYLIST YouTube, ne legge nome/canale + elenco dei video.
+    """Nome/canale + elenco video se l'URL e' una playlist, altrimenti None.
 
-    Usa yt-dlp in modalità "flat" (extract_flat="in_playlist"): NON risolve i
-    metadati di ogni singolo video, legge solo l'elenco — quindi è veloce anche
-    con playlist lunghe. Restituisce None se l'URL NON è una playlist (video
-    singolo); solleva EngineError su errore di rete/lettura. La chiave 'entries'
-    è la lista degli URL dei video nell'ordine della playlist; 'title' (con
-    fallback al canale) diventa il nome della sottocartella in results/."""
-    ydl_opts = {"quiet": True, "no_warnings": True, "skip_download": True,
-                "extract_flat": "in_playlist"}
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-    except Exception as e:
-        raise EngineError(f"Impossibile leggere la playlist: {e}")
-
-    if not info or info.get("_type") != "playlist":
-        return None  # non è una playlist: si prosegue come video singolo
-
-    entries: list[str] = []
-    for e in (info.get("entries") or []):
-        if not e:
-            continue
-        vid = e.get("id")
-        vurl = e.get("url") or e.get("webpage_url")
-        if vid:
-            entries.append(f"https://www.youtube.com/watch?v={vid}")
-        elif vurl:
-            entries.append(vurl)
-    if not entries:
-        return None
-
-    channel = info.get("channel") or info.get("uploader")
-    return {
-        "title": info.get("title") or channel,
-        "channel": channel,
-        "count": len(entries),
-        "entries": entries,
-    }
-
-
-def _best_thumbnail(info: dict) -> str | None:
-    """Pick the best still image (cover) for a video.
-
-    Prefers the single 'thumbnail' yt-dlp already resolves; otherwise takes the
-    highest-resolution entry from the 'thumbnails' list. Returns None if absent."""
-    if info.get("thumbnail"):
-        return info["thumbnail"]
-    thumbs = info.get("thumbnails") or []
-    if not thumbs:
-        return None
-    best = max(thumbs, key=lambda t: (t.get("width") or 0) * (t.get("height") or 0))
-    return best.get("url")
-
+    Raises EngineError su errore di rete/lettura."""
+    return _shared(tx.get_playlist_info, url)
 
 # === GROQ CLIENT ===
 
@@ -447,108 +381,31 @@ def get_cached_credits() -> list[dict]:
     return out
 
 
-# === AUDIO DOWNLOAD ===
+# === AUDIO/VIDEO DOWNLOAD ===
+# Anche questi sono ponti: la logica yt-dlp sta in transcriber.py. Passiamo la
+# lingua del motore cosi' i testi di avanzamento arrivano gia' tradotti.
 
 def download_audio(url: str, workdir: str, on_progress=_noop) -> str:
-    """Download only the audio track into 'workdir', reporting progress.
-
-    Returns the path to the downloaded audio file. Raises EngineError on failure."""
-    out_template = os.path.join(workdir, "audio.%(ext)s")
-
-    def hook(d: dict) -> None:
-        if d["status"] == "downloading":
-            total = d.get("total_bytes") or d.get("total_bytes_estimate")
-            done = d.get("downloaded_bytes", 0)
-            on_progress("download", done, total, _L("dl_audio"))
-        elif d["status"] == "finished":
-            on_progress("download", None, None, _L("extract_audio"))
-
-    def pp_hook(d: dict) -> None:
-        if d.get("status") == "started":
-            on_progress("download", None, None, _L("convert_audio"))
-
-    ydl_opts = {
-        "format": "bestaudio/best",
-        "outtmpl": out_template,
-        "quiet": True,
-        "no_warnings": True,
-        "noprogress": True,
-        "progress_hooks": [hook],
-        "postprocessor_hooks": [pp_hook],
-        "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}],
-    }
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-    except Exception as e:
-        raise EngineError(f"Errore nel download audio: {e}")
-
-    for fname in os.listdir(workdir):
-        if fname.startswith("audio."):
-            return os.path.join(workdir, fname)
-    raise EngineError("File audio non trovato dopo il download.")
+    """Scarica la sola traccia audio in 'workdir'. Raises EngineError on failure."""
+    return _shared(tx.download_audio, url, workdir, on_progress, lang=_ENGINE_LANG)
 
 
 def download_video(url: str, workdir: str, on_progress=_noop) -> str:
-    """Scarica il VIDEO (a risoluzione contenuta) per l'analisi visiva.
+    """Scarica il VIDEO (risoluzione contenuta) per l'analisi visiva.
 
-    A differenza di download_audio, qui serve l'immagine: da questo unico file si
-    estraggono SIA i fotogrammi SIA l'audio per la trascrizione. Restituisce il
-    percorso del video. Raises EngineError on failure."""
-    out_template = os.path.join(workdir, "video.%(ext)s")
-
-    def hook(d: dict) -> None:
-        if d["status"] == "downloading":
-            total = d.get("total_bytes") or d.get("total_bytes_estimate")
-            done = d.get("downloaded_bytes", 0)
-            on_progress("download", done, total, _L("dl_video"))
-        elif d["status"] == "finished":
-            on_progress("download", None, None, _L("prep_video"))
-
-    h = tx.VISION_YT_MAX_HEIGHT
-    ydl_opts = {
-        "format": f"bestvideo[height<={h}]+bestaudio/best[height<={h}]/best",
-        "merge_output_format": "mp4",
-        "outtmpl": out_template,
-        "quiet": True,
-        "no_warnings": True,
-        "noprogress": True,
-        "progress_hooks": [hook],
-    }
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-    except Exception as e:
-        raise EngineError(f"Errore nel download video: {e}")
-
-    for fname in os.listdir(workdir):
-        if fname.startswith("video."):
-            return os.path.join(workdir, fname)
-    raise EngineError("File video non trovato dopo il download.")
+    Da questo unico file si estraggono SIA i fotogrammi SIA l'audio per la
+    trascrizione. Raises EngineError on failure."""
+    return _shared(tx.download_video, url, workdir, on_progress, lang=_ENGINE_LANG)
 
 
 # === AUDIO SPLITTING (Groq only) ===
 
 def split_audio(audio_path: str, duration: float, workdir: str, on_progress=_noop) -> list[tuple[float, str]]:
-    """Split the audio into ~CHUNK_SECONDS chunks (16 kHz mono), reporting progress.
+    """Divide l'audio in blocchi da ~CHUNK_SECONDS (16 kHz mono).
 
     Returns a list of (offset_seconds, chunk_path) pairs."""
-    chunks: list[tuple[float, str]] = []
-    n_chunks = max(1, int((duration + tx.CHUNK_SECONDS - 1) // tx.CHUNK_SECONDS)) if duration else 1
-    start = 0.0
-    idx = 0
-    while start < duration:
-        out_path = os.path.join(workdir, f"chunk_{idx:03d}.mp3")
-        cmd = ["ffmpeg", "-y", "-ss", str(start), "-t", str(tx.CHUNK_SECONDS),
-               "-i", audio_path, "-ac", "1", "-ar", str(tx.AUDIO_SAMPLE_RATE),
-               "-b:a", tx.AUDIO_BITRATE, out_path]
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-        chunks.append((start, out_path))
-        start += tx.CHUNK_SECONDS
-        idx += 1
-        on_progress("prepare", idx, n_chunks, _L("chunk_prep", i=idx, n=n_chunks))
-    return chunks
-
+    return _shared(tx.split_audio, audio_path, duration, workdir, on_progress,
+                   lang=_ENGINE_LANG)
 
 # === TRANSCRIPTION ===
 
@@ -604,73 +461,15 @@ def transcribe_groq(client, chunks: list[tuple[float, str]], on_progress=_noop,
 def transcribe_local(model_name: str, audio_path: str, duration: float, on_progress=_noop,
                      language=None, meta: dict | None = None,
                      resume_cp: dict | None = None, workdir: str | None = None):
-    """Transcribe the whole file locally with faster-whisper, reporting progress.
+    """Trascrive tutto il file in locale con faster-whisper, riportando l'avanzamento.
 
-    Picks GPU (CUDA) automatically when available, else CPU (see tx._resolve_device),
-    and asks for per-word timestamps when WORD_TIMESTAMPS is on. 'language' forces
-    the audio language (None = auto-detect).
-
-    RESUME: if 'meta' is given, the partial result is checkpointed every
-    LOCAL_CHECKPOINT_EVERY seconds of audio (so a crash/close mid-run can resume).
-    If 'resume_cp' matches (and 'workdir' is available), the audio is trimmed from
-    the saved point and only the remainder is transcribed, with timestamps shifted
-    back. Returns (segments, detected_language). Raises EngineError on load failure."""
-    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
-    try:
-        from faster_whisper import WhisperModel
-    except ImportError:
-        raise EngineError("faster-whisper non installato. Esegui: pip install faster-whisper")
-
-    device, compute_type = tx._resolve_device()
-    dev_note = "GPU (CUDA)" if device == "cuda" else "CPU"
-
-    # Resume point (if a matching checkpoint is passed): trim and reuse prior segs.
-    start_offset, out, detected = tx._local_resume_point(model_name, duration, resume_cp)
-    transcribe_path = audio_path
-    if start_offset > 0 and workdir:
-        try:
-            transcribe_path = tx._trim_audio(audio_path, start_offset, workdir)
-        except Exception:
-            start_offset, out, detected = 0.0, [], None
-    elif start_offset > 0:
-        start_offset, out, detected = 0.0, [], None  # cannot trim without a workdir
-
-    note = (_L("resume_from", ts=tx._format_timestamp(start_offset)) if start_offset > 0 else "")
-    on_progress("transcribe", None, None,
-                _L("model_load", model=model_name, dev=dev_note, note=note))
-    try:
-        model = WhisperModel(model_name, device=device, compute_type=compute_type)
-        segments_gen, info = model.transcribe(
-            transcribe_path, language=language, vad_filter=True, beam_size=5,
-            word_timestamps=tx.WORD_TIMESTAMPS,
-        )
-    except Exception as e:
-        raise EngineError(f"Errore nella trascrizione locale: {e}")
-
-    detected = detected or getattr(info, "language", None)
-    last_saved = start_offset
-    for seg in segments_gen:
-        abs_start, abs_end = float(seg.start) + start_offset, float(seg.end) + start_offset
-        entry = {"start": abs_start, "end": abs_end, "text": seg.text.strip()}
-        seg_words = getattr(seg, "words", None) or []
-        if seg_words:
-            entry["words"] = [
-                {"word": w.word, "start": float(w.start) + start_offset,
-                 "end": float(w.end) + start_offset}
-                for w in seg_words if w.start is not None and w.end is not None
-            ]
-        out.append(entry)
-        if duration:
-            on_progress("transcribe", min(abs_end, duration), duration, _L("transcribing"))
-        if meta and (abs_end - last_saved) >= tx.LOCAL_CHECKPOINT_EVERY:
-            tx.save_local_checkpoint(meta, out, abs_end, model_name, duration, detected)
-            last_saved = abs_end
-    if duration:
-        on_progress("transcribe", duration, duration, _L("transcribed"))
-    if meta:
-        tx.delete_local_checkpoint(meta)  # completed fully -> no partial to keep
-    return out, detected
-
+    Ponte verso tx.transcribe_local: sceglie da se' GPU (CUDA) o CPU, chiede i
+    timestamp per parola quando WORD_TIMESTAMPS e' attivo e gestisce il
+    checkpoint di ripresa. 'language' forza la lingua audio (None = autorileva).
+    Returns (segments, detected_language). Raises EngineError on failure."""
+    return _shared(tx.transcribe_local, model_name, audio_path, duration, on_progress,
+                   language=language, meta=meta, resume_cp=resume_cp,
+                   workdir=workdir, lang=_ENGINE_LANG)
 
 # === FILE HELPERS ===
 

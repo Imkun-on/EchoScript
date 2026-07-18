@@ -450,6 +450,31 @@ def _lp(path: str) -> str:
 
 # === RATE LIMIT + CHECKPOINT (ripresa dei video lunghi su Groq) =============
 
+class MediaError(Exception):
+    """Errore nelle funzioni media condivise (download, split, trascrizione locale).
+
+    Le funzioni "core" di questo modulo sono SENZA interfaccia: non stampano e
+    non decidono cosa mostrare, segnalano il guasto sollevando questa eccezione.
+    Chi chiama la traduce nella propria UI: la CLI la cattura nei wrapper
+    `_cli_*` (stampa in rosso e restituisce None), il motore la riavvolge in
+    `EngineError` per la GUI."""
+
+
+def _noop_progress(phase, current, total, detail=""):  # pragma: no cover - trivial
+    """Callback di avanzamento di default: non fa nulla.
+
+    Permette alle funzioni core di chiamare sempre `on_progress(...)` senza
+    controllare ogni volta se qualcuno sta ascoltando."""
+
+
+def _never_stop() -> bool:  # pragma: no cover - trivial
+    """Callback di annullamento di default: non si ferma mai.
+
+    La CLI passa una funzione che legge il flag `_interrupted` (Ctrl+C); la GUI
+    ha un suo meccanismo e lascia il default."""
+    return False
+
+
 class GroqRateLimit(Exception):
     """Sollevata quando Groq rifiuta per limite (429 / token-al-giorno).
 
@@ -1452,13 +1477,28 @@ def _confirm(label: str, accent: str = "bright_blue") -> bool:
 
 # === PHASE 0: VIDEO METADATA ===
 
-def get_video_info(url: str) -> dict | None:
+def _best_thumbnail(info: dict) -> str | None:
+    """Pick the best still image (cover) for a video.
+
+    Prefers the single 'thumbnail' yt-dlp already resolves; otherwise takes the
+    highest-resolution entry from the 'thumbnails' list. Returns None if absent."""
+    if info.get("thumbnail"):
+        return info["thumbnail"]
+    thumbs = info.get("thumbnails") or []
+    if not thumbs:
+        return None
+    best = max(thumbs, key=lambda t: (t.get("width") or 0) * (t.get("height") or 0))
+    return best.get("url")
+
+
+def get_video_info(url: str) -> dict:
     """Download ONLY the video metadata (without downloading the audio).
 
     Uses yt-dlp with download=False: a lightweight call that returns a large
     dictionary of information. We extract the fields we need and pack them into
-    our own, cleaner dictionary. In case of an error (invalid URL, private
-    video, network...) it returns None."""
+    our own, cleaner dictionary. Solleva MediaError su errore (URL non valido,
+    video privato, rete...). Versione SENZA interfaccia, condivisa da CLI e GUI:
+    per la CLI c'è il wrapper `_cli_get_video_info`."""
     ydl_opts = {
         "quiet": True,            # no yt-dlp output on screen (we handle it ourselves)
         "no_warnings": True,
@@ -1468,8 +1508,7 @@ def get_video_info(url: str) -> dict | None:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
     except Exception as e:
-        console.print(f"[error]Impossibile leggere il video: {e}[/error]")
-        return None
+        raise MediaError(f"Impossibile leggere il video: {e}")
 
     # Some URLs (playlists) return a list of 'entries': we take the first one.
     if info.get("_type") == "playlist" and info.get("entries"):
@@ -1477,6 +1516,8 @@ def get_video_info(url: str) -> dict | None:
 
     categories = info.get("categories") or []
     return {
+        # Copertina: la usa la GUI nella card di conferma (la CLI la ignora).
+        "thumbnail": _best_thumbnail(info),
         "id": info.get("id", ""),
         "title": info.get("title", "Senza titolo"),
         "channel": info.get("channel") or info.get("uploader") or "?",
@@ -1504,9 +1545,11 @@ def get_playlist_info(url: str) -> dict | None:
     Usa yt-dlp in modalità "flat" (extract_flat="in_playlist"): NON risolve i
     metadati di ogni singolo video, legge soltanto l'elenco — quindi è veloce
     anche con playlist lunghe. Restituisce None se l'URL non è una playlist
-    (video singolo) o in caso di errore. La chiave 'entries' è la lista degli URL
-    dei video nell'ordine della playlist; 'title' è il nome della playlist (con
-    fallback al canale) usato per la sottocartella in results/."""
+    (video singolo); solleva MediaError su errore di rete/lettura. La chiave
+    'entries' è la lista degli URL dei video nell'ordine della playlist; 'title'
+    è il nome della playlist (con fallback al canale) usato per la sottocartella
+    in results/. Versione senza interfaccia: wrapper CLI in
+    `_cli_get_playlist_info`."""
     ydl_opts = {
         "quiet": True,
         "no_warnings": True,
@@ -1517,8 +1560,7 @@ def get_playlist_info(url: str) -> dict | None:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
     except Exception as e:
-        console.print(f"[error]Impossibile leggere la playlist: {e}[/error]")
-        return None
+        raise MediaError(f"Impossibile leggere la playlist: {e}")
 
     if not info or info.get("_type") != "playlist":
         return None  # non è una playlist: si prosegue come video singolo
@@ -1543,6 +1585,28 @@ def get_playlist_info(url: str) -> dict | None:
         "count": len(entries),
         "entries": entries,
     }
+
+
+# --- Wrapper CLI dei metadati ------------------------------------------------
+# Le funzioni core qui sopra sollevano MediaError; la CLI preferisce lavorare
+# con None ("non è andata, vai avanti") e stampare l'errore in rosso.
+
+def _cli_get_video_info(url: str) -> dict | None:
+    """get_video_info per la CLI: stampa l'errore e restituisce None."""
+    try:
+        return get_video_info(url)
+    except MediaError as e:
+        console.print(f"[error]{e}[/error]")
+        return None
+
+
+def _cli_get_playlist_info(url: str) -> dict | None:
+    """get_playlist_info per la CLI: stampa l'errore e restituisce None."""
+    try:
+        return get_playlist_info(url)
+    except MediaError as e:
+        console.print(f"[error]{e}[/error]")
+        return None
 
 
 def _is_local(meta: dict) -> bool:
@@ -1750,17 +1814,76 @@ def display_video_info(meta: dict) -> None:
 
 # === PHASE 1: AUDIO DOWNLOAD ===
 
-def download_audio(url: str, workdir: str) -> str | None:
+def download_audio(url: str, workdir: str, on_progress=_noop_progress,
+                   should_stop=_never_stop, lang: str = "it") -> str:
     """Download ONLY the video's audio into the temporary folder `workdir`.
 
-    Shows a progress bar with percentage, speed and estimated time, updated by
-    the yt-dlp hook (a function that yt-dlp calls continuously during the
-    download). Returns the path of the downloaded audio file, or None if
-    something goes wrong."""
+    Versione SENZA interfaccia, condivisa da CLI e GUI: l'avanzamento esce da
+    `on_progress(phase, current, total, detail)` invece di essere disegnato qui,
+    così chi chiama decide se mostrarlo con una barra rich, in una GUI o per
+    niente. `should_stop()` viene interrogata a ogni tick per poter annullare
+    (la CLI la aggancia a Ctrl+C). Restituisce il percorso del file audio;
+    solleva MediaError se qualcosa va storto. Wrapper CLI: `_cli_download_audio`."""
     out_template = os.path.join(workdir, "audio.%(ext)s")  # %(ext)s = the actual extension chosen by yt-dlp
 
-    # A bar with: spinner, description, bar, percentage, downloaded bytes, speed,
-    # and estimated remaining time at the end.
+    def _hook(d: dict) -> None:
+        """Callback called by yt-dlp with the download status."""
+        if should_stop():
+            # Raising an exception here interrupts the yt-dlp download.
+            raise KeyboardInterrupt
+        if d["status"] == "downloading":
+            total = d.get("total_bytes") or d.get("total_bytes_estimate")
+            done = d.get("downloaded_bytes", 0)
+            on_progress("download", done, total, msg("dl_audio", lang))
+        elif d["status"] == "finished":
+            # Download finished: but yt-dlp now EXTRACTS the audio with ffmpeg (a
+            # few seconds, without a percentage). We signal it so it does not look stuck.
+            on_progress("download", None, None, msg("extract_audio", lang))
+
+    def _pp_hook(d: dict) -> None:
+        """Post-processor callback (the audio conversion after the download).
+
+        It serves to NOT leave the screen frozen during the audio extraction: we
+        report it so the user sees that the work continues."""
+        if d.get("status") == "started":
+            on_progress("download", None, None, msg("convert_audio", lang))
+
+    ydl_opts = {
+        "format": "bestaudio/best",   # the best audio-only track available
+        "outtmpl": out_template,
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,           # suppress yt-dlp's internal bar (we draw our own)
+        "progress_hooks": [_hook],
+        "postprocessor_hooks": [_pp_hook],  # to show the progress of the conversion
+        # Extracts/normalizes the audio into m4a via ffmpeg (already present on the system).
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "m4a",
+        }],
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+    except Exception as e:
+        raise MediaError(f"Errore nel download audio: {e}")
+
+    # The postprocessor produces a .m4a: we look for it in the working folder.
+    for fname in os.listdir(workdir):
+        if fname.startswith("audio."):
+            return os.path.join(workdir, fname)
+    raise MediaError("File audio non trovato dopo il download.")
+
+
+def _download_progress(description: str):
+    """Barra rich per i download: spinner, %, byte, velocità e tempo stimato.
+
+    Restituisce (progress, task_id, on_progress): `on_progress` è la callback da
+    passare alle funzioni core, che traduce i loro tick in aggiornamenti della
+    barra. Il testo `detail` che arriva dal core diventa la descrizione, così la
+    dicitura ("Estraggo audio", "Converto audio in m4a"…) resta una sola, presa
+    dal catalogo dei messaggi."""
     progress = Progress(
         SpinnerColumn("dots", style="bright_blue"),
         TextColumn("[phase]{task.description}"),
@@ -1772,71 +1895,39 @@ def download_audio(url: str, workdir: str) -> str | None:
         TimeRemainingColumn(),
         console=console, expand=False,
     )
-    task_id = progress.add_task("Scarico audio", total=None)  # total=None: unknown until yt-dlp reports it
+    task_id = progress.add_task(description, total=None)  # total=None: unknown until yt-dlp reports it
 
-    def _hook(d: dict) -> None:
-        """Callback called by yt-dlp with the download status."""
-        if _interrupted:
-            # Raising an exception here interrupts the yt-dlp download.
-            raise KeyboardInterrupt
-        if d["status"] == "downloading":
-            total = d.get("total_bytes") or d.get("total_bytes_estimate")
-            done = d.get("downloaded_bytes", 0)
-            if total:
-                progress.update(task_id, completed=done, total=total)
-            else:
-                progress.update(task_id, completed=done)
-        elif d["status"] == "finished":
-            # Download finished: but yt-dlp now EXTRACTS the audio with ffmpeg (a
-            # few seconds, without a percentage). We signal it so it does not look stuck.
-            progress.update(task_id, description="Estraggo audio (attendi)")
+    def on_progress(phase, current, total, detail="") -> None:
+        if current is None:
+            progress.update(task_id, description=detail or description)
+            return
+        if total:
+            progress.update(task_id, completed=current, total=total)
+        else:
+            progress.update(task_id, completed=current)
 
-    def _pp_hook(d: dict) -> None:
-        """Post-processor callback (the audio conversion after the download).
+    return progress, task_id, on_progress
 
-        It serves to NOT leave the screen frozen during the audio extraction: we
-        update the description so the user sees that the work continues."""
-        status = d.get("status")
-        if status == "started":
-            progress.update(task_id, description="Converto audio in m4a (attendi)")
-        elif status == "finished":
-            progress.update(task_id, description="Audio pronto")
 
-    ydl_opts = {
-        "format": "bestaudio/best",   # the best audio-only track available
-        "outtmpl": out_template,
-        "quiet": True,
-        "no_warnings": True,
-        "noprogress": True,           # suppress yt-dlp's internal bar (we use our rich one)
-        "progress_hooks": [_hook],
-        "postprocessor_hooks": [_pp_hook],  # to show the progress of the conversion
-        # Extracts/normalizes the audio into m4a via ffmpeg (already present on the system).
-        "postprocessors": [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "m4a",
-        }],
-    }
-
+def _cli_download_audio(url: str, workdir: str) -> str | None:
+    """download_audio per la CLI: barra rich, Ctrl+C e None su errore."""
+    progress, _task, on_progress = _download_progress("Scarico audio")
     try:
         with progress:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
+            return download_audio(url, workdir, on_progress,
+                                  should_stop=lambda: _interrupted)
     except KeyboardInterrupt:
         return None
-    except Exception as e:
-        console.print(f"[error]Errore nel download audio: {e}[/error]")
+    except MediaError as e:
+        console.print(f"[error]{e}[/error]")
         return None
-
-    # The postprocessor produces a .m4a: we look for it in the working folder.
-    for fname in os.listdir(workdir):
-        if fname.startswith("audio."):
-            return os.path.join(workdir, fname)
-    return None
 
 
 # === PHASE 2: PREPARATION / SPLITTING ===
 
-def split_audio(audio_path: str, duration: float, workdir: str) -> list[tuple[float, str]]:
+def split_audio(audio_path: str, duration: float, workdir: str,
+                on_progress=_noop_progress, should_stop=_never_stop,
+                lang: str = "it") -> list[tuple[float, str]]:
     """Split the audio into chunks of CHUNK_SECONDS, re-encoding them to 16 kHz mono.
 
     For each chunk it launches ffmpeg with:
@@ -1846,12 +1937,42 @@ def split_audio(audio_path: str, duration: float, workdir: str) -> list[tuple[fl
       -ar 16000       -> 16 kHz (format Whisper likes)
     Returns a list of pairs (offset_in_seconds, mp3_file_path).
     The offset is used later to correct each chunk's timestamps.
-    Shows a progress bar that grows as the chunks are created."""
+    Versione senza interfaccia: l'avanzamento esce da `on_progress` e
+    `should_stop()` permette di annullare a metà. Wrapper CLI:
+    `_cli_split_audio`."""
     chunks: list[tuple[float, str]] = []
     # Number of chunks computed in advance (rounded up) to give the bar a total.
     # max(1, ...) avoids 0 chunks on very short audio.
     n_chunks = max(1, int((duration + CHUNK_SECONDS - 1) // CHUNK_SECONDS)) if duration else 1
 
+    start = 0.0
+    idx = 0
+    while start < duration:
+        if should_stop():
+            break
+        out_path = os.path.join(workdir, f"chunk_{idx:03d}.mp3")
+        cmd = [
+            "ffmpeg", "-y",                 # -y = overwrite without asking
+            "-ss", str(start),              # start point
+            "-t", str(CHUNK_SECONDS),       # how many seconds to take
+            "-i", audio_path,               # input file
+            "-ac", "1",                     # mono
+            "-ar", str(AUDIO_SAMPLE_RATE),  # 16 kHz
+            "-b:a", AUDIO_BITRATE,          # audio bitrate
+            out_path,
+        ]
+        # stdout/stderr discarded: we only care that the file gets created.
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        chunks.append((start, out_path))
+        start += CHUNK_SECONDS
+        idx += 1
+        on_progress("prepare", idx, n_chunks, msg("chunk_prep", lang, i=idx, n=n_chunks))
+    return chunks
+
+
+def _cli_split_audio(audio_path: str, duration: float, workdir: str) -> list[tuple[float, str]]:
+    """split_audio per la CLI: barra rich che cresce a ogni blocco creato."""
+    n_chunks = max(1, int((duration + CHUNK_SECONDS - 1) // CHUNK_SECONDS)) if duration else 1
     progress = Progress(
         SpinnerColumn("dots", style="bright_blue"),
         TextColumn("[phase]{task.description}"),
@@ -1860,32 +1981,14 @@ def split_audio(audio_path: str, duration: float, workdir: str) -> list[tuple[fl
         MofNCompleteColumn(),
         console=console, expand=False,
     )
-
     with progress:
         task_id = progress.add_task("Creo i blocchi", total=n_chunks)
-        start = 0.0
-        idx = 0
-        while start < duration:
-            if _interrupted:
-                break
-            out_path = os.path.join(workdir, f"chunk_{idx:03d}.mp3")
-            cmd = [
-                "ffmpeg", "-y",                 # -y = overwrite without asking
-                "-ss", str(start),              # start point
-                "-t", str(CHUNK_SECONDS),       # how many seconds to take
-                "-i", audio_path,               # input file
-                "-ac", "1",                     # mono
-                "-ar", str(AUDIO_SAMPLE_RATE),  # 16 kHz
-                "-b:a", AUDIO_BITRATE,          # audio bitrate
-                out_path,
-            ]
-            # stdout/stderr discarded: we only care that the file gets created.
-            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-            chunks.append((start, out_path))
-            start += CHUNK_SECONDS
-            idx += 1
-            progress.advance(task_id)
-    return chunks
+
+        def on_progress(phase, current, total, detail="") -> None:
+            progress.update(task_id, completed=current or 0)
+
+        return split_audio(audio_path, duration, workdir, on_progress,
+                           should_stop=lambda: _interrupted)
 
 
 # === PHASE 3: TRANSCRIPTION WITH GROQ ===
@@ -2114,26 +2217,37 @@ def _resolve_device() -> tuple[str, str]:
 
 
 def transcribe_local(model_name: str, audio_path: str, duration: float,
-                     meta: dict | None = None, resume_cp: dict | None = None,
-                     workdir: str | None = None):
+                     on_progress=_noop_progress, should_stop=_never_stop,
+                     language=_USE_CONFIG, meta: dict | None = None,
+                     resume_cp: dict | None = None, workdir: str | None = None,
+                     lang: str = "it"):
     """Transcribe the entire audio LOCALLY with faster-whisper (no data over the network).
 
-    Returns (segments, detected_language).
+    Returns (segments, detected_language). Solleva MediaError se il modello non
+    si carica o la trascrizione fallisce.
 
     Unlike Groq, no splitting is needed: faster-whisper processes the whole file
-    and returns the segments incrementally (a generator), so we can update the
-    bar as we go. The bar uses the video's DURATION as the total and advances up
-    to the 'end' of the last processed segment.
+    and returns the segments incrementally (a generator), so progress can be
+    reported as we go: `on_progress` riceve il secondo di audio raggiunto sul
+    totale della durata.
+
+    'language' forza la lingua dell'audio; il default `_USE_CONFIG` significa
+    "usa LANGUAGE dalla configurazione" (None sarebbe ambiguo: vale già
+    "autorileva"). `should_stop()` interrompe il ciclo a fine segmento.
 
     RESUME: if 'meta' is given, the partial result is checkpointed every
     LOCAL_CHECKPOINT_EVERY seconds of audio. If a matching checkpoint exists (and
     'workdir' is available for the trimmed file), we trim the audio from the saved
     point with ffmpeg, transcribe only the remainder, and shift its timestamps
-    back, so an interrupted long run resumes instead of starting over.
+    back, so an interrupted long run resumes instead of starting over. Se il
+    ciclo viene fermato da `should_stop`, il parziale resta salvato per la
+    ripresa; se arriva in fondo, il checkpoint viene cancellato.
 
     PRIVACY: on the first use of a model, faster-whisper downloads its "weights"
     from HuggingFace (once only, then they stay cached). The AUDIO, however, is
-    never sent anywhere: the transcription happens on your PC."""
+    never sent anywhere: the transcription happens on your PC.
+
+    Versione senza interfaccia. Wrapper CLI: `_cli_transcribe_local`."""
     # Silence the HuggingFace warning about symlinks (irrelevant: the cache works
     # anyway). It must be set BEFORE importing faster-whisper.
     os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
@@ -2141,8 +2255,10 @@ def transcribe_local(model_name: str, audio_path: str, duration: float,
     try:
         from faster_whisper import WhisperModel
     except ImportError:
-        console.print("[error]faster-whisper non installato. Esegui:  pip install faster-whisper[/error]")
-        return [], None
+        raise MediaError("faster-whisper non installato. Esegui: pip install faster-whisper")
+
+    if language is _USE_CONFIG:
+        language = LANGUAGE
 
     # Device/precision: GPU (CUDA) when available, else CPU (see _resolve_device).
     device, compute_type = _resolve_device()
@@ -2158,35 +2274,76 @@ def transcribe_local(model_name: str, audio_path: str, duration: float,
         else:
             try:
                 transcribe_path = _trim_audio(audio_path, start_offset, workdir)
-                console.print(f"  [info]Ripresa dalla posizione {_format_timestamp(start_offset)} "
-                              f"({len(all_segments)} segmenti già fatti).[/info]")
             except Exception:
                 start_offset, all_segments, detected = 0.0, [], None  # trim failed: full re-run
 
-    # Loading the model (on first use it downloads the weights).
-    with console.status(
-        f"[info]Carico il modello '{model_name}' su {dev_note}... "
-        f"(al primo uso scarica i pesi da HuggingFace, una volta sola)[/info]",
-        spinner="dots",
-    ):
-        try:
-            model = WhisperModel(model_name, device=device, compute_type=compute_type)
-        except Exception as e:
-            console.print(f"[error]Impossibile caricare il modello: {e}[/error]")
-            return [], None
-
-    # transcribe() returns (segment_generator, info). The segments are produced
-    # as the audio is processed. vad_filter skips the silences; word_timestamps
-    # asks for per-word timings (so segments carry a 'words' list).
+    # Loading the model (on first use it downloads the weights) e avvio: il
+    # chiamante mostra l'attesa come preferisce (spinner CLI, stato nella GUI).
+    note = msg("resume_from", lang, ts=_format_timestamp(start_offset)) if start_offset > 0 else ""
+    on_progress("transcribe", None, None,
+                msg("model_load", lang, model=model_name, dev=dev_note, note=note))
     try:
+        model = WhisperModel(model_name, device=device, compute_type=compute_type)
+        # transcribe() returns (segment_generator, info). The segments are produced
+        # as the audio is processed. vad_filter skips the silences; word_timestamps
+        # asks for per-word timings (so segments carry a 'words' list).
         segments_gen, info = model.transcribe(
-            transcribe_path, language=LANGUAGE, vad_filter=True, beam_size=5,
+            transcribe_path, language=language, vad_filter=True, beam_size=5,
             word_timestamps=WORD_TIMESTAMPS,
         )
     except Exception as e:
-        console.print(f"[error]Errore durante la trascrizione locale: {e}[/error]")
-        return all_segments or [], detected
+        raise MediaError(f"Errore nella trascrizione locale: {e}")
     detected = detected or getattr(info, "language", None)
+
+    last_abs_end = start_offset   # highest audio time reached (absolute)
+    last_saved = start_offset     # audio time at the last checkpoint save
+    completed_fully = True
+    for seg in segments_gen:
+        if should_stop():
+            completed_fully = False
+            break
+        # Shift the tail's timestamps back to their absolute position.
+        abs_start, abs_end = float(seg.start) + start_offset, float(seg.end) + start_offset
+        entry = {"start": abs_start, "end": abs_end, "text": seg.text.strip()}
+        seg_words = getattr(seg, "words", None) or []
+        if seg_words:
+            entry["words"] = [
+                {"word": w.word, "start": float(w.start) + start_offset,
+                 "end": float(w.end) + start_offset}
+                for w in seg_words if w.start is not None and w.end is not None
+            ]
+        all_segments.append(entry)
+        last_abs_end = abs_end
+        if duration:
+            # min() avoids exceeding 100% if the last segment overruns the estimate.
+            on_progress("transcribe", min(abs_end, duration), duration, msg("transcribing", lang))
+        # Periodic checkpoint, so an interruption loses at most a couple of minutes.
+        if meta and (abs_end - last_saved) >= LOCAL_CHECKPOINT_EVERY:
+            save_local_checkpoint(meta, all_segments, abs_end, model_name, duration, detected)
+            last_saved = abs_end
+    if duration and completed_fully:
+        on_progress("transcribe", duration, duration, msg("transcribed", lang))
+
+    # Done -> drop the checkpoint; interrupted -> keep the latest partial to resume.
+    if meta:
+        if completed_fully:
+            delete_local_checkpoint(meta)
+        else:
+            save_local_checkpoint(meta, all_segments, last_abs_end, model_name, duration, detected)
+    return all_segments, detected
+
+
+def _cli_transcribe_local(model_name: str, audio_path: str, duration: float,
+                          meta: dict | None = None, resume_cp: dict | None = None,
+                          workdir: str | None = None):
+    """transcribe_local per la CLI: spinner di caricamento, barra sulla durata,
+    Ctrl+C e ([], None) invece dell'eccezione (la pipeline gestisce già il caso
+    "nessun segmento")."""
+    # Nota di ripresa: la stampiamo prima, come faceva la versione precedente.
+    start_offset, prior, _lang = _local_resume_point(model_name, duration, resume_cp)
+    if start_offset > 0 and workdir is not None:
+        console.print(f"  [info]Ripresa dalla posizione {_format_timestamp(start_offset)} "
+                      f"({len(prior)} segmenti già fatti).[/info]")
 
     progress = Progress(
         SpinnerColumn("dots", style="bright_green"),
@@ -2199,47 +2356,27 @@ def transcribe_local(model_name: str, audio_path: str, duration: float,
         TimeRemainingColumn(),
         console=console, expand=False,
     )
+    # total = the video's duration: the bar advances based on the reached timestamp.
+    task_id = progress.add_task("Trascrivo (locale)", total=duration or None,
+                                completed=min(start_offset, duration) if duration else None)
 
-    last_abs_end = start_offset   # highest audio time reached (absolute)
-    last_saved = start_offset     # audio time at the last checkpoint save
-    completed_fully = True
-    with progress:
-        # total = the video's duration: the bar advances based on the reached timestamp.
-        task_id = progress.add_task("Trascrivo (locale)", total=duration or None,
-                                    completed=min(start_offset, duration) if duration else None)
-        for seg in segments_gen:
-            if _interrupted:
-                completed_fully = False
-                break
-            # Shift the tail's timestamps back to their absolute position.
-            abs_start, abs_end = float(seg.start) + start_offset, float(seg.end) + start_offset
-            entry = {"start": abs_start, "end": abs_end, "text": seg.text.strip()}
-            seg_words = getattr(seg, "words", None) or []
-            if seg_words:
-                entry["words"] = [
-                    {"word": w.word, "start": float(w.start) + start_offset,
-                     "end": float(w.end) + start_offset}
-                    for w in seg_words if w.start is not None and w.end is not None
-                ]
-            all_segments.append(entry)
-            last_abs_end = abs_end
-            if duration:
-                # min() avoids exceeding 100% if the last segment overruns the estimate.
-                progress.update(task_id, completed=min(abs_end, duration))
-            # Periodic checkpoint, so an interruption loses at most a couple of minutes.
-            if meta and (abs_end - last_saved) >= LOCAL_CHECKPOINT_EVERY:
-                save_local_checkpoint(meta, all_segments, abs_end, model_name, duration, detected)
-                last_saved = abs_end
-        if duration and completed_fully:
-            progress.update(task_id, completed=duration)  # bring the bar to 100% when done
+    def on_progress(phase, current, total, detail="") -> None:
+        if current is None:
+            # Tick senza numeri = messaggio di stato (caricamento del modello):
+            # lo stampiamo sopra la barra, che resta ferma finché non parte.
+            if detail:
+                console.print(f"  [info]{detail}[/info]")
+            return
+        progress.update(task_id, completed=current)
 
-    # Done -> drop the checkpoint; interrupted -> keep the latest partial to resume.
-    if meta:
-        if completed_fully:
-            delete_local_checkpoint(meta)
-        else:
-            save_local_checkpoint(meta, all_segments, last_abs_end, model_name, duration, detected)
-    return all_segments, detected
+    try:
+        with progress:
+            return transcribe_local(model_name, audio_path, duration, on_progress,
+                                    should_stop=lambda: _interrupted, meta=meta,
+                                    resume_cp=resume_cp, workdir=workdir)
+    except MediaError as e:
+        console.print(f"[error]{e}[/error]")
+        return [], None
 
 
 # === BUILDING THE FINAL DOCUMENT ===
@@ -2794,35 +2931,26 @@ def _has_video_stream(path: str) -> bool:
         return False
 
 
-def download_video(url: str, workdir: str) -> str | None:
+def download_video(url: str, workdir: str, on_progress=_noop_progress,
+                   should_stop=_never_stop, lang: str = "it") -> str:
     """Scarica il VIDEO (capped a VISION_YT_MAX_HEIGHT) per l'analisi visiva.
 
     A differenza di download_audio (solo audio), qui serve l'immagine: scarichiamo
     un file muxed a risoluzione contenuta, da cui poi si estraggono SIA i
-    fotogrammi SIA l'audio per la trascrizione (un solo download). None su errore."""
+    fotogrammi SIA l'audio per la trascrizione (un solo download). Versione senza
+    interfaccia: restituisce il percorso del video e solleva MediaError su
+    errore. Wrapper CLI: `_cli_download_video`."""
     out_template = os.path.join(workdir, "video.%(ext)s")
-    progress = Progress(
-        SpinnerColumn("dots", style="bright_blue"),
-        TextColumn("[phase]{task.description}"),
-        BarColumn(bar_width=40, style="bar.back", complete_style="bright_blue", finished_style="bright_green"),
-        TaskProgressColumn(), DownloadColumn(), TransferSpeedColumn(),
-        TextColumn("[dim]→[/dim]"), TimeRemainingColumn(),
-        console=console, expand=False,
-    )
-    task_id = progress.add_task("Scarico video", total=None)
 
     def _hook(d: dict) -> None:
-        if _interrupted:
+        if should_stop():
             raise KeyboardInterrupt
         if d["status"] == "downloading":
             total = d.get("total_bytes") or d.get("total_bytes_estimate")
             done = d.get("downloaded_bytes", 0)
-            if total:
-                progress.update(task_id, completed=done, total=total)
-            else:
-                progress.update(task_id, completed=done)
+            on_progress("download", done, total, msg("dl_video", lang))
         elif d["status"] == "finished":
-            progress.update(task_id, description="Preparo il video (attendi)")
+            on_progress("download", None, None, msg("prep_video", lang))
 
     h = VISION_YT_MAX_HEIGHT
     ydl_opts = {
@@ -2834,18 +2962,28 @@ def download_video(url: str, workdir: str) -> str | None:
         "progress_hooks": [_hook],
     }
     try:
-        with progress:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-    except KeyboardInterrupt:
-        return None
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
     except Exception as e:
-        console.print(f"[error]Errore nel download video: {e}[/error]")
-        return None
+        raise MediaError(f"Errore nel download video: {e}")
     for fname in os.listdir(workdir):
         if fname.startswith("video."):
             return os.path.join(workdir, fname)
-    return None
+    raise MediaError("File video non trovato dopo il download.")
+
+
+def _cli_download_video(url: str, workdir: str) -> str | None:
+    """download_video per la CLI: barra rich, Ctrl+C e None su errore."""
+    progress, _task, on_progress = _download_progress("Scarico video")
+    try:
+        with progress:
+            return download_video(url, workdir, on_progress,
+                                  should_stop=lambda: _interrupted)
+    except KeyboardInterrupt:
+        return None
+    except MediaError as e:
+        console.print(f"[error]{e}[/error]")
+        return None
 
 
 def _parse_showinfo_times(stderr: str) -> list[float]:
@@ -3583,16 +3721,16 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
             console.rule(f"[phase]⬇ Fase {step['download']}/{n} — {dl_label}[/phase]", style="bright_blue")
             if do_visual:
                 # Un solo download: dal video estraiamo SIA i fotogrammi SIA l'audio.
-                media_path = download_video(ref, workdir)
+                media_path = _cli_download_video(ref, workdir)
                 if media_path:
                     audio_path = media_path
                 else:
                     console.print("[warning]Download del video non riuscito: proseguo con il "
                                   "solo audio (analisi visiva disattivata).[/warning]")
                     do_visual = False
-                    audio_path = download_audio(ref, workdir)
+                    audio_path = _cli_download_audio(ref, workdir)
             else:
-                audio_path = download_audio(ref, workdir)
+                audio_path = _cli_download_audio(ref, workdir)
             if not audio_path or _interrupted:
                 console.print("[warning]Download non completato.[/warning]")
                 return None
@@ -3610,7 +3748,7 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
         if backend == "groq":
             console.print()
             console.rule(f"[phase]✂ Fase {step['prepare']}/{n} — Preparazione audio[/phase]", style="bright_blue")
-            chunks = split_audio(audio_path, duration, workdir)
+            chunks = _cli_split_audio(audio_path, duration, workdir)
             console.print(f"  {SYM_OK} Audio diviso in [info]{len(chunks)}[/info] blocchi da ~{CHUNK_SECONDS // 60} min")
 
             console.print()
@@ -3661,8 +3799,9 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
                              style="bright_green")
                 if dev != "cuda":
                     console.print("  [warning]La trascrizione locale gira sulla CPU: può richiedere diversi minuti.[/warning]")
-                segments, detected = transcribe_local(cont_model, audio_path, duration,
-                                                      meta=meta, resume_cp=local_cp, workdir=workdir)
+                segments, detected = _cli_transcribe_local(cont_model, audio_path, duration,
+                                                           meta=meta, resume_cp=local_cp,
+                                                           workdir=workdir)
                 # Header dei file: motore combinato Groq + locale.
                 meta["engine_label_override"] = f"Groq + Locale / faster-whisper {cont_model}"
             delete_checkpoint(meta)
@@ -3674,8 +3813,9 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
                          style="bright_green")
             if dev != "cuda":
                 console.print("  [warning]La trascrizione locale gira sulla CPU: può richiedere diversi minuti.[/warning]")
-            segments, detected = transcribe_local(local_model, audio_path, duration,
-                                                  meta=meta, resume_cp=resume_cp, workdir=workdir)
+            segments, detected = _cli_transcribe_local(local_model, audio_path, duration,
+                                                       meta=meta, resume_cp=resume_cp,
+                                                       workdir=workdir)
 
         # Lingua dell'audio rilevata da Whisper (per la card di riepilogo).
         meta["detected_language"] = detected
@@ -4785,7 +4925,7 @@ def run() -> None:
         pl = None
         if "list=" in url:
             with console.status("[info]Leggo la playlist...[/info]", spinner="dots"):
-                pl = get_playlist_info(url)
+                pl = _cli_get_playlist_info(url)
 
         if pl and pl["count"] >= 1:
             # --- Sorgente PLAYLIST: un job per video, tutti sotto results/<playlist> ---
@@ -4794,7 +4934,7 @@ def run() -> None:
                                 spinner="dots") as st:
                 for i, vurl in enumerate(pl["entries"], 1):
                     st.update(f"[info]Leggo le informazioni dei video... ({i}/{pl['count']})[/info]")
-                    m = get_video_info(vurl)
+                    m = _cli_get_video_info(vurl)
                     if not m:
                         # Video privato/rimosso/non disponibile: lo saltiamo e proseguiamo.
                         console.print(f"  [warning]Video {i}/{pl['count']} non disponibile: saltato.[/warning]")
@@ -4816,7 +4956,7 @@ def run() -> None:
         else:
             # --- Video singolo (comportamento invariato) ---
             with console.status("[info]Leggo le informazioni del video...[/info]", spinner="dots"):
-                meta = get_video_info(url)
+                meta = _cli_get_video_info(url)
             if not meta:
                 return
             display_video_info(meta)
