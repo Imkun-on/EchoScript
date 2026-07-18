@@ -905,6 +905,41 @@ def stage_sections(state: dict | None, stage: str) -> list[dict]:
     return list(secs) if isinstance(secs, list) else []
 
 
+def resume_sections(meta: dict, stage: str, total: int, key: str, value):
+    """Prepara la RIPRESA a sezioni di una fase lunga (traduzione o riassunto).
+
+    Sia la traduzione sia il riassunto lavorano sezione per sezione e salvano il
+    parziale dopo ognuna, così un'interruzione (tipicamente i crediti Groq
+    esauriti a metà) non fa rispendere lavoro già fatto. Rileggendo quel
+    parziale servono sempre le stesse tre cautele:
+
+    1. il parziale vale solo se l'IMPOSTAZIONE con cui era stato prodotto non è
+       cambiata — la lingua di destinazione per la traduzione ('target'), la
+       lingua del riassunto ('lang'). Se è cambiata, il testo già fatto è nella
+       lingua sbagliata e va buttato;
+    2. se le sezioni salvate sono PIÙ di quelle attuali (la trascrizione è stata
+       rifatta e ora è più corta), la coda in eccesso va tagliata, altrimenti si
+       riprenderebbe oltre la fine;
+    3. il salvataggio del parziale deve riportare gli stessi campi, o alla
+       ripresa successiva la cautela 1 non potrebbe più scattare.
+
+    Restituisce (done_sections, persist) dove 'persist' è la funzione da passare
+    come `on_section` a translate_sections/summarize_sections."""
+    state = load_state(meta)
+    done = stage_sections(state, stage)
+    saved = (state or {}).get("stages", {}).get(stage, {}).get(key)
+    if saved and saved != value:
+        done = []          # impostazione cambiata: il parziale non è riutilizzabile
+    if len(done) > total:
+        done = done[:total]  # trascrizione più corta di prima: taglia l'eccesso
+
+    def persist(done_list):
+        update_stage(meta, stage, status=STAGE_PARTIAL, done=len(done_list),
+                     total=total, sections=done_list, extra={key: value})
+
+    return done, persist
+
+
 def resume_plan(state: dict | None) -> dict:
     """Da uno stato salvato, ricava la prima fase incompleta da cui riprendere.
 
@@ -3992,18 +4027,8 @@ def translate_existing(out_root: str, title: str, target: str = "it",
     # Resume: se una precedente traduzione si era interrotta a metà, ricarica le
     # sezioni già tradotte dallo stato e riparti da lì (a patto che la lingua di
     # destinazione coincida). 'on_section' salva il parziale dopo ogni sezione.
-    _state = load_state(meta)
-    _tr_stage = (_state or {}).get("stages", {}).get("translation", {})
-    done_secs = stage_sections(_state, "translation")
-    if _tr_stage.get("target") and _tr_stage.get("target") != target:
-        done_secs = []  # target cambiato: il parziale non è riutilizzabile
-    if len(done_secs) > len(sections):
-        done_secs = done_secs[:len(sections)]
-
-    def _persist_translation(done_list):
-        update_stage(meta, "translation", status=STAGE_PARTIAL,
-                     done=len(done_list), total=len(sections),
-                     sections=done_list, extra={"target": target})
+    done_secs, _persist_translation = resume_sections(
+        meta, "translation", len(sections), "target", target)
 
     safe_title = _safe_filename(meta["title"])
     video_dir = os.path.join(out_root, safe_title)
@@ -4743,18 +4768,8 @@ def summarize_existing(out_root: str, title: str, client=None,
     # Resume: riprendi il riassunto dalle sezioni già fatte in una precedente
     # esecuzione (es. crediti Groq esauriti a metà). 'on_section' salva il
     # parziale dopo OGNI sezione, così non si rispendono crediti sul già fatto.
-    _state = load_state(meta)
-    done_secs = stage_sections(_state, "summary")
-    _sum_stage = (_state or {}).get("stages", {}).get("summary", {})
-    if _sum_stage.get("lang") and _sum_stage.get("lang") != (ui_lang or "it"):
-        done_secs = []  # lingua del riassunto cambiata: non riusare il parziale
-    if len(done_secs) > len(sections):
-        done_secs = done_secs[:len(sections)]
-
-    def _persist_summary(done_list):
-        update_stage(meta, "summary", status=STAGE_PARTIAL,
-                     done=len(done_list), total=len(sections), sections=done_list,
-                     extra={"lang": ui_lang or "it"})
+    done_secs, _persist_summary = resume_sections(
+        meta, "summary", len(sections), "lang", ui_lang or "it")
 
     try:
         summarize_fn, engine_label = _make_summarizer(client)

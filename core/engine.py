@@ -711,18 +711,8 @@ def _translate_outputs(meta: dict, sections: list[dict], options: dict,
     # Resume: ricarica dallo stato le sezioni già tradotte (se una precedente
     # esecuzione si era interrotta) e riparti da lì; 'on_section' salva il
     # parziale dopo ogni sezione, così è sempre riprendibile.
-    _state = tx.load_state(meta)
-    _tr = (_state or {}).get("stages", {}).get("translation", {})
-    done_secs = tx.stage_sections(_state, "translation")
-    if _tr.get("target") and _tr.get("target") != target:
-        done_secs = []
-    if len(done_secs) > n:
-        done_secs = done_secs[:n]
-
-    def _persist_translation(done_list):
-        tx.update_stage(meta, "translation", status=tx.STAGE_PARTIAL,
-                        done=len(done_list), total=n, sections=done_list,
-                        extra={"target": target})
+    done_secs, _persist_translation = tx.resume_sections(
+        meta, "translation", n, "target", target)
 
     on_progress("translate", len(done_secs), n, _L("translating_to", lang=lang_label))
     try:
@@ -813,18 +803,8 @@ def _summarize_outputs(meta: dict, sections: list[dict], options: dict,
     # Resume: riparti dalle sezioni già riassunte (es. crediti Groq esauriti a
     # metà); 'on_section' salva il parziale dopo ogni sezione. Se la lingua UI è
     # cambiata dall'ultima volta, il parziale (in un'altra lingua) non si riusa.
-    _sum_state = tx.load_state(meta)
-    done_secs = tx.stage_sections(_sum_state, "summary")
-    _sum_stage = (_sum_state or {}).get("stages", {}).get("summary", {})
-    if _sum_stage.get("lang") and _sum_stage.get("lang") != (ui_lang or "it"):
-        done_secs = []
-    if len(done_secs) > n:
-        done_secs = done_secs[:n]
-
-    def _persist_summary(done_list):
-        tx.update_stage(meta, "summary", status=tx.STAGE_PARTIAL,
-                        done=len(done_list), total=n, sections=done_list,
-                        extra={"lang": ui_lang or "it"})
+    done_secs, _persist_summary = tx.resume_sections(
+        meta, "summary", n, "lang", ui_lang or "it")
 
     on_progress("summarize", len(done_secs), n, _L("summarizing"))
     # Lingua del riassunto = lingua dell'interfaccia; il prompt «visivo» (se ci
