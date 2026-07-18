@@ -216,10 +216,6 @@ This section is written for **non-technical users**: we explain every screen, ev
 
 > ▶️ **How to start it:** double-click the executable (if you have the packaged version), or from the project folder run `python gui/main.py`.
 
-<p align="center">
-  <img src="docs/screenshot.png" alt="EchoScript - desktop app" width="840">
-</p>
-
 ### Top bar: language and window buttons
 - Top-right there are **two flags** 🇮🇹 / 🇬🇧: click them to switch the **interface language** (Italian or English). All text changes instantly.
 - The three small buttons at the top (**–**, **▢**, **✕**) **minimize**, **maximize** and **close** the window, like in any program.

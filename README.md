@@ -214,10 +214,6 @@ Questa sezione è pensata per chi **non è tecnico**: spieghiamo ogni schermata,
 
 > ▶️ **Come si avvia:** doppio clic sull'eseguibile (se hai la versione pacchettizzata), oppure dalla cartella del progetto esegui `python gui/main.py`.
 
-<p align="center">
-  <img src="docs/screenshot.png" alt="EchoScript - app desktop" width="840">
-</p>
-
 ### In alto: lingua e pulsanti finestra
 - In alto a destra ci sono **due bandierine** 🇮🇹 / 🇬🇧: cliccale per cambiare la **lingua dell'interfaccia** (italiano o inglese). Tutto il testo cambia all'istante.
 - I tre pulsantini in cima (**–**, **▢**, **✕**) servono a **minimizzare**, **ingrandire** e **chiudere** la finestra, come in ogni programma.
