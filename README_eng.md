@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/Ollama-local_summary-000000?logo=ollama&logoColor=white" alt="Ollama">
   <img src="https://img.shields.io/badge/Llama_3.3_·_Qwen_2.5-LLM-7C3AED" alt="LLM">
   <img src="https://img.shields.io/badge/Qwen3.6_·_Llama_Vision-visual_analysis-C026D3" alt="Vision">
-  <img src="https://img.shields.io/badge/License-MIT-green" alt="MIT License">
+  <img src="https://img.shields.io/badge/License-PolyForm_Noncommercial-orange" alt="PolyForm Noncommercial License">
 </p>
 
 <p align="center">
@@ -950,4 +950,12 @@ EchoScript downloads audio from YouTube to transcribe it. Its use may be subject
 
 ## 📄 License
 
-Released under the **MIT** license.
+Released under the **[PolyForm Noncommercial License 1.0.0](LICENSE)**.
+
+In short — **this is not legal advice, the license text prevails**:
+
+- ✅ **You may** use, study, modify and redistribute EchoScript for **noncommercial purposes**: personal use, research, hobby projects, and use by **charitable or educational organizations** (schools, universities).
+- ❌ **You may not** use it commercially: sell it, offer it as a paid service, or use it in a company's business.
+- 📎 If you redistribute it, you must **include the license** (or its URL) and keep the `Required Notice:` line.
+
+> Need a commercial use? Get in touch: a separate license is negotiable.
