@@ -446,28 +446,22 @@ def _ensure_dir(path: str) -> None:
 
     Called right before every write: on OneDrive-synced folders the directory
     can be briefly renamed/locked while syncing, which would otherwise cause a
-    'No such file or directory' (Errno 2) error mid-run."""
+    'No such file or directory' (Errno 2) error mid-run. Il percorso passa da
+    tx._lp: con titoli lunghi la cartella supera i 260 caratteri di Windows e
+    makedirs fallirebbe."""
     parent = os.path.dirname(path)
     if parent:
-        os.makedirs(parent, exist_ok=True)
+        os.makedirs(tx._lp(parent), exist_ok=True)
 
 
 def _write(path: str, content: str, created: list[str], root: str) -> None:
     """Write a UTF-8 file and record its path relative to 'root' (for the result).
 
-    Re-ensures the parent directory exists first and retries once on a transient
-    filesystem error (e.g. OneDrive touching the folder during sync)."""
-    for attempt in (1, 2):
-        try:
-            _ensure_dir(path)
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(content)
-            created.append(os.path.relpath(path, root).replace("\\", "/"))
-            return
-        except OSError:
-            if attempt == 2:
-                raise
-            time.sleep(0.4)  # let OneDrive finish, then retry once
+    Ponte verso tx.write_text_file, che ricrea la directory e riprova una volta
+    sui guasti transitori di OneDrive E applica il prefisso per i percorsi lunghi
+    di Windows (_lp): quest'ultimo qui mancava, quindi un titolo di video lungo
+    faceva fallire la scrittura dalla GUI mentre da CLI funzionava."""
+    tx.write_text_file(path, content, created, root)
 
 
 # === HIGH-LEVEL ORCHESTRATION ===

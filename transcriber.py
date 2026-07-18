@@ -46,6 +46,7 @@ import re                                          # regular expressions (file n
 import json                                        # export in .json format (for RAG/other LLMs)
 import sys                                         # clean exit from the program
 import signal                                      # intercept Ctrl+C
+import time                                        # brevi attese: retry di scrittura, backoff
 import shutil                                      # find the ffmpeg executable in PATH
 import tempfile                                    # temporary folder for the audio
 import subprocess                                  # launch ffmpeg/ffprobe as external processes
@@ -446,6 +447,39 @@ def _lp(path: str) -> str:
     if abs_path.startswith("\\\\"):          # percorso di rete \\server\share
         return "\\\\?\\UNC" + abs_path[1:]   # -> \\?\UNC\server\share
     return "\\\\?\\" + abs_path
+
+
+def write_text_file(path: str, content: str, created: list[str] | None = None,
+                    root: str | None = None) -> None:
+    """Scrive un file UTF-8 con LE DUE protezioni che servono su questo sistema.
+
+    Ogni scrittura dell'app passa di qui perché due guasti diversi, entrambi
+    reali, colpiscono percorsi diversi:
+
+    1. TITOLI LUNGHI (Windows): il percorso completo, che contiene il titolo del
+       video, supera facilmente il vecchio limite di 260 caratteri. Senza il
+       prefisso di `_lp()` open() fallisce con FileNotFoundError.
+    2. ONEDRIVE: durante la sincronizzazione la cartella può essere
+       rinominata/bloccata per un istante, e la scrittura fallisce con OSError
+       anche se il percorso è giusto. Si ricrea la directory e si riprova una
+       volta dopo una breve pausa.
+
+    Se `created` e `root` sono dati, il percorso del file viene aggiunto alla
+    lista in forma relativa a `root` (per l'elenco dei file prodotti)."""
+    for attempt in (1, 2):
+        try:
+            parent = os.path.dirname(path)
+            if parent:
+                os.makedirs(_lp(parent), exist_ok=True)
+            with open(_lp(path), "w", encoding="utf-8") as f:
+                f.write(content)
+            break
+        except OSError:
+            if attempt == 2:
+                raise
+            time.sleep(0.4)  # lascia finire OneDrive, poi riprova una volta
+    if created is not None and root is not None:
+        created.append(os.path.relpath(path, root).replace("\\", "/"))
 
 
 # === RATE LIMIT + CHECKPOINT (ripresa dei video lunghi su Groq) =============
@@ -2137,7 +2171,6 @@ def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
                 console.print(f"  [error]Blocco fallito dopo {MAX_RETRIES} tentativi: {e}[/error]")
                 return _ret([], None)
             # Increasing wait between one attempt and the next (linear backoff).
-            import time
             time.sleep(2 * attempt)
     return _ret([], None)
 
@@ -3880,9 +3913,8 @@ def _save_outputs(meta: dict, segments: list[dict], engine_label: str,
     created: list[str] = []  # paths (relative to the video folder) of generated files, for the summary
 
     def _save(path: str, content: str) -> None:
-        with open(_lp(path), "w", encoding="utf-8") as f:
-            f.write(content)
-        created.append(os.path.relpath(path, video_dir).replace("\\", "/"))
+        # write_text_file: percorsi lunghi (_lp) + retry su OneDrive, condiviso col motore.
+        write_text_file(path, content, created, video_dir)
 
     _save(f"{base_orig}.md", build_md(meta["title"], meta, engine_label, sections, with_timestamps=True))
     _save(f"{base_orig}.txt", build_txt(meta["title"], meta, sections))
@@ -4015,9 +4047,8 @@ def translate_existing(out_root: str, title: str, target: str = "it",
     created: list[str] = []
 
     def _save(path: str, content: str) -> None:
-        with open(_lp(path), "w", encoding="utf-8") as f:
-            f.write(content)
-        created.append(os.path.relpath(path, video_dir).replace("\\", "/"))
+        # write_text_file: percorsi lunghi (_lp) + retry su OneDrive, condiviso col motore.
+        write_text_file(path, content, created, video_dir)
 
     # La versione tradotta non porta i timestamp (testo continuo, più leggibile).
     _save(f"{base}.md", build_md(meta["title"], meta, engine_label, translated, with_timestamps=False))
@@ -4787,9 +4818,8 @@ def summarize_existing(out_root: str, title: str, client=None,
     created: list[str] = []
 
     def _save(path: str, content: str) -> None:
-        with open(_lp(path), "w", encoding="utf-8") as f:
-            f.write(content)
-        created.append(os.path.relpath(path, video_dir).replace("\\", "/"))
+        # write_text_file: percorsi lunghi (_lp) + retry su OneDrive, condiviso col motore.
+        write_text_file(path, content, created, video_dir)
 
     # Fotogrammi nel riassunto: aggiungiamo i frame (per timestamp) alle sezioni.
     # Sono salvati in analisi_visiva/frames/: link RELATIVO per il .md (portabile)
