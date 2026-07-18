@@ -1,16 +1,23 @@
 # =============================================================================
 #  EchoScript — shared engine (UI-agnostic)
 # =============================================================================
-#  This module is the headless "engine" used by BOTH the CLI (transcriber.py)
-#  and the GUI (gui/app.py). It performs the heavy work — fetching video info,
-#  downloading audio, splitting, transcribing (Groq or local), translating and
-#  exporting — WITHOUT touching the terminal: instead of printing to the rich
-#  console, it reports progress through a simple callback. This keeps the logic
-#  reusable from a graphical front-end (where there is no terminal at all).
+#  This module is the headless "engine" behind the GUI (gui/main.py). It
+#  orchestrates the heavy work — fetching video info, downloading audio,
+#  splitting, transcribing (Groq or local), translating and exporting — WITHOUT
+#  touching the terminal: instead of printing to the rich console, it reports
+#  progress through a simple callback, so it works from a graphical front-end
+#  (where there is no terminal at all).
 #
-#  Pure, presentation-free helpers (formatters, Markdown/TXT/JSON/PDF
-#  builders, the Groq translation primitive, etc.) are imported and reused from
-#  transcriber.py so there is a single source of truth for the output formats.
+#  Rapporto con transcriber.py: NON e' un modulo indipendente, e' lo strato di
+#  orchestrazione sopra di esso. Le funzioni media (download, split, trascrizione
+#  locale), gli helper puri (formatter, builder MD/TXT/JSON/PDF, primitive di
+#  traduzione) e il catalogo dei messaggi vivono in transcriber.py e da li'
+#  vengono importati: unica fonte di verita'.
+#
+#  ATTENZIONE alla direzione delle dipendenze: engine importa transcriber, mai
+#  il contrario. La CLI (transcriber.run) ha oggi una sua pipeline separata; per
+#  farla passare da qui andrebbe prima estratta in un modulo a parte, altrimenti
+#  si crea un import circolare.
 # =============================================================================
 
 from __future__ import annotations
@@ -184,26 +191,7 @@ def make_groq_client(api_key: str | None = None):
 # transcription endpoint (the same one the app uses) and parse the headers from
 # the raw response. Costs ~1 second of the daily audio budget — negligible.
 
-import re as _re
 from datetime import datetime as _datetime, timedelta as _timedelta
-
-_RESET_UNITS = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
-
-
-def _parse_reset_duration(value: str | None) -> float | None:
-    """Parse a Groq reset header (e.g. '2m59.56s', '986ms', '7.66s', '1h0m0s')
-    into seconds. Returns None if the value is empty/unparseable."""
-    if not value:
-        return None
-    total = 0.0
-    found = False
-    for num, unit in _re.findall(r"([0-9.]+)\s*(ms|s|m|h|d)", value):
-        try:
-            total += float(num) * _RESET_UNITS[unit]
-            found = True
-        except ValueError:
-            pass
-    return total if found else None
 
 
 def _reset_clock(seconds: float | None) -> str | None:
@@ -214,46 +202,26 @@ def _reset_clock(seconds: float | None) -> str | None:
     return (_datetime.now() + _timedelta(seconds=seconds)).strftime("%H:%M")
 
 
-def _num(value: str | None) -> float | None:
-    """Best-effort float() of a header value (handles ints, floats, None)."""
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except ValueError:
-        return None
-
-
 def _parse_ratelimit_headers(headers) -> list[dict]:
     """Turn the x-ratelimit-* headers into a tidy list of limit groups.
 
     Each item: {kind, remaining, limit, reset_seconds, reset_clock}. 'kind' is
     one of 'audio_seconds' | 'requests' | 'tokens' (the GUI localizes the label).
-    Only groups actually present in the response are returned."""
-    def get(name: str):
-        try:
-            return headers.get(name)
-        except Exception:
-            return None
+    Only groups actually present in the response are returned.
 
-    items: list[dict] = []
-    # Order: audio-seconds first (it's what gates transcription), then requests/tokens.
-    for kind, suffix in (("audio_seconds", "audio-seconds"),
-                         ("requests", "requests"),
-                         ("tokens", "tokens")):
-        remaining = _num(get(f"x-ratelimit-remaining-{suffix}"))
-        limit = _num(get(f"x-ratelimit-limit-{suffix}"))
-        reset_s = _parse_reset_duration(get(f"x-ratelimit-reset-{suffix}"))
-        if remaining is None and limit is None and reset_s is None:
-            continue
-        items.append({
+    La lettura degli header (regex del formato '2m59.56s', unità, conversioni)
+    sta in tx.ratelimit_groups: qui resta solo la FORMA che serve alla GUI,
+    durata + orario di azzeramento, diversa da quella salvata in cache."""
+    return [
+        {
             "kind": kind,
             "remaining": remaining,
             "limit": limit,
             "reset_seconds": reset_s,
             "reset_clock": _reset_clock(reset_s),
-        })
-    return items
+        }
+        for kind, remaining, limit, reset_s in tx.ratelimit_groups(headers)
+    ]
 
 
 def _silent_probe_audio(workdir: str) -> str:

@@ -49,7 +49,7 @@ import signal                                      # intercept Ctrl+C
 import shutil                                      # find the ffmpeg executable in PATH
 import tempfile                                    # temporary folder for the audio
 import subprocess                                  # launch ffmpeg/ffprobe as external processes
-from datetime import datetime                      # format the publication date
+from datetime import datetime, timedelta           # format the publication date / limit resets
 
 # --- External libraries (see requirements.txt) ---
 import yt_dlp                                       # downloads audio and metadata from YouTube
@@ -535,20 +535,24 @@ def _rate_limit_num(value) -> float | None:
         return None
 
 
-def parse_ratelimit_headers(headers) -> list[dict]:
-    """Header x-ratelimit-* -> lista di gruppi limite, già con il MOMENTO ASSOLUTO
-    di azzeramento (così la cache resta valida anche letta molto dopo).
+def ratelimit_groups(headers):
+    """Legge gli header x-ratelimit-* e restituisce le terne grezze.
 
-    Ogni voce: {kind, remaining, limit, reset_at_iso}. 'kind' ∈
-    'audio_seconds' | 'requests' | 'tokens'. Solo i gruppi presenti vengono resi."""
+    Genera (kind, remaining, limit, reset_seconds) per i soli gruppi presenti
+    nella risposta; 'kind' ∈ 'audio_seconds' | 'requests' | 'tokens'. Ordine:
+    audio-seconds per primo (è quello che frena la trascrizione), poi
+    requests/tokens.
+
+    È la parte comune ai due modi di presentare i limiti: la cache di
+    transcriber li salva col MOMENTO ASSOLUTO di azzeramento (parse_ratelimit_headers),
+    la GUI li vuole come durata + orario (engine._parse_ratelimit_headers).
+    Entrambe partono da qui, così la lettura degli header sta scritta una volta sola."""
     def get(name: str):
         try:
             return headers.get(name)
         except Exception:
             return None
 
-    now = datetime.now()
-    items: list[dict] = []
     for kind, suffix in (("audio_seconds", "audio-seconds"),
                          ("requests", "requests"),
                          ("tokens", "tokens")):
@@ -557,7 +561,17 @@ def parse_ratelimit_headers(headers) -> list[dict]:
         reset_s = _rate_limit_reset_seconds(get(f"x-ratelimit-reset-{suffix}"))
         if remaining is None and limit is None and reset_s is None:
             continue
-        from datetime import timedelta
+        yield kind, remaining, limit, reset_s
+
+
+def parse_ratelimit_headers(headers) -> list[dict]:
+    """Header x-ratelimit-* -> lista di gruppi limite, già con il MOMENTO ASSOLUTO
+    di azzeramento (così la cache resta valida anche letta molto dopo).
+
+    Ogni voce: {kind, remaining, limit, reset_at_iso}."""
+    now = datetime.now()
+    items: list[dict] = []
+    for kind, remaining, limit, reset_s in ratelimit_groups(headers):
         reset_at = (now + timedelta(seconds=reset_s)) if reset_s is not None else None
         items.append({
             "kind": kind,
