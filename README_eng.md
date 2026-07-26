@@ -36,9 +36,6 @@
 git clone https://github.com/Imkun-on/EchoScript.git
 cd EchoScript
 pip install -r requirements.txt
-
-python gui/main.py        # native desktop app (GUI)
-python transcriber.py     # terminal interface (CLI)
 ```
 
 > 🇮🇹 The app's interface is in **Italian**; this README is the English documentation. For the Italian README see [README.md](README.md).
