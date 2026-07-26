@@ -36,9 +36,6 @@
 git clone https://github.com/Imkun-on/EchoScript.git
 cd EchoScript
 pip install -r requirements.txt
-
-python gui/main.py        # interfaccia grafica desktop (GUI)
-python transcriber.py     # interfaccia da terminale (CLI)
 ```
 
 ---
