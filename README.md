@@ -501,6 +501,8 @@ pyinstaller echoscriptapp.spec --noconfirm
 
 Risultato in `dist/EchoScript/`: `EchoScript.exe` più la cartella `_internal`. **Vanno tenuti insieme**, ed è la cartella intera che si comprime per pubblicarla.
 
+> ⚠️ **Comprimi prima di provarlo, o ripulisci dopo.** L'eseguibile scrive accanto a sé: `settings.json` con le preferenze (lingua, motore, modelli scelti) al primo avvio, e `results/` con le trascrizioni appena ne fai una. Se comprimi dopo aver fatto una prova, quella roba finisce nell'archivio e chi lo scarica si ritrova le tue scelte e i tuoi file. Cancella entrambi prima di pubblicare.
+
 Sulla macchina di riferimento la costruzione dura **circa 8 minuti** e produce **~730 MB**, di cui 402 sono `ffmpeg.exe` e `ffprobe.exe`.
 
 **Tre cose dello spec che non sono ovvie:**

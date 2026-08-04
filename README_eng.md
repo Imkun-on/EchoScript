@@ -503,6 +503,8 @@ pyinstaller echoscriptapp.spec --noconfirm
 
 The result lands in `dist/EchoScript/`: `EchoScript.exe` plus the `_internal` folder. **They belong together**, and it is the whole folder you compress for publishing.
 
+> ⚠️ **Compress before testing it, or clean up afterwards.** The executable writes next to itself: `settings.json` with the preferences (language, engine, chosen models) on first launch, and `results/` with the transcriptions as soon as you run one. If you compress after a test run, that ends up in the archive and whoever downloads it gets your choices and your files. Delete both before publishing.
+
 On the reference machine the build takes **about 8 minutes** and produces **~730 MB**, of which 402 are `ffmpeg.exe` and `ffprobe.exe`.
 
 **Three things about the spec that aren't obvious:**
