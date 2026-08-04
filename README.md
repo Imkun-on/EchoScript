@@ -436,6 +436,14 @@ Se **non sei uno sviluppatore** e vuoi solo usare il programma, non serve instal
 4. Doppio click su **`EchoScript.exe`**. Fatto: si apre l'app, **senza installare nulla**.
 
 > 🛡️ **Primo avvio – Windows SmartScreen:** poiché l'app non è firmata digitalmente, Windows può mostrare *"Windows ha protetto il PC"*. Clicca **"Ulteriori informazioni" → "Esegui comunque"**. È normale per i programmi gratuiti non firmati.
+>
+> Se preferisci controllare di aver scaricato davvero il file pubblicato, confronta la sua impronta con quella scritta nelle note della release:
+>
+> ```powershell
+> Get-FileHash .\EchoScript.zip -Algorithm SHA256
+> ```
+
+> ⏳ **Il primo avvio è il più lento.** Dal doppio clic compare subito la schermata con il marchio, e la finestra arriva una decina di secondi dopo: nel frattempo Windows sta leggendo dal disco qualche centinaio di megabyte, e la volta successiva ci mette molto meno. L'immagine resta a schermo finché la finestra non ha davvero disegnato, quindi finché la vedi il programma sta lavorando.
 
 **Cosa è incluso e cosa no:**
 - ✅ **Tutto incluso**: non servono Python, ffmpeg o altre installazioni.
@@ -481,6 +489,27 @@ sudo apt install ffmpeg
 ```
 
 > ⭐ **File da lanciare:** la **GUI** da `EchoScriptApp.py`, la **CLI** da `transcriber.py`.
+
+### Costruire l'eseguibile
+
+Serve solo se vuoi produrre da te il pacchetto della sezione [Scarica l'app pronta](#️-scarica-lapp-pronta-exe). Per usare il programma **non serve**.
+
+```bash
+pip install pyinstaller
+pyinstaller echoscriptapp.spec --noconfirm
+```
+
+Risultato in `dist/EchoScript/`: `EchoScript.exe` più la cartella `_internal`. **Vanno tenuti insieme**, ed è la cartella intera che si comprime per pubblicarla.
+
+Sulla macchina di riferimento la costruzione dura **circa 8 minuti** e produce **~730 MB**, di cui 402 sono `ffmpeg.exe` e `ffprobe.exe`.
+
+**Tre cose dello spec che non sono ovvie:**
+
+- **ffmpeg viene preso dal `PATH` al momento della costruzione** e incorporato, così l'eseguibile è autosufficiente. Se non lo trovi nel `PATH` mentre costruisci, il pacchetto verrà senza, e a chi lo usa servirà ffmpeg installato.
+- **`tkinter` deve restare** fra i pacchetti raccolti: la schermata di avvio è disegnata dal bootloader con Tcl/Tk, e senza quelle librerie l'oggetto `Splash` non si costruisce. È l'unico motivo per cui c'è.
+- **La lista degli `excludes` vale metà del peso.** I `collect_all` raccolgono *tutti* i sottomoduli di ogni pacchetto, comprese le integrazioni facoltative verso librerie che qui nessuno usa: senza quelle esclusioni il pacchetto passa da 730 MB a **1360**, e l'avvio da 10 secondi a 34. Le voci più pesanti sono Qt (628 MB, arriva da pywebview che porta un backend per ogni sistema) e le integrazioni di `huggingface_hub` (OpenCV, NLTK, pyarrow, numba, scipy, transformers).
+
+Se aggiungi una dipendenza e il pacchetto raddoppia, guarda lì prima di cercare altrove.
 
 ---
 
