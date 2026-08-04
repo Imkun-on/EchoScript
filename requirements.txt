@@ -16,9 +16,13 @@ fpdf2>=2.7
 # salvata in italiano via Google Translate. Serve solo per l'opzione "traduci".
 deep-translator>=1.11
 
-# GUI desktop (Flet): interfaccia grafica nativa moderna. Serve solo per la
-# GUI (gui/main.py); la CLI funziona senza. Avvio: python gui/main.py
-flet>=0.27,<0.29
+# INTERFACCIA GRAFICA (EchoScriptApp.py): una pagina web (web/) mostrata dentro
+# il WebView che Windows ha gia' installato. Niente motore grafico da scaricare.
+# Avvio: python EchoScriptApp.py
+pywebview>=5.0
+# Su Windows serve anche il ponte .NET verso WebView2 (su macOS e Linux
+# pywebview usa WebKit di sistema e questa riga viene semplicemente ignorata).
+pythonnet>=3.0 ; sys_platform == "win32"
 
 # ANALISI VISIVA (opzionale): "legge" i fotogrammi di un video (codice, formule,
 # grafici, diagrammi) e li integra nel riassunto. NON richiede pacchetti pip in

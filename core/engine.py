@@ -1,7 +1,7 @@
 # =============================================================================
 #  EchoScript — shared engine (UI-agnostic)
 # =============================================================================
-#  This module is the headless "engine" behind the GUI (gui/main.py). It
+#  This module is the headless "engine" behind the GUI (EchoScriptApp.py). It
 #  orchestrates the heavy work — fetching video info, downloading audio,
 #  splitting, transcribing (Groq or local), translating and exporting — WITHOUT
 #  touching the terminal: instead of printing to the rich console, it reports

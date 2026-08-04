@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/Groq-Whisper-F55036?logo=groq&logoColor=white" alt="Groq">
   <img src="https://img.shields.io/badge/faster--whisper-local-0A9396?logo=openai&logoColor=white" alt="faster-whisper">
   <img src="https://img.shields.io/badge/Rich-TUI-4EC820?logo=windowsterminal&logoColor=white" alt="Rich">
-  <img src="https://img.shields.io/badge/Flet-GUI-02569B?logo=flutter&logoColor=white" alt="Flet">
+  <img src="https://img.shields.io/badge/pywebview-GUI-7C6CFF?logo=html5&logoColor=white" alt="pywebview">
   <img src="https://img.shields.io/badge/yt--dlp-downloader-FF0000?logo=youtube&logoColor=white" alt="yt-dlp">
   <img src="https://img.shields.io/badge/fpdf2-PDF-EC1C24?logo=adobeacrobatreader&logoColor=white" alt="fpdf2">
   <img src="https://img.shields.io/badge/Google_Translate-translation-4285F4?logo=googletranslate&logoColor=white" alt="deep-translator">
@@ -190,8 +190,10 @@ In short: **you are in control**, it runs on **your computer**, and there are no
 
 EchoScript can be used in **two ways**, with the **same engine** underneath (same transcription, same output formats):
 
-- 🖥️ **Desktop app (GUI)** with `python gui/main.py`: a native graphical interface (Flet), dark, with an animated background. For those who prefer clicking.
+- 🖥️ **Desktop app (GUI)** with `python EchoScriptApp.py`: a dark **sidebar** interface (Transcribe · Engine · Credits), drawn in HTML/CSS/JavaScript and shown inside the **WebView already installed in Windows**. No graphics engine to download. For those who prefer clicking.
 - ⌨️ **Terminal (CLI)** with `python transcriber.py`: the classic text interface (Rich), handy for batches and automation.
+
+> 🗂️ **How the GUI is built:** `EchoScriptApp.py` is only the bridge to the engine; the look lives in `web/style.css`, the structure in `web/index.html`, the behaviour in one JavaScript file **per section** (`web/sez-*.js`), and the wording in `Shared/strings_app.py`. Moving a button does not require reading the code that spawns the threads.
 
 The **GUI** adds a few conveniences:
 
@@ -211,7 +213,7 @@ The **GUI** adds a few conveniences:
 
 This section is written for **non-technical users**: we explain every screen, every button and every message. **No programming needed.**
 
-> ▶️ **How to start it:** double-click the executable (if you have the packaged version), or from the project folder run `python gui/main.py`.
+> ▶️ **How to start it:** double-click the executable (if you have the packaged version), or from the project folder run `python EchoScriptApp.py`.
 
 ### Top bar: language and window buttons
 - Top-right there are **two flags** 🇮🇹 / 🇬🇧: click them to switch the **interface language** (Italian or English). All text changes instantly.
@@ -400,7 +402,7 @@ If a model doesn't fit in RAM, Ollama falls back to disk (swap) and becomes **ve
 
 ## ✨ Features
 
-- 🖥️ **Two interfaces**: desktop **GUI** (`gui/main.py`) or **CLI** in the terminal (`transcriber.py`)
+- 🖥️ **Two interfaces**: desktop **GUI** (`EchoScriptApp.py`) or **CLI** in the terminal (`transcriber.py`)
 - 🔀 **Two backends** selectable from a panel: Groq (cloud, fast) or faster-whisper (local, private)
 - 🎚️ **Groq transcription model chosen in-app** (GUI and CLI): `whisper-large-v3-turbo` (default, cheap) or `whisper-large-v3` (more accurate); the **estimated cost** follows the chosen model
 - 🦙 **Local models chosen in-app** (GUI and CLI): a dedicated window/panel with the Whisper model + the **Ollama** models for summary/translation and visual analysis, required RAM and a **✓ on the models already pulled** (see [chapter 6](#-the-models-used-complete-guide))
@@ -458,7 +460,7 @@ This part is only for **running from code** or **modifying** the project. For pl
 - *(Groq only)* a free **Groq API key** (see below)
 - *(local backend only)* `faster-whisper`
 - *(PDF export only)* `fpdf2`
-- *(desktop GUI only)* `flet`
+- *(GUI only)* `pywebview` (plus `pythonnet` on Windows)
 
 ### Steps
 
@@ -480,7 +482,7 @@ brew install ffmpeg
 sudo apt install ffmpeg
 ```
 
-> ⭐ **Entry point:** the **GUI** via `gui/main.py`, the **CLI** via `transcriber.py`.
+> ⭐ **Entry point:** the **GUI** via `EchoScriptApp.py`, the **CLI** via `transcriber.py`.
 
 ---
 
@@ -524,7 +526,7 @@ The key is needed **only** if you use the **Groq** (cloud) backend. It is **free
 | `faster-whisper` | *(optional)* **Local** transcription on CPU | Optimized Whisper implementation (CTranslate2), great on CPU with `int8` |
 | `deep-translator` | **Translation** to Italian (cloud) | Uses Google Translate (free endpoint): no key, no credits. Locally, with no key, translation switches to **Ollama** (offline) instead |
 | `fpdf2` | *(optional)* **PDF** export | Pure-python, **no system LaTeX needed**; supports Unicode fonts |
-| `flet` | *(optional)* **desktop GUI** (`gui/main.py`) | Modern native graphical interface in Python; the CLI works without it |
+| `pywebview` | *(optional)* **GUI** (`EchoScriptApp.py`) | Shows the `web/` page inside the WebView already present on the system: no graphics engine to download. On Windows `pythonnet` is also needed for the WebView2 bridge; the CLI works without it |
 
 ### External tool (not pip)
 

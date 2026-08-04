@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/Groq-Whisper-F55036?logo=groq&logoColor=white" alt="Groq">
   <img src="https://img.shields.io/badge/faster--whisper-locale-0A9396?logo=openai&logoColor=white" alt="faster-whisper">
   <img src="https://img.shields.io/badge/Rich-TUI-4EC820?logo=windowsterminal&logoColor=white" alt="Rich">
-  <img src="https://img.shields.io/badge/Flet-GUI-02569B?logo=flutter&logoColor=white" alt="Flet">
+  <img src="https://img.shields.io/badge/pywebview-GUI-7C6CFF?logo=html5&logoColor=white" alt="pywebview">
   <img src="https://img.shields.io/badge/yt--dlp-downloader-FF0000?logo=youtube&logoColor=white" alt="yt-dlp">
   <img src="https://img.shields.io/badge/fpdf2-PDF-EC1C24?logo=adobeacrobatreader&logoColor=white" alt="fpdf2">
   <img src="https://img.shields.io/badge/Google_Translate-traduzione-4285F4?logo=googletranslate&logoColor=white" alt="deep-translator">
@@ -188,8 +188,10 @@ In breve: **lo controlli tu**, gira sul **tuo computer**, e non ti chiede nulla 
 
 EchoScript si usa in **due modi**, con lo **stesso motore** sotto (stessa trascrizione, stessi formati di output):
 
-- 🖥️ **App desktop (GUI)** con `python gui/main.py`: interfaccia grafica nativa (Flet), scura, con sfondo animato. Pensata per chi preferisce i clic.
+- 🖥️ **App desktop (GUI)** con `python EchoScriptApp.py`: interfaccia scura a **barra laterale** (Trascrivi · Motore · Crediti), disegnata in HTML/CSS/JavaScript e mostrata dentro il **WebView già presente in Windows**. Niente motore grafico da scaricare. Pensata per chi preferisce i clic.
 - ⌨️ **Terminale (CLI)** con `python transcriber.py`: la classica interfaccia testuale (Rich), comoda per batch e automazioni.
+
+> 🗂️ **Com'è fatta la GUI:** `EchoScriptApp.py` è solo il ponte verso il motore; l'aspetto sta in `web/style.css`, la struttura in `web/index.html`, il comportamento in un file JavaScript **per sezione** (`web/sez-*.js`), e le frasi in `Shared/strings_app.py`. Spostare un bottone non richiede di leggere il codice che lancia i thread.
 
 La **GUI** aggiunge alcune comodità:
 
@@ -209,7 +211,7 @@ La **GUI** aggiunge alcune comodità:
 
 Questa sezione è pensata per chi **non è tecnico**: spieghiamo ogni schermata, ogni pulsante e ogni messaggio. **Non serve saper programmare.**
 
-> ▶️ **Come si avvia:** doppio clic sull'eseguibile (se hai la versione pacchettizzata), oppure dalla cartella del progetto esegui `python gui/main.py`.
+> ▶️ **Come si avvia:** doppio clic sull'eseguibile (se hai la versione pacchettizzata), oppure dalla cartella del progetto esegui `python EchoScriptApp.py`.
 
 ### In alto: lingua e pulsanti finestra
 - In alto a destra ci sono **due bandierine** 🇮🇹 / 🇬🇧: cliccale per cambiare la **lingua dell'interfaccia** (italiano o inglese). Tutto il testo cambia all'istante.
@@ -398,7 +400,7 @@ Se un modello non entra nella RAM, Ollama usa il disco (swap) e diventa **molto*
 
 ## ✨ Caratteristiche
 
-- 🖥️ **Due interfacce**: app desktop **GUI** (`gui/main.py`) o **CLI** da terminale (`transcriber.py`)
+- 🖥️ **Due interfacce**: app desktop **GUI** (`EchoScriptApp.py`) o **CLI** da terminale (`transcriber.py`)
 - 🔀 **Due backend** selezionabili da pannello: Groq (cloud, veloce) o faster-whisper (locale, privato)
 - 🎚️ **Modello di trascrizione Groq scelto in-app** (GUI e CLI): `whisper-large-v3-turbo` (default, economico) o `whisper-large-v3` (più accurato); il **costo stimato** segue il modello scelto
 - 🦙 **Modelli locali scelti in-app** (GUI e CLI): finestra/pannello dedicato con modello Whisper + modelli **Ollama** per riassunto/traduzione e analisi visiva, RAM richiesta e **✓ sui modelli già scaricati** (vedi il [capitolo 6](#-i-modelli-usati-guida-completa))
@@ -456,7 +458,7 @@ Questa parte serve solo se vuoi **eseguire dal codice** o **modificare** il prog
 - *(solo per Groq)* una **API key Groq** gratuita (vedi sotto)
 - *(solo per il backend locale)* `faster-whisper`
 - *(solo per l'export PDF)* `fpdf2`
-- *(solo per la GUI desktop)* `flet`
+- *(solo per la GUI)* `pywebview` (e `pythonnet` su Windows)
 
 ### Passi
 
@@ -478,7 +480,7 @@ brew install ffmpeg
 sudo apt install ffmpeg
 ```
 
-> ⭐ **File da lanciare:** la **GUI** da `gui/main.py`, la **CLI** da `transcriber.py`.
+> ⭐ **File da lanciare:** la **GUI** da `EchoScriptApp.py`, la **CLI** da `transcriber.py`.
 
 ---
 
@@ -523,7 +525,7 @@ La chiave serve **solo** se usi il backend **Groq** (cloud). È **gratuita**.
 | `faster-whisper` | *(opzionale)* Trascrizione **locale** su CPU | Implementazione ottimizzata di Whisper (CTranslate2), ottima su CPU con `int8` |
 | `deep-translator` | **Traduzione** in italiano (cloud) | Usa Google Translate (endpoint gratuito): nessuna chiave, nessun credito. In locale senza chiave la traduzione passa invece a **Ollama** (offline) |
 | `fpdf2` | *(opzionale)* Esportazione in **PDF** | Pure-python, **niente LaTeX di sistema**; supporta font Unicode |
-| `flet` | *(opzionale)* **GUI desktop** (`gui/main.py`) | Interfaccia grafica nativa moderna in Python; la CLI funziona senza |
+| `pywebview` | *(opzionale)* **GUI** (`EchoScriptApp.py`) | Mostra la pagina di `web/` dentro il WebView già presente nel sistema: niente motore grafico da scaricare. Su Windows serve anche `pythonnet` per il ponte verso WebView2; la CLI funziona senza |
 
 ### Strumento esterno (non pip)
 
