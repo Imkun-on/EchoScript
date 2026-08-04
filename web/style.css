@@ -1,0 +1,983 @@
+/* Tema di EchoScript: indaco profondo, con la luce che viene dal suono.
+ *
+ * Direzione: una sala d'ascolto di notte. Non il terminale a fosfori verdi di
+ * MediaDex — quello e' un altro programma e deve restare riconoscibile a colpo
+ * d'occhio, anche da lontano, anche su una barra delle applicazioni piena.
+ * Qui il fondo e' un blu che tira al viola, e l'unica cosa che brilla e' cio'
+ * che sta lavorando.
+ *
+ * Le tre regole che tengono insieme il file:
+ *   1. le superfici sono vetro smerigliato su fondo scuro: bordo tenue,
+ *      taglio di luce in alto, ombra sotto;
+ *   2. le distanze seguono una scala di 4 px, mai valori a caso;
+ *   3. il viola e' l'identita', il ciano e' cio' che lavora, il verde acqua
+ *      cio' che e' riuscito, l'ambra e il corallo cio' che non va.
+ *
+ * Cambiare tinta al programma intero e' cambiare le sei righe di :root qui
+ * sotto: nessun colore e' scritto altrove se non come trasparenza dello stesso.
+ */
+
+:root {
+  /* Fondali: nero che tira all'indaco */
+  --f0: #04040a;
+  --f1: #0a0a16;
+  --f2: #12122a;
+
+  /* Superfici */
+  --vetro:      #12122ab3;
+  --vetro-alto: #1b1b3aa6;
+  --incavo:     #07070fe0;
+
+  --bordo:  #8b7cff1f;
+  --taglio: #8b7cff38;
+
+  /* Testo: bianco appena virato al lilla, mai puro */
+  --t0: #e9e7f7;
+  --t1: #a6a1cc;
+  --t2: #6a6590;
+
+  /* Luci */
+  --iris:  #7c6cff;   /* il viola d'identita': marchio, selezioni, azione */
+  --lume:  #a78bfa;   /* viola chiaro, per i bordi accesi */
+  --onda:  #38d6ee;   /* ciano: cio' che sta lavorando */
+  --verde: #34d399;   /* verde acqua: cio' che e' riuscito */
+  --rosso: #fb7185;   /* corallo: gli errori */
+  --giallo:#fbbf24;   /* ambra: gli avvisi */
+
+  /* Ritmo */
+  --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px;
+  --s5: 24px; --s6: 32px;
+  --r-s: 7px; --r-m: 10px; --r-l: 14px;
+
+  --ombra-bassa: 0 1px 2px #00000073;
+  --ombra-media: 0 4px 18px #000000a6, 0 1px 3px #00000080;
+  --ombra-alta:  0 16px 48px #000000cc, 0 2px 8px #000000a6;
+
+  --molla: cubic-bezier(.22, 1, .36, 1);
+}
+
+* { box-sizing: border-box; }
+*:focus { outline: none; }
+
+/* L'attributo hidden vale piu' di qualunque display dichiarato qui sotto.
+ * Senza questa riga un elemento nascosto con hidden ma dichiarato flex — i due
+ * ingressi della sorgente, che si alternano nello stesso posto — resterebbe
+ * visibile: la regola di classe batte quella dell'attributo, e si vedrebbero
+ * il campo del link e quello del file uno sopra l'altro. */
+[hidden] { display: none !important; }
+
+html, body {
+  height: 100%; margin: 0; overflow: hidden;
+  background: var(--f1);
+  color: var(--t0);
+  font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px; line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -webkit-user-select: none; user-select: none;
+}
+
+/* ── Sfondo ─────────────────────────────────────────────────────────────── */
+/* Tre aloni che derivano lentamente, un'onda sonora ferma sul fondo, un velo
+ * di grana per non far vedere le bande dei gradienti. Nessuna immagine da
+ * caricare: sono venti righe di CSS e pesano zero. */
+
+.sfondo { position: fixed; inset: 0; overflow: hidden; z-index: 0; background: var(--f1); }
+
+.alone {
+  position: absolute; border-radius: 50%;
+  filter: blur(120px); will-change: transform;
+}
+.alone-1 {
+  width: 46vw; height: 46vw; left: -12vw; top: -14vw; opacity: .40;
+  background: radial-gradient(circle, var(--iris) 0%, transparent 68%);
+  animation: deriva-1 41s ease-in-out infinite alternate;
+}
+.alone-2 {
+  width: 40vw; height: 40vw; right: -10vw; top: 12vh; opacity: .28;
+  background: radial-gradient(circle, var(--onda) 0%, transparent 68%);
+  animation: deriva-2 34s ease-in-out infinite alternate;
+}
+.alone-3 {
+  width: 36vw; height: 36vw; left: 28vw; bottom: -18vw; opacity: .22;
+  background: radial-gradient(circle, var(--lume) 0%, transparent 68%);
+  animation: deriva-3 47s ease-in-out infinite alternate;
+}
+@keyframes deriva-1 { to { transform: translate(11vw, 9vh) scale(1.16); } }
+@keyframes deriva-2 { to { transform: translate(-9vw, 8vh) scale(.9);  } }
+@keyframes deriva-3 { to { transform: translate(8vw, -8vh) scale(1.2); } }
+
+/* L'onda: barre verticali di altezza diversa lungo il fondo, come un livello
+ * audio congelato. E' il marchio del programma ripetuto in sottofondo, e la
+ * sola cosa che dice, senza scriverlo, di cosa si occupa. */
+.onde {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 34vh;
+  background-image: repeating-linear-gradient(
+    90deg, #8b7cff14 0 2px, transparent 2px 13px);
+  mask-image: linear-gradient(to top, #000 0%, transparent 78%);
+  -webkit-mask-image: linear-gradient(to top, #000 0%, transparent 78%);
+  animation: respiro 14s ease-in-out infinite alternate;
+}
+@keyframes respiro { to { opacity: .45; transform: scaleY(1.14); } }
+
+/* Grana finissima: senza, i gradienti larghi mostrano le bande a scalini. */
+.grana {
+  position: absolute; inset: -50%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.32'/%3E%3C/svg%3E");
+  opacity: .05; pointer-events: none;
+}
+
+.vignetta {
+  position: absolute; inset: 0; pointer-events: none;
+  background:
+    radial-gradient(ellipse at 50% 32%, transparent 26%, #04040ab8 100%),
+    linear-gradient(180deg, #0a0a16d9 0%, #0a0a1659 38%, #04040aeb 100%);
+}
+
+/* ── Impianto ───────────────────────────────────────────────────────────── */
+
+.guscio { position: relative; z-index: 1; display: flex; height: 100vh; }
+
+.barra {
+  width: 236px; flex: 0 0 236px;
+  display: flex; flex-direction: column;
+  padding: var(--s5) var(--s4);
+  background: linear-gradient(180deg, #07070ff7, #07070fe6);
+  border-right: 1px solid var(--bordo);
+  backdrop-filter: blur(10px);
+}
+
+.marchio { margin-bottom: var(--s6); padding-left: var(--s1); }
+.logo {
+  font-size: 26px; font-weight: 800; letter-spacing: -.5px; line-height: 1.1;
+  background: linear-gradient(103deg, #fff 6%, var(--lume) 44%, var(--onda) 98%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 22px #7c6cff4d);
+}
+.sottotitolo {
+  font-size: 10px; color: var(--t2); margin-top: var(--s1);
+  letter-spacing: .8px; text-transform: uppercase; font-weight: 600;
+}
+
+.menu { display: flex; flex-direction: column; gap: var(--s1); }
+.voce {
+  position: relative; display: flex; align-items: center; gap: 11px;
+  padding: 11px 12px 11px 14px; border: 0; border-radius: var(--r-m);
+  background: transparent; color: var(--t1);
+  font: inherit; font-size: 13.5px; font-weight: 600; text-align: left;
+  cursor: pointer; transition: background .2s var(--molla), color .2s;
+}
+.voce .icona { width: 18px; height: 18px; flex: 0 0 18px; opacity: .8; }
+.voce:hover:not(:disabled) { background: #8b7cff0f; color: var(--t0); }
+
+/* La rotaia accesa a sinistra dice quale sezione e' attiva meglio di uno
+ * sfondo diverso: si vede con la coda dell'occhio, senza dover leggere. */
+.rotaia {
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 0; border-radius: 0 3px 3px 0;
+  background: var(--iris); transition: height .26s var(--molla);
+}
+.voce.attiva { background: #7c6cff1a; color: var(--t0); }
+.voce.attiva .rotaia { height: 22px; box-shadow: 0 0 14px var(--iris), 0 0 28px #7c6cff73; }
+.voce.attiva .icona { opacity: 1; color: var(--lume); }
+
+/* La targhetta accanto a «Motore» dice quale motore e' scelto senza dover
+ * entrare nella sezione: e' l'informazione che si vuole piu' spesso. */
+.targhetta-menu {
+  margin-left: auto; font-size: 8.5px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .7px; color: var(--t2);
+  border: 1px solid var(--bordo); border-radius: 5px; padding: 2px 5px;
+  white-space: nowrap;
+}
+.targhetta-menu.cloud  { color: var(--onda);  border-color: #38d6ee4d; }
+.targhetta-menu.locale { color: var(--verde); border-color: #34d3994d; }
+
+.piede { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
+.etichetta {
+  font-size: 9.5px; color: var(--t2); font-weight: 700;
+  text-transform: uppercase; letter-spacing: .7px;
+}
+/* Un'etichetta che intitola un blocco invece di un campo: stesso carattere, un
+ * po' d'aria sopra, cosi' si legge come un titoletto e non come una didascalia
+ * appiccicata all'elemento precedente. */
+.etichetta-blocco { display: block; margin: var(--s2) 0 10px; }
+
+.corpo {
+  flex: 1; min-width: 0; overflow: hidden;
+  padding: var(--s5) var(--s5) var(--s4);
+  display: flex; flex-direction: column; gap: var(--s4);
+}
+
+.intestazione h1 {
+  margin: 0 0 5px; font-size: 25px; font-weight: 800; letter-spacing: -.5px;
+  font-family: 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
+}
+.intestazione p { margin: 0; color: var(--t1); font-size: 12.5px; max-width: 82ch; }
+
+/* ── Vetro ──────────────────────────────────────────────────────────────── */
+/* Il taglio di luce in alto e l'ombra sotto sono cio' che fa leggere una
+ * superficie come vetro invece che come un rettangolo colorato. */
+
+.vetro {
+  background: linear-gradient(165deg, var(--vetro-alto), var(--vetro));
+  border: 1px solid var(--bordo);
+  border-radius: var(--r-l);
+  padding: var(--s4);
+  backdrop-filter: blur(10px) saturate(1.15);
+  box-shadow: var(--ombra-media), inset 0 1px 0 var(--taglio);
+}
+.vetro.colonna {
+  display: flex; flex-direction: column; min-height: 0;
+  padding: var(--s3) var(--s4) var(--s4);
+}
+.vetro.crescente { flex: 1; min-height: 0; }
+
+/* ── Campi ──────────────────────────────────────────────────────────────── */
+
+.riga { display: flex; gap: var(--s3); margin-bottom: var(--s3); flex-wrap: wrap; }
+.gruppo { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.gruppo + .gruppo { margin-top: var(--s3); }
+.riga .gruppo + .gruppo { margin-top: 0; }
+.gruppo.largo { flex: 1 1 320px; }
+.gruppo.stretto { flex: 0 1 200px; }
+.gruppo label {
+  font-size: 9.5px; color: var(--t2); font-weight: 700;
+  text-transform: uppercase; letter-spacing: .7px;
+}
+
+.campo {
+  width: 100%; padding: 10px 12px;
+  background: var(--incavo);
+  border: 1px solid var(--bordo); border-radius: var(--r-s);
+  color: var(--t0); font: inherit; font-size: 13px;
+  transition: border-color .18s, box-shadow .18s, background .18s;
+  -webkit-user-select: text; user-select: text;
+}
+.campo::placeholder { color: var(--t2); }
+.campo:hover { border-color: var(--taglio); }
+.campo:focus {
+  border-color: #7c6cffa6; background: #07070f;
+  box-shadow: 0 0 0 3px #7c6cff26, 0 0 18px #7c6cff1f;
+}
+.campo.compatto { padding: 7px 10px; font-size: 12.5px; }
+select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
+
+.campo-icona { position: relative; display: flex; }
+.icona-campo {
+  position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+  width: 15px; height: 15px; color: var(--t2); pointer-events: none;
+  transition: color .18s;
+}
+.campo-icona:focus-within .icona-campo { color: var(--lume); }
+.campo.con-icona { padding-left: 34px; }
+.campo.con-coda { padding-right: 44px; }
+.coda {
+  position: absolute; right: 4px; top: 4px; bottom: 4px; width: 34px;
+  border: 0; border-radius: 6px; background: #8b7cff14; color: var(--t1);
+  font: inherit; font-size: 15px; cursor: pointer;
+  transition: background .18s, color .18s;
+}
+.coda:hover { background: #8b7cff26; color: var(--lume); }
+
+/* ── Interruttori ───────────────────────────────────────────────────────── */
+/* Ognuno porta con se' la propria spiegazione: sono tre scelte che costano
+ * tempo e crediti, e nasconderne il prezzo dietro un nome di tre parole
+ * sarebbe stato scortese. */
+
+.interruttori { display: flex; flex-direction: column; gap: var(--s3); margin-bottom: var(--s4); }
+.interruttore {
+  display: flex; align-items: flex-start; gap: 11px;
+  font-size: 12.5px; color: var(--t1); cursor: pointer;
+  transition: color .18s;
+}
+.interruttore:hover { color: var(--t0); }
+.interruttore input { display: none; }
+.interruttore-testo { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.interruttore-nome { font-size: 13px; font-weight: 600; color: var(--t0); }
+.interruttore-nota { font-size: 11px; color: var(--t2); line-height: 1.4; }
+
+.cursore {
+  width: 36px; height: 20px; border-radius: 10px; flex: 0 0 36px;
+  margin-top: 1px;
+  background: #8b7cff1f; position: relative;
+  transition: background .24s var(--molla);
+  box-shadow: inset 0 1px 2px #00000040;
+}
+.cursore::after {
+  content: ''; position: absolute; top: 3px; left: 3px;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--t2); box-shadow: var(--ombra-bassa);
+  transition: transform .24s var(--molla), background .24s;
+}
+.interruttore input:checked + .cursore { background: #7c6cff59; }
+.interruttore input:checked + .cursore::after {
+  transform: translateX(16px); background: var(--lume);
+  box-shadow: 0 0 12px var(--iris);
+}
+
+/* ── Bottoni ────────────────────────────────────────────────────────────── */
+
+.azioni { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+.azioni-chiave { margin-bottom: 6px; }
+.spazio { flex: 1; }
+
+.bottone {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 20px; border-radius: var(--r-s);
+  font: inherit; font-size: 13px; font-weight: 700;
+  cursor: pointer; border: 1px solid transparent;
+  transition: transform .14s var(--molla), box-shadow .22s, background .2s, color .2s;
+}
+.bottone .icona { width: 16px; height: 16px; flex: 0 0 16px; }
+.bottone:active:not(:disabled) { transform: translateY(1px) scale(.985); }
+.bottone:disabled { opacity: .4; cursor: default; }
+
+.bottone.contorno { background: #7c6cff0f; color: var(--lume); border-color: #7c6cff59; }
+.bottone.contorno:hover:not(:disabled) {
+  background: #7c6cff1f; border-color: var(--lume);
+  box-shadow: 0 0 20px #7c6cff3d, inset 0 0 14px #7c6cff14;
+}
+.bottone.pieno {
+  background: linear-gradient(100deg, var(--iris), #5b8cff);
+  color: #060617; box-shadow: 0 4px 18px #7c6cff4d;
+}
+.bottone.pieno:hover:not(:disabled) {
+  box-shadow: 0 6px 28px #7c6cff8c, 0 0 0 1px #7c6cff73;
+  filter: brightness(1.08);
+}
+.bottone.nudo {
+  background: transparent; border: 0; color: var(--t2);
+  padding: 4px 8px; font-size: 11px; font-weight: 600;
+}
+.bottone.nudo:hover { color: var(--t0); }
+.bottone.ambra {
+  background: linear-gradient(100deg, var(--giallo), #f59e0b);
+  color: #1a1206; box-shadow: 0 4px 18px #fbbf2440;
+}
+.bottone.ambra:hover:not(:disabled) { filter: brightness(1.06); }
+
+.scorciatoie {
+  font-size: 10.5px; color: var(--t2); letter-spacing: .2px;
+  padding-left: 2px; margin-top: -6px;
+}
+
+/* ── Scelte a riquadro ──────────────────────────────────────────────────── */
+/* Il motore non e' una voce di menu: e' la decisione piu' importante del
+ * programma — dove finisce l'audio, quanto costa, quanto si aspetta — e va
+ * presa guardando due riquadri affiancati, non aprendo una tendina. */
+
+.scelte { display: flex; gap: var(--s3); flex-wrap: wrap; }
+.scelta {
+  flex: 1 1 128px; min-width: 118px;
+  display: flex; flex-direction: column; gap: 3px; align-items: flex-start;
+  padding: 9px 11px; border-radius: var(--r-s);
+  background: var(--incavo); border: 1px solid var(--bordo);
+  color: var(--t1); font: inherit; cursor: pointer; text-align: left;
+  transition: border-color .18s, background .18s, transform .14s var(--molla);
+}
+.scelta:hover { background: #8b7cff0f; transform: translateY(-1px); }
+.scelta.attiva {
+  border-color: var(--iris); background: #7c6cff1a;
+  box-shadow: 0 0 0 3px #7c6cff1f;
+}
+.scelta.grande { flex: 1 1 260px; padding: var(--s4); gap: 5px; }
+.scelta-alto { display: flex; align-items: center; width: 100%; margin-bottom: 6px; }
+.scelta-alto .icona {
+  width: 26px; height: 26px; color: var(--t1);
+  transition: color .18s;
+}
+.scelta.attiva .scelta-alto .icona { color: var(--lume); }
+.scelta-tag {
+  margin-left: auto; font-size: 8.5px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .8px; color: var(--t2);
+  border: 1px solid var(--bordo); border-radius: 5px; padding: 2px 6px;
+}
+.scelta.attiva .scelta-tag { color: var(--lume); border-color: #7c6cff59; }
+.scelta-nome { font-size: 14px; font-weight: 700; color: var(--t0); }
+.scelta-nota { font-size: 11px; color: var(--t2); line-height: 1.45; }
+
+/* ── Avanzamento ────────────────────────────────────────────────────────── */
+
+.avanzamento { display: none; flex-direction: column; gap: var(--s3); }
+.avanzamento.visibile { display: flex; animation: entra .3s var(--molla) both; }
+
+.avanz-alto { display: flex; align-items: center; gap: var(--s2); }
+.avanz-pct {
+  font-size: 15px; font-weight: 800; color: var(--lume);
+  font-family: 'Cascadia Mono', Consolas, monospace;
+}
+.avanz-nota { font-size: 11px; color: var(--giallo); }
+
+.targhetta-motore {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 700; letter-spacing: .2px;
+  border-radius: 999px; padding: 3px 11px;
+  background: #7c6cff1f; color: var(--lume); border: 1px solid #7c6cff59;
+}
+.targhetta-motore.cloud  { background: #38d6ee1f; color: var(--onda);  border-color: #38d6ee59; }
+.targhetta-motore.locale { background: #34d3991f; color: var(--verde); border-color: #34d39959; }
+
+.binario {
+  height: 6px; border-radius: 3px; overflow: hidden;
+  background: var(--incavo); box-shadow: inset 0 1px 2px #00000059;
+}
+/* La barra dice sempre un numero vero: la larghezza e' la frazione che il
+ * motore ha davvero portato a termine — blocchi trascritti, sezioni tradotte,
+ * fotogrammi guardati. Non esiste uno stato «indeterminato» che va avanti e
+ * indietro: quando un motore non sa quanto manca la barra sta ferma dov'e', e a
+ * parlare e' la riga di testo sotto. */
+.cursa {
+  height: 100%; width: 0; border-radius: 3px;
+  background: linear-gradient(90deg, var(--iris), var(--onda));
+  box-shadow: 0 0 16px var(--iris);
+  transition: width .35s var(--molla);
+}
+
+.avanz-riga { display: flex; align-items: baseline; gap: var(--s3); flex-wrap: wrap; }
+.avanz-titolo { font-size: 13px; font-weight: 700; color: var(--t0); }
+.avanz-dettaglio {
+  font-size: 11.5px; color: var(--t1); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* I passaggi: quelli fatti spuntati, quello in corso acceso, gli altri spenti.
+ * E' la sola cosa che dice quanto manca alla fine e non solo alla fase. */
+.passi { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.passo {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 600; color: var(--t2);
+  border: 1px solid var(--bordo); border-radius: 999px; padding: 4px 11px 4px 8px;
+  transition: color .2s, border-color .2s, background .2s;
+}
+.passo .pallino {
+  width: 7px; height: 7px; border-radius: 50%; flex: 0 0 7px;
+  background: #8b7cff33; transition: background .2s, box-shadow .2s;
+}
+.passo.fatto { color: var(--verde); border-color: #34d39940; }
+.passo.fatto .pallino { background: var(--verde); }
+.passo.corrente {
+  color: var(--onda); border-color: #38d6ee66; background: #38d6ee14;
+}
+.passo.corrente .pallino {
+  background: var(--onda); box-shadow: 0 0 10px var(--onda);
+  animation: pulsa 1.2s ease-in-out infinite;
+}
+
+.racconto {
+  display: flex; gap: 10px; align-items: flex-start;
+  border-radius: var(--r-m); padding: var(--s3);
+  background: #7c6cff0d; border: 1px solid var(--bordo);
+  font-size: 12.5px; color: var(--t0);
+}
+.racconto .icona { width: 16px; height: 16px; flex: 0 0 16px; color: var(--lume); margin-top: 2px; }
+.racconto-piano { font-size: 11px; color: var(--t2); margin-top: 3px; line-height: 1.45; }
+
+/* ── Colonne, elenchi, diario ───────────────────────────────────────────── */
+
+.due-colonne { display: grid; grid-template-columns: 1.1fr 1fr; gap: var(--s4); flex: 1; min-height: 0; }
+
+/* I pannelli del motore non sono due colonne: sono due facce della stessa
+ * scelta, e se ne vede una alla volta. Impilarli e lasciar decidere al display
+ * quale mostrare costa una riga e non lascia mai un buco. */
+.pannelli-motore { display: flex; flex-direction: column; gap: var(--s4); }
+.pannelli-motore > .colonna { flex: 0 0 auto; }
+
+.titolo-pannello {
+  display: flex; align-items: center; gap: var(--s2);
+  font-size: 11px; font-weight: 700; letter-spacing: 1.1px;
+  text-transform: uppercase; color: var(--t1);
+  padding-bottom: var(--s3); margin-bottom: var(--s3);
+  border-bottom: 1px solid var(--bordo);
+  font-family: 'Cascadia Mono', Consolas, monospace;
+}
+.icona-pannello { width: 15px; height: 15px; color: var(--lume); }
+.targhetta {
+  font-size: 10px; font-weight: 600; letter-spacing: .2px;
+  text-transform: none; color: var(--t1);
+  background: #8b7cff0f; border: 1px solid var(--bordo);
+  border-radius: 999px; padding: 2px 9px; white-space: nowrap;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+.stato { font-size: 10px; color: var(--t2); font-weight: 600; text-transform: none; letter-spacing: 0; }
+
+.spia { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 7px; background: #8b7cff33; transition: background .25s, box-shadow .25s; }
+.spia.working { background: var(--onda);  box-shadow: 0 0 12px var(--onda); animation: pulsa 1.2s ease-in-out infinite; }
+.spia.done    { background: var(--verde); box-shadow: 0 0 12px var(--verde); }
+.spia.error   { background: var(--rosso); box-shadow: 0 0 12px var(--rosso); }
+@keyframes pulsa { 50% { opacity: .3; } }
+
+.elenco, .diario {
+  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  display: flex; flex-direction: column; padding-right: 6px;
+}
+.elenco { gap: var(--s3); }
+
+.diario {
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: 11px; line-height: 1.6; gap: 0;
+  -webkit-user-select: text; user-select: text;
+}
+.riga-log {
+  white-space: pre-wrap; word-break: break-word; color: var(--t1);
+  padding: 1px 0 1px 9px; border-left: 2px solid transparent;
+}
+.riga-log.ok   { color: var(--verde);  border-left-color: #34d39940; }
+.riga-log.err  { color: var(--rosso);  border-left-color: #fb718540; }
+.riga-log.warn { color: var(--giallo); border-left-color: #fbbf2440; }
+/* Le intestazioni di fase: piu' chiare e staccate da sopra, cosi' il diario si
+   legge a blocchi invece che come un elenco piatto. Il colore non e' un giudizio,
+   quello lo danno il verde e il rosso: e' solo il grado del titolo. */
+.riga-log.fase { color: var(--t0); border-left-color: var(--taglio); margin-top: 7px; }
+.riga-log.fase:first-child { margin-top: 0; }
+
+.vuoto {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 11px; padding: var(--s5) var(--s4);
+  color: var(--t2); font-size: 12px; text-align: center;
+}
+.vuoto .icona { width: 34px; height: 34px; opacity: .35; }
+
+.nota-riga { font-size: 11.5px; color: var(--t2); margin: 0 0 var(--s3); line-height: 1.5; }
+
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #8b7cff1f; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #8b7cff3d; }
+
+/* ── La scheda della sorgente ───────────────────────────────────────────── */
+/* La copertina rende il video riconoscibile a colpo d'occhio molto piu' del
+ * titolo, che su YouTube e' spesso una fila di parole chiave. Per un file
+ * locale non c'e' copertina: al suo posto l'icona, e nessun rettangolo vuoto. */
+
+.scheda-sorgente { display: flex; flex-direction: column; gap: var(--s3); }
+.scheda-copertina {
+  width: 100%; aspect-ratio: 16 / 9; border-radius: var(--r-m);
+  overflow: hidden; background: var(--incavo);
+  border: 1px solid var(--taglio); box-shadow: var(--ombra-media);
+  display: flex; align-items: center; justify-content: center;
+  animation: entra .35s var(--molla) both;
+}
+.scheda-copertina img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scheda-copertina .icona { width: 46px; height: 46px; color: var(--t2); opacity: .5; }
+.scheda-nome { font-size: 15px; font-weight: 700; color: var(--t0); line-height: 1.35; }
+
+.dati { display: flex; flex-wrap: wrap; gap: 6px var(--s4); }
+.dato { display: flex; gap: 6px; font-size: 12px; align-items: baseline; }
+.dato-nome { color: var(--t2); }
+.dato-valore { color: var(--t0); font-weight: 600; }
+
+/* L'elenco dei video di una playlist: numerato, con la durata a destra. */
+.elenco-video {
+  display: flex; flex-direction: column; gap: 2px;
+  max-height: 240px; overflow-y: auto;
+  border-radius: var(--r-s); background: var(--incavo);
+  border: 1px solid var(--bordo); padding: var(--s2);
+}
+.riga-video { display: flex; align-items: center; gap: var(--s2); font-size: 12px; padding: 3px 4px; }
+.riga-video .numero { color: var(--t2); width: 26px; flex: 0 0 26px; font-family: 'Cascadia Mono', monospace; font-size: 10.5px; }
+.riga-video .titolo { flex: 1; min-width: 0; color: var(--t0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.riga-video .durata { color: var(--t2); font-family: 'Cascadia Mono', monospace; font-size: 10.5px; }
+.riga-video.ok .titolo         { color: var(--verde); }
+.riga-video.neutro .titolo     { color: var(--t2); }
+.riga-video.attenzione .titolo { color: var(--giallo); }
+
+/* ── Stato della chiave ─────────────────────────────────────────────────── */
+
+.stato-chiave { font-size: 11.5px; color: var(--t2); line-height: 1.45; }
+.stato-chiave.presente { color: var(--verde); }
+
+/* ── Crediti ────────────────────────────────────────────────────────────── */
+
+.credito {
+  border-radius: var(--r-m); padding: var(--s3) var(--s4);
+  background: #8b7cff0a; border: 1px solid var(--bordo);
+  display: flex; flex-direction: column; gap: var(--s2);
+  animation: entra .3s var(--molla) both;
+}
+.credito-testa { display: flex; align-items: baseline; gap: var(--s2); flex-wrap: wrap; }
+.credito-ruolo { font-size: 13.5px; font-weight: 700; color: var(--t0); }
+.credito-modello { font-size: 11px; color: var(--t2); font-family: 'Cascadia Mono', monospace; }
+.credito-voce {
+  display: flex; flex-direction: column; gap: 1px;
+  padding: var(--s2) var(--s3); border-radius: var(--r-s);
+  background: var(--incavo); border: 1px solid var(--bordo);
+}
+.credito-tipo { font-size: 12px; font-weight: 700; color: var(--t0); }
+.credito-riga { font-size: 11.5px; color: var(--t2); }
+.credito-riga.forte { color: var(--lume); font-weight: 600; }
+
+/* ── Sezioni ────────────────────────────────────────────────────────────── */
+/* Prima la sezione che se ne va sfuma e arretra, poi entra la nuova dall'altro
+ * lato: si capisce di essersi spostati, invece di ritrovarsi altrove senza
+ * sapere come. */
+
+.sezione { display: none; flex-direction: column; gap: var(--s4); flex: 1; min-height: 0; }
+.sezione.attiva { display: flex; animation: sezione-entra .32s var(--molla) both; }
+.sezione.uscita {
+  display: flex !important;
+  animation: sezione-esce .2s ease-in both;
+  pointer-events: none;
+}
+@keyframes sezione-entra {
+  from { opacity: 0; transform: translateX(18px); filter: blur(3px); }
+  to   { opacity: 1; transform: none; filter: none; }
+}
+@keyframes sezione-esce {
+  from { opacity: 1; transform: none; filter: none; }
+  to   { opacity: 0; transform: translateX(-14px); filter: blur(4px); }
+}
+@keyframes entra { from { opacity: 0; transform: translateY(6px); } }
+
+.slot-diario { display: flex; flex-direction: column; min-height: 0; }
+.slot-diario > .colonna { flex: 1; }
+
+/* ── Avvisi a comparsa ──────────────────────────────────────────────────── */
+/* Un errore dentro il diario si perde fra cinquanta righe. Qui arriva davanti,
+ * resta il tempo di leggerlo e se ne va da solo. */
+
+.avvisi {
+  position: fixed; right: var(--s5); bottom: var(--s5); z-index: 50;
+  display: flex; flex-direction: column; gap: var(--s2);
+  pointer-events: none;
+}
+.avviso {
+  display: flex; align-items: center; gap: 10px;
+  min-width: 260px; max-width: 420px;
+  padding: 12px 15px; border-radius: var(--r-m);
+  background: linear-gradient(165deg, #1b1b3af2, #12122af2);
+  border: 1px solid var(--taglio);
+  box-shadow: var(--ombra-alta), inset 0 1px 0 var(--taglio);
+  backdrop-filter: blur(12px);
+  font-size: 12.5px; color: var(--t0);
+  animation: avviso-entra .32s var(--molla) both;
+  pointer-events: auto;
+}
+.avviso.uscita { animation: avviso-esce .28s ease-in both; }
+.avviso::before {
+  content: ''; width: 3px; align-self: stretch; border-radius: 2px;
+  background: var(--iris); flex: 0 0 3px;
+}
+.avviso.ok::before   { background: var(--verde); box-shadow: 0 0 10px var(--verde); }
+.avviso.fail::before { background: var(--rosso); box-shadow: 0 0 10px var(--rosso); }
+@keyframes avviso-entra { from { opacity: 0; transform: translateX(28px) scale(.96); } }
+@keyframes avviso-esce  { to   { opacity: 0; transform: translateX(28px) scale(.96); } }
+
+/* ── Trascinamento ──────────────────────────────────────────────────────── */
+
+.velo-trascina {
+  position: fixed; inset: 0; z-index: 60; display: none;
+  align-items: center; justify-content: center;
+  background: #04040ad9; backdrop-filter: blur(6px);
+}
+.velo-trascina.visibile { display: flex; animation: avviso-entra .2s ease both; }
+.riquadro-trascina {
+  display: flex; flex-direction: column; align-items: center; gap: var(--s3);
+  padding: var(--s6) 56px; border-radius: var(--r-l);
+  border: 2px dashed #7c6cffa6; background: #7c6cff14;
+  color: var(--t0); font-size: 15px; font-weight: 700;
+}
+.riquadro-trascina .icona { width: 40px; height: 40px; color: var(--lume); }
+
+/* ── La finestra modale ─────────────────────────────────────────────────── */
+/* Una sola, riempita di volta in volta. Il fondo si sfoca invece di annerirsi:
+ * si continua a vedere dov'e' rimasto il programma, il che rende la finestra
+ * un momento della stessa storia e non un'interruzione. */
+
+.velo-finestra {
+  position: fixed; inset: 0; z-index: 100;
+  display: none; align-items: center; justify-content: center;
+  padding: var(--s5);
+  background: #04040ab3; backdrop-filter: blur(7px);
+}
+.velo-finestra.visibile { display: flex; animation: velo-entra .22s ease both; }
+@keyframes velo-entra { from { opacity: 0; } }
+
+.finestra {
+  width: min(560px, 100%); max-height: 88vh;
+  display: flex; flex-direction: column;
+  background: linear-gradient(168deg, #1b1b3af7, #12122af7);
+  border: 1px solid var(--taglio); border-radius: var(--r-l);
+  box-shadow: var(--ombra-alta), inset 0 1px 0 var(--taglio);
+  animation: finestra-entra .28s var(--molla) both;
+}
+@keyframes finestra-entra { from { opacity: 0; transform: translateY(14px) scale(.97); } }
+
+.finestra-testa {
+  display: flex; align-items: center; gap: 11px;
+  padding: var(--s4) var(--s5) var(--s3);
+  border-bottom: 1px solid var(--bordo);
+}
+.finestra-testa .icona { width: 21px; height: 21px; flex: 0 0 21px; color: var(--lume); }
+.finestra-testa h2 { margin: 0; font-size: 17px; font-weight: 700; color: var(--t0); }
+.finestra.attenzione .finestra-testa .icona,
+.finestra.attenzione .finestra-testa h2 { color: var(--giallo); }
+.finestra.errore .finestra-testa .icona,
+.finestra.errore .finestra-testa h2 { color: var(--rosso); }
+.finestra.riuscito .finestra-testa .icona,
+.finestra.riuscito .finestra-testa h2 { color: var(--verde); }
+
+.finestra-corpo {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: var(--s4) var(--s5);
+  display: flex; flex-direction: column; gap: var(--s3);
+  font-size: 13px; color: var(--t1);
+}
+.finestra-corpo p { margin: 0; line-height: 1.55; white-space: pre-line; }
+.finestra-azioni {
+  display: flex; justify-content: flex-end; gap: var(--s2);
+  padding: var(--s3) var(--s5) var(--s4);
+  border-top: 1px solid var(--bordo);
+}
+
+/* Un elenco di scelte dentro la finestra: ognuna una riga cliccabile con icona,
+ * nome e spiegazione. Il chevron a destra dice che porta da qualche parte. */
+.voce-scelta {
+  display: flex; align-items: center; gap: var(--s3); width: 100%;
+  padding: var(--s3) var(--s4); border-radius: var(--r-m); text-align: left;
+  background: var(--incavo); border: 1px solid var(--bordo);
+  color: var(--t1); font: inherit; cursor: pointer;
+  transition: background .18s, border-color .18s, transform .14s var(--molla);
+}
+.voce-scelta:hover { background: #8b7cff14; border-color: var(--taglio); transform: translateX(2px); }
+.voce-scelta .riquadro-icona {
+  width: 38px; height: 38px; flex: 0 0 38px; border-radius: var(--r-m);
+  display: flex; align-items: center; justify-content: center;
+  background: #7c6cff1f; color: var(--lume);
+}
+.voce-scelta.attenzione .riquadro-icona { background: #fbbf241f; color: var(--giallo); }
+.voce-scelta .riquadro-icona .icona { width: 19px; height: 19px; }
+.voce-scelta .testo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.voce-scelta .titolo { font-size: 13.5px; font-weight: 700; color: var(--t0); }
+.voce-scelta .desc { font-size: 11.5px; color: var(--t2); line-height: 1.45; }
+.voce-scelta .chevron { width: 16px; height: 16px; flex: 0 0 16px; color: var(--t2); }
+
+/* Il riquadro dove sono finiti i file: si copia con il mouse, quindi il testo
+ * qui dentro resta selezionabile anche se nel resto della finestra non lo e'. */
+.riquadro-cartella {
+  border-radius: var(--r-m); padding: var(--s3);
+  background: #7c6cff0d; border: 1px solid var(--bordo);
+  display: flex; flex-direction: column; gap: 3px;
+}
+.riquadro-cartella .etichetta-piccola {
+  font-size: 10px; text-transform: uppercase; letter-spacing: .7px;
+  color: var(--t2); font-weight: 700;
+}
+.riquadro-cartella .percorso {
+  font-size: 12px; color: var(--t0); word-break: break-all;
+  -webkit-user-select: text; user-select: text;
+}
+
+.gruppo-file { display: flex; flex-direction: column; gap: 3px; }
+.gruppo-file .cartella {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12.5px; font-weight: 700; color: var(--lume);
+}
+.gruppo-file .cartella .icona { width: 15px; height: 15px; }
+.gruppo-file .nome-file {
+  padding-left: 26px; font-size: 12px; color: var(--t1);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.avviso-riquadro {
+  border-radius: var(--r-m); padding: var(--s3);
+  background: #fbbf2417; border: 1px solid #fbbf2440;
+  color: var(--giallo); font-size: 12px; line-height: 1.5;
+}
+
+.conteggi { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); }
+.conteggio { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; }
+.conteggio .pallino { width: 7px; height: 7px; border-radius: 50%; }
+.conteggio.ok .pallino         { background: var(--verde); }
+.conteggio.neutro .pallino     { background: var(--t2); }
+.conteggio.attenzione .pallino { background: var(--giallo); }
+
+.blocco-visiva {
+  display: flex; align-items: center; gap: var(--s3);
+  border-radius: var(--r-m); padding: var(--s3);
+  background: #38d6ee14; border: 1px solid #38d6ee40;
+}
+.blocco-visiva .icona { width: 20px; height: 20px; color: var(--onda); flex: 0 0 20px; }
+.blocco-visiva .testo { flex: 1; min-width: 0; }
+.blocco-visiva .titolo { font-size: 13px; font-weight: 700; color: var(--t0); }
+.blocco-visiva .desc { font-size: 11.5px; color: var(--t2); }
+
+/* ── Menu a tendina della pagina ────────────────────────────────────────── */
+/* Il <select> vero resta nel documento, invisibile: continua a essere la fonte
+ * della verita' per tutto il resto del programma. Quello che si vede e si
+ * clicca e' costruito da tendine.js. */
+
+.tendina { position: relative; width: 100%; }
+.tendina > select {
+  position: absolute; inset: 0; opacity: 0; pointer-events: none;
+  width: 100%; height: 100%;
+}
+.tendina-testa {
+  display: flex; align-items: center; gap: var(--s2);
+  text-align: left; cursor: pointer; font: inherit; font-size: 13px;
+  padding-right: 30px; position: relative;
+}
+.tendina-valore {
+  flex: 1; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.tendina-punta {
+  position: absolute; right: 12px; top: 50%;
+  width: 7px; height: 7px; margin-top: -5px;
+  border-right: 1.6px solid var(--t2); border-bottom: 1.6px solid var(--t2);
+  transform: rotate(45deg);
+  transition: transform .22s var(--molla), border-color .18s;
+}
+.tendina.aperta .tendina-punta {
+  transform: rotate(-135deg) translate(-2px, -2px); border-color: var(--lume);
+}
+.tendina.aperta .tendina-testa {
+  border-color: #7c6cffa6;
+  box-shadow: 0 0 0 3px #7c6cff26, 0 0 16px #7c6cff1f;
+}
+
+.tendina-pannello {
+  /* La larghezza non segue quella del bottone: i campi vanno da cento pixel a
+     tutta riga, e i pannelli finirebbero larghi il triplo l'uno dell'altro.
+     Partono da una misura comune e crescono solo se il testo lo richiede. */
+  position: fixed; z-index: 120; min-width: 180px; max-width: 460px;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 5px; overflow-y: auto;
+  background: linear-gradient(168deg, #1b1b3af7, #12122af7);
+  border: 1px solid var(--taglio); border-radius: var(--r-m);
+  box-shadow: var(--ombra-alta), inset 0 1px 0 var(--taglio);
+  backdrop-filter: blur(12px);
+  opacity: 0; pointer-events: none;
+  transform: translateY(-6px) scale(.985);
+  transition: opacity .16s ease, transform .2s var(--molla);
+}
+.tendina-pannello.verso-alto { transform: translateY(6px) scale(.985); }
+.tendina-pannello.visibile { opacity: 1; pointer-events: auto; transform: none; }
+.tendina-voce {
+  /* Altezza fissa e testo su una riga sola: senza, una voce lunga andrebbe a
+     capo e diventerebbe alta il doppio delle altre, e l'elenco sembrerebbe
+     fatto di pezzi diversi. */
+  display: flex; align-items: center; width: 100%; text-align: left;
+  min-height: 34px; padding: 0 12px; border: 0; border-radius: var(--r-s);
+  background: transparent; color: var(--t1);
+  font: inherit; font-size: 12.5px; cursor: pointer;
+  transition: background .12s, color .12s;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tendina-voce.evidenziata { background: #7c6cff1f; color: var(--t0); }
+/* Il nome e' 'tendina-scelta' e non 'scelta' di proposito: quest'ultima e' gia'
+   dei riquadri del motore, dove vale 'flex: 1 1 128px'. Applicata qui dentro,
+   in un pannello che e' a sua volta una colonna flessibile, farebbe crescere la
+   voce scelta fino a riempire tutto. */
+.tendina-voce.tendina-scelta {
+  color: var(--lume); font-weight: 700;
+  box-shadow: inset 2px 0 0 var(--iris);
+}
+.tendina-pannello > .tendina-voce {
+  flex: 0 0 auto; flex-direction: row; min-width: 0;
+  border: 0; background: transparent;
+}
+
+/* ── Il velo di caricamento ─────────────────────────────────────────────── */
+/* Copre la finestra dal momento in cui compare a quello in cui la pagina ha
+ * ricevuto i testi e le scelte. E' lo stesso disegno della schermata che
+ * PyInstaller mostra mentre scompatta l'eseguibile — stesso marchio, stesso
+ * viola, stesso nero — cosi' i due momenti sembrano uno solo e non due
+ * programmi diversi che si passano il turno. */
+
+.velo-avvio {
+  position: fixed; inset: 0; z-index: 200;
+  display: grid; place-items: center;
+  background:
+    radial-gradient(60% 50% at 50% 42%, #2a1f6b59, transparent 70%),
+    var(--f0);
+  transition: opacity .45s var(--molla), visibility .45s;
+}
+.velo-avvio.via { opacity: 0; visibility: hidden; pointer-events: none; }
+
+.avvio-blocco { display: grid; justify-items: center; gap: var(--s4); }
+
+.avvio-marchio {
+  width: 104px; height: 104px; color: var(--iris);
+  filter: drop-shadow(0 0 16px #7c6cff66);
+}
+/* Le barre si muovono come un livello audio: e' l'unica cosa che dice che il
+ * programma sta lavorando e non si e' piantato. */
+.avvio-marchio .b1, .avvio-marchio .b2, .avvio-marchio .b3 {
+  transform-box: fill-box; transform-origin: center;
+  animation: livello 1.15s ease-in-out infinite;
+}
+.avvio-marchio .b1 { animation-delay: -.90s; }
+.avvio-marchio .b2 { animation-delay: -.45s; fill: var(--lume); }
+.avvio-marchio .b3 { animation-delay: -.15s; }
+
+/* Le righe si scrivono una volta sola, da sinistra e una dopo l'altra: e' il
+ * verso in cui va il lavoro, dal parlato allo scritto. In ciclo sarebbero una
+ * scritta che si cancella da sola, che non e' cio' che il programma fa. */
+.avvio-marchio .r1, .avvio-marchio .r2, .avvio-marchio .r3 {
+  transform-box: fill-box; transform-origin: left center;
+  fill: var(--onda);
+  animation: scrittura .5s var(--molla) both;
+}
+.avvio-marchio .r1 { animation-delay: .12s; }
+.avvio-marchio .r2 { animation-delay: .30s; }
+.avvio-marchio .r3 { animation-delay: .48s; }
+
+@keyframes livello {
+  0%, 100% { transform: scaleY(.38); }
+  50%      { transform: scaleY(1); }
+}
+@keyframes scrittura {
+  from { transform: scaleX(0); opacity: 0; }
+  to   { transform: scaleX(1); opacity: 1; }
+}
+
+.avvio-nome {
+  font-size: 26px; font-weight: 700; letter-spacing: .5px;
+  color: var(--t0); text-shadow: 0 0 18px #7c6cff40;
+}
+
+.avvio-barra {
+  width: 190px; height: 3px; border-radius: 2px;
+  background: #8b7cff1f; overflow: hidden;
+}
+/* Si riempie per passi veri: ogni scatto e' un pezzo di avvio portato a
+ * termine (la pagina, i testi, le sezioni, l'ultimo disegno). Non scorre avanti
+ * e indietro, perche' andare avanti e indietro non e' una informazione. */
+.avvio-barra span {
+  display: block; width: 0; height: 100%; border-radius: 2px;
+  background: linear-gradient(90deg, var(--iris), var(--onda));
+  box-shadow: 0 0 10px #7c6cff73;
+  transition: width .28s var(--molla);
+}
+
+/* ── Costo di disegno e coerenza ────────────────────────────────────────── */
+/* Una durata sola e una curva sola per tutto cio' che non ha un motivo per
+ * essere diverso: la sensazione di fluidita' viene piu' dalla coerenza che
+ * dalla lentezza. E si dichiara in anticipo cosa cambiera', cosi' il disegno
+ * prepara il livello una volta invece di ricostruirlo a ogni fotogramma. */
+
+.bottone, .campo, .voce, .interruttore, .scelta, .voce-scelta,
+.tendina-testa, .tendina-voce, .cursore {
+  transition-timing-function: var(--molla);
+}
+.elenco, .diario, .finestra-corpo { scroll-behavior: smooth; }
+.alone, .onde, .cursa, .sezione.attiva, .sezione.uscita { will-change: transform, opacity; }
+
+/* Sotto i 1120 px la seconda colonna scende sotto la prima invece di
+ * strizzarsi fino a rendere illeggibili i titoli. */
+@media (max-width: 1120px) {
+  .due-colonne { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+  /* Anche i tre menu dei modelli vanno in colonna: a 250 px l'uno il nome del
+     modello e la sua descrizione finirebbero entrambi tagliati. */
+  .pannelli-motore .riga .gruppo.largo { flex-basis: 100%; }
+  .barra { width: 196px; flex-basis: 196px; }
+}
+
+/* Chi ha chiesto al sistema meno animazioni le vede ferme: lo sfondo e'
+ * decorazione, non deve dare fastidio a chi ne soffre. */
+@media (prefers-reduced-motion: reduce) {
+  .alone, .onde, .spia.working, .passo.corrente .pallino,
+  .avvio-marchio rect { animation: none; }
+  .sezione.attiva, .sezione.uscita, .finestra, .velo-finestra,
+  .credito, .scheda-copertina, .avanzamento.visibile { animation: none; }
+  * { transition-duration: .01ms !important; }
+}

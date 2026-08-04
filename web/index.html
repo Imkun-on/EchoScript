@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <title>EchoScript</title>
+  <!-- WebView2 non mostra nessuna scheda, quindi qui non si vede: serve a chi
+       apre questo file in un browser per lavorarci sopra. -->
+  <link rel="icon" href="../assets/EchoScript.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Sfondo: strati sovrapposti, tutti generati dal CSS. Nessun file, nessun
+       download, niente da inizializzare. -->
+  <div class="sfondo" aria-hidden="true">
+    <div class="alone alone-1"></div>
+    <div class="alone alone-2"></div>
+    <div class="alone alone-3"></div>
+    <div class="onde"></div>
+    <div class="grana"></div>
+    <div class="vignetta"></div>
+  </div>
+
+  <!-- Le icone stanno qui una volta sola e si richiamano con <use>. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <g id="i-onda" fill="none" stroke="currentColor" stroke-width="1.7"
+         stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 12h2M8 12h1M13 12h1M19 12h2"/>
+        <path d="M5 8v8M9 5v14M14 7v10M18 9.5v5"/>
+      </g>
+      <g id="i-cpu" fill="none" stroke="currentColor" stroke-width="1.6"
+         stroke-linecap="round" stroke-linejoin="round">
+        <rect x="7" y="7" width="10" height="10" rx="2"/>
+        <rect x="3.5" y="3.5" width="17" height="17" rx="3.5" opacity=".45"/>
+        <path d="M10 1.5v2M14 1.5v2M10 20.5v2M14 20.5v2M1.5 10h2M1.5 14h2M20.5 10h2M20.5 14h2"/>
+      </g>
+      <g id="i-gettone" fill="none" stroke="currentColor" stroke-width="1.6"
+         stroke-linecap="round" stroke-linejoin="round">
+        <ellipse cx="12" cy="6.5" rx="7.5" ry="3"/>
+        <path d="M4.5 6.5v11c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-11"/>
+        <path d="M4.5 12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3"/>
+      </g>
+      <g id="i-cerca" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+        <circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>
+      </g>
+      <g id="i-video" fill="none" stroke="currentColor" stroke-width="1.6"
+         stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2.5" y="4.5" width="19" height="15" rx="3"/>
+        <path d="M10 9.2l5 2.8-5 2.8z"/>
+      </g>
+      <g id="i-file-audio" fill="none" stroke="currentColor" stroke-width="1.6"
+         stroke-linecap="round" stroke-linejoin="round">
+        <path d="M13.5 2.5H7a2 2 0 00-2 2v15a2 2 0 002 2h10a2 2 0 002-2V8z"/>
+        <path d="M13.5 2.5V8H19"/><path d="M9 16v-3.5M12 17.5v-6.5M15 15.5v-2.5"/>
+      </g>
+      <g id="i-avvia" fill="none" stroke="currentColor" stroke-width="1.7"
+         stroke-linecap="round" stroke-linejoin="round">
+        <path d="M7 4.5l12 7.5-12 7.5z"/>
+      </g>
+      <g id="i-vuoto" fill="none" stroke="currentColor" stroke-width="1.3"
+         stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 10h18M8.5 14.5h7"/>
+      </g>
+      <g id="i-cartella" fill="none" stroke="currentColor" stroke-width="1.6"
+         stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 7a2 2 0 012-2h4l2 2.5h8a2 2 0 012 2V17a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+      </g>
+      <g id="i-chiave" fill="none" stroke="currentColor" stroke-width="1.6"
+         stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="7.5" cy="15.5" r="4"/>
+        <path d="M10.4 12.6L20 3M17 6l2.5 2.5M14.5 8.5l2.5 2.5"/>
+      </g>
+      <g id="i-nuvola" fill="none" stroke="currentColor" stroke-width="1.6"
+         stroke-linecap="round" stroke-linejoin="round">
+        <path d="M7 18.5h10.5a4 4 0 000-8 6 6 0 00-11.6 1.6A3.6 3.6 0 007 18.5z"/>
+      </g>
+      <g id="i-casa" fill="none" stroke="currentColor" stroke-width="1.6"
+         stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2.5" y="5" width="19" height="12" rx="2"/><path d="M8 21h8M12 17v4"/>
+      </g>
+      <g id="i-rifai" fill="none" stroke="currentColor" stroke-width="1.7"
+         stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 12a8 8 0 11-2.6-5.9"/><path d="M20 3v5h-5"/>
+      </g>
+      <g id="i-riprendi" fill="none" stroke="currentColor" stroke-width="1.6"
+         stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"/><path d="M10 8.5l5.5 3.5L10 15.5z"/>
+      </g>
+      <g id="i-traduci" fill="none" stroke="currentColor" stroke-width="1.6"
+         stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 5.5h8M7 3.5v2M9 5.5c0 3.6-2.6 6.6-6 7.5M5 9c1 2.2 3 3.9 5.5 4.5"/>
+        <path d="M12 20.5l4-9 4 9M13.4 17.5h5.2"/>
+      </g>
+      <g id="i-riassumi" fill="none" stroke="currentColor" stroke-width="1.6"
+         stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 5.5h11M4 10h11M4 14.5h7M4 19h5"/><circle cx="17.5" cy="17.5" r="3.2"/>
+      </g>
+      <g id="i-occhio" fill="none" stroke="currentColor" stroke-width="1.6"
+         stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/>
+        <circle cx="12" cy="12" r="2.6"/>
+      </g>
+      <g id="i-spunta" fill="none" stroke="currentColor" stroke-width="1.9"
+         stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4.5 12.5l5 5 10-11"/>
+      </g>
+      <g id="i-clessidra" fill="none" stroke="currentColor" stroke-width="1.6"
+         stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6.5 3h11M6.5 21h11M8 3v4l4 5 4-5V3M8 21v-4l4-5 4 5v4"/>
+      </g>
+      <g id="i-avviso" fill="none" stroke="currentColor" stroke-width="1.7"
+         stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3.5L21.5 20h-19z"/><path d="M12 9.5v5M12 17.2v.3"/>
+      </g>
+      <g id="i-errore" fill="none" stroke="currentColor" stroke-width="1.7"
+         stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.2v.3"/>
+      </g>
+      <g id="i-freccia" fill="none" stroke="currentColor" stroke-width="1.7"
+         stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 5l7 7-7 7"/>
+      </g>
+    </defs>
+  </svg>
+
+  <div class="guscio">
+
+    <aside class="barra">
+      <div class="marchio">
+        <div class="logo">EchoScript</div>
+        <div class="sottotitolo" data-t="app.subtitle"></div>
+      </div>
+
+      <nav class="menu">
+        <button class="voce attiva" data-va="trascrivi">
+          <span class="rotaia"></span>
+          <svg class="icona" viewBox="0 0 24 24"><use href="#i-onda"/></svg>
+          <span data-t="menu.trascrivi"></span>
+        </button>
+        <button class="voce" data-va="motore">
+          <span class="rotaia"></span>
+          <svg class="icona" viewBox="0 0 24 24"><use href="#i-cpu"/></svg>
+          <span data-t="menu.motore"></span>
+          <span class="targhetta-menu" id="targhetta-motore"></span>
+        </button>
+        <button class="voce" data-va="crediti">
+          <span class="rotaia"></span>
+          <svg class="icona" viewBox="0 0 24 24"><use href="#i-gettone"/></svg>
+          <span data-t="menu.crediti"></span>
+        </button>
+      </nav>
+
+      <div class="piede">
+        <label class="etichetta" data-t="app.language"></label>
+        <select id="lingua" class="campo compatto">
+          <option value="it">Italiano</option>
+          <option value="en">English</option>
+        </select>
+      </div>
+    </aside>
+
+    <main class="corpo">
+
+      <!-- ══ TRASCRIVI ══════════════════════════════════════════════════ -->
+      <div class="sezione attiva" data-sez="trascrivi">
+        <header class="intestazione">
+          <h1 data-t="sez.trascrivi.title"></h1>
+          <p data-t="sez.trascrivi.desc"></p>
+        </header>
+
+        <section class="vetro">
+          <div class="riga">
+            <div class="gruppo stretto">
+              <label data-t="src.label"></label>
+              <select id="sorgente" class="campo">
+                <option value="youtube" data-t="src.youtube"></option>
+                <option value="local" data-t="src.local"></option>
+              </select>
+            </div>
+
+            <!-- I due ingressi occupano lo stesso posto: si vede solo quello
+                 della sorgente scelta, cosi' la riga non cambia altezza. -->
+            <div class="gruppo largo" id="ingresso-youtube">
+              <label data-t="src.input.url"></label>
+              <div class="campo-icona">
+                <svg class="icona-campo" viewBox="0 0 24 24"><use href="#i-video"/></svg>
+                <input id="url" class="campo con-icona" type="text" spellcheck="false"
+                       placeholder="https://www.youtube.com/watch?v=…">
+              </div>
+            </div>
+            <div class="gruppo largo" id="ingresso-file" hidden>
+              <label data-t="src.input.file"></label>
+              <div class="campo-icona">
+                <svg class="icona-campo" viewBox="0 0 24 24"><use href="#i-file-audio"/></svg>
+                <input id="file" class="campo con-icona con-coda" type="text"
+                       spellcheck="false" readonly>
+                <button id="sfoglia" class="coda">…</button>
+              </div>
+            </div>
+          </div>
+
+          <label class="etichetta etichetta-blocco" data-t="opts.title"></label>
+          <div class="interruttori">
+            <label class="interruttore">
+              <input type="checkbox" id="opt-translate"><span class="cursore"></span>
+              <span class="interruttore-testo">
+                <span class="interruttore-nome" data-t="opt.translate"></span>
+                <span class="interruttore-nota" data-t="opt.translate.desc"></span>
+              </span>
+            </label>
+            <label class="interruttore">
+              <input type="checkbox" id="opt-summarize"><span class="cursore"></span>
+              <span class="interruttore-testo">
+                <span class="interruttore-nome" data-t="opt.summary"></span>
+                <span class="interruttore-nota" data-t="opt.summary.desc"></span>
+              </span>
+            </label>
+            <label class="interruttore">
+              <input type="checkbox" id="opt-visual"><span class="cursore"></span>
+              <span class="interruttore-testo">
+                <span class="interruttore-nome" data-t="opt.visual"></span>
+                <span class="interruttore-nota" data-t="opt.visual.desc"></span>
+              </span>
+            </label>
+          </div>
+
+          <div class="azioni">
+            <button id="leggi" class="bottone contorno">
+              <svg class="icona" viewBox="0 0 24 24"><use href="#i-cerca"/></svg>
+              <span data-t="src.load"></span>
+            </button>
+            <div class="spazio"></div>
+            <button id="avvia" class="bottone pieno">
+              <svg class="icona" viewBox="0 0 24 24"><use href="#i-avvia" id="icona-avvia"/></svg>
+              <span id="testo-avvia" data-t="src.start"></span>
+            </button>
+          </div>
+        </section>
+
+        <div class="scorciatoie" data-t="scorciatoie"></div>
+
+        <!-- L'avanzamento compare solo mentre si lavora. Dentro c'e' tutto
+             quello che serve a capire a che punto siamo: chi sta lavorando, in
+             che fase, quanto manca, e l'elenco dei passaggi con quelli fatti
+             gia' spuntati. -->
+        <section class="vetro avanzamento" id="avanzamento">
+          <div class="titolo-pannello">
+            <span class="spia working"></span>
+            <span data-t="prog.title"></span>
+          </div>
+          <div class="avanz-alto">
+            <span class="targhetta-motore" id="badge-motore"></span>
+            <span class="targhetta" id="badge-batch" hidden></span>
+            <div class="spazio"></div>
+            <span class="targhetta" id="badge-fase"></span>
+            <span class="avanz-pct" id="avanz-pct"></span>
+          </div>
+          <div class="avanz-nota" id="badge-nota" hidden></div>
+          <div class="binario"><div class="cursa" id="barra"></div></div>
+          <div class="avanz-riga">
+            <span class="avanz-titolo" id="avanz-fase"></span>
+            <span class="avanz-dettaglio" id="avanz-dettaglio"></span>
+          </div>
+          <label class="etichetta" data-t="prog.steps"></label>
+          <div class="passi" id="passi"></div>
+          <div class="racconto">
+            <svg class="icona" viewBox="0 0 24 24"><use href="#i-onda"/></svg>
+            <div>
+              <div id="racconto-testo"></div>
+              <div class="racconto-piano" id="racconto-piano"></div>
+            </div>
+          </div>
+        </section>
+
+        <div class="due-colonne">
+          <section class="vetro colonna">
+            <div class="titolo-pannello">
+              <span data-t="src.panel"></span>
+              <div class="spazio"></div>
+              <span class="targhetta" id="stima"></span>
+            </div>
+            <div id="sorgente-scheda" class="elenco"></div>
+          </section>
+          <div class="slot-diario"></div>
+        </div>
+      </div>
+
+      <!-- ══ MOTORE ═════════════════════════════════════════════════════ -->
+      <div class="sezione" data-sez="motore">
+        <header class="intestazione">
+          <h1 data-t="sez.motore.title"></h1>
+          <p data-t="sez.motore.desc"></p>
+        </header>
+
+        <section class="vetro">
+          <div class="gruppo">
+            <label data-t="eng.choose"></label>
+            <div class="scelte" id="scelta-motore">
+              <button class="scelta grande" data-motore="local">
+                <span class="scelta-alto">
+                  <svg class="icona" viewBox="0 0 24 24"><use href="#i-casa"/></svg>
+                  <span class="scelta-tag" data-t="eng.tag.offline"></span>
+                </span>
+                <span class="scelta-nome" data-t="eng.local"></span>
+                <span class="scelta-nota" data-t="eng.local.desc"></span>
+              </button>
+              <button class="scelta grande" data-motore="groq">
+                <span class="scelta-alto">
+                  <svg class="icona" viewBox="0 0 24 24"><use href="#i-nuvola"/></svg>
+                  <span class="scelta-tag" data-t="eng.tag.cloud"></span>
+                </span>
+                <span class="scelta-nome" data-t="eng.groq"></span>
+                <span class="scelta-nota" data-t="eng.groq.desc"></span>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Un pannello per motore, a tutta larghezza: se ne vede uno solo alla
+             volta, e affiancarli in due colonne lascerebbe mezza schermata vuota
+             ogni volta — che si legge come qualcosa che non ha finito di
+             caricare, non come una scelta. -->
+        <div class="pannelli-motore">
+          <section class="vetro colonna" id="pannello-locale">
+            <div class="titolo-pannello">
+              <svg class="icona-pannello" viewBox="0 0 24 24"><use href="#i-casa"/></svg>
+              <span data-t="eng.local.title"></span>
+            </div>
+            <p class="nota-riga" data-t="eng.local.hint"></p>
+            <div class="riga">
+              <div class="gruppo largo">
+                <label data-t="eng.model.whisper"></label>
+                <select id="m-whisper" class="campo"></select>
+              </div>
+              <div class="gruppo largo">
+                <label data-t="eng.model.ollama"></label>
+                <select id="m-ollama" class="campo"></select>
+              </div>
+              <div class="gruppo largo">
+                <label data-t="eng.model.vision"></label>
+                <select id="m-vision" class="campo"></select>
+              </div>
+            </div>
+          </section>
+
+          <section class="vetro colonna" id="pannello-groq">
+            <div class="titolo-pannello">
+              <svg class="icona-pannello" viewBox="0 0 24 24"><use href="#i-nuvola"/></svg>
+              <span data-t="eng.groq.title"></span>
+            </div>
+            <div class="riga">
+              <div class="gruppo largo">
+                <label data-t="eng.model.groq"></label>
+                <select id="m-groq" class="campo"></select>
+              </div>
+              <div class="gruppo largo">
+                <label data-t="eng.key"></label>
+                <div class="azioni azioni-chiave">
+                  <button id="carica-chiave" class="bottone contorno">
+                    <svg class="icona" viewBox="0 0 24 24"><use href="#i-chiave"/></svg>
+                    <span data-t="eng.key.load"></span>
+                  </button>
+                  <button id="ottieni-chiave" class="bottone nudo" data-t="eng.key.get"></button>
+                </div>
+                <div class="stato-chiave" id="stato-chiave"></div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- ══ CREDITI ════════════════════════════════════════════════════ -->
+      <div class="sezione" data-sez="crediti">
+        <header class="intestazione">
+          <h1 data-t="sez.crediti.title"></h1>
+          <p data-t="sez.crediti.desc"></p>
+        </header>
+
+        <section class="vetro colonna crescente">
+          <div class="titolo-pannello">
+            <span data-t="menu.crediti"></span>
+            <div class="spazio"></div>
+            <button id="aggiorna-crediti" class="bottone nudo" data-t="lim.refresh"></button>
+          </div>
+          <p class="nota-riga" data-t="lim.note"></p>
+          <div id="crediti" class="elenco"></div>
+        </section>
+      </div>
+
+      <!-- Il diario e' uno solo e si sposta nella sezione aperta: tenerne tre
+           significherebbe tre cronologie diverse, e non sapere piu' dove
+           guardare. -->
+      <section class="vetro colonna" id="pannello-diario">
+        <div class="titolo-pannello">
+          <span class="spia" id="spia"></span>
+          <span data-t="log.title"></span>
+          <span class="stato" id="stato"></span>
+          <div class="spazio"></div>
+          <button id="svuota" class="bottone nudo" data-t="log.clear"></button>
+        </div>
+        <div id="diario" class="diario"></div>
+      </section>
+
+    </main>
+  </div>
+
+  <div class="avvisi" id="avvisi"></div>
+
+  <div class="velo-trascina" id="velo-trascina">
+    <div class="riquadro-trascina">
+      <svg class="icona" viewBox="0 0 24 24"><use href="#i-onda"/></svg>
+      <span data-t="trascina"></span>
+    </div>
+  </div>
+
+  <!-- La finestra modale e' una sola e viene riempita di volta in volta:
+       conferma di un video, elenco di scelte, risultato, avviso. Averne una
+       per caso significherebbe cinque strutture da tenere allineate. -->
+  <div class="velo-finestra" id="velo-finestra">
+    <div class="finestra" id="finestra" role="dialog" aria-modal="true">
+      <div class="finestra-testa">
+        <svg class="icona" viewBox="0 0 24 24"><use href="#i-onda" id="finestra-icona"/></svg>
+        <h2 id="finestra-titolo"></h2>
+      </div>
+      <div class="finestra-corpo" id="finestra-corpo"></div>
+      <div class="finestra-azioni" id="finestra-azioni"></div>
+    </div>
+  </div>
+
+  <!-- Il velo di caricamento. Prende il testimone dalla schermata che
+       PyInstaller mostra mentre scompatta l'eseguibile: quella sparisce quando
+       la finestra compare, questo quando la pagina e' davvero pronta. Senza, in
+       mezzo si vedrebbe per un istante l'interfaccia vuota e senza traduzioni. -->
+  <div class="velo-avvio" id="velo-avvio">
+    <div class="avvio-blocco">
+      <!-- Il marchio: tre barre di livello che diventano tre righe scritte.
+           E' lo stesso disegno di assets/EchoScript.ico e di
+           assets/caricamento.png — le coordinate qui sotto sono le stesse che
+           assets/marchio.py usa per generarli. Cambiandone uno vanno cambiati
+           tutti, altrimenti l'icona, la schermata di avvio e questo velo si
+           contraddicono a vicenda nel giro di due secondi. -->
+      <svg class="avvio-marchio" viewBox="0 0 100 100" aria-hidden="true">
+        <rect class="b1" x="14" y="34" width="8"  height="32" rx="4" fill="currentColor"/>
+        <rect class="b2" x="26" y="22" width="8"  height="56" rx="4" fill="currentColor"/>
+        <rect class="b3" x="38" y="30" width="8"  height="40" rx="4" fill="currentColor"/>
+        <rect class="r1" x="54" y="32" width="32" height="8"  rx="4" fill="currentColor"/>
+        <rect class="r2" x="54" y="46" width="26" height="8"  rx="4" fill="currentColor"/>
+        <rect class="r3" x="54" y="60" width="20" height="8"  rx="4" fill="currentColor"/>
+      </svg>
+      <div class="avvio-nome">EchoScript</div>
+      <div class="avvio-barra"><span></span></div>
+    </div>
+  </div>
+
+  <script src="tendine.js"></script>
+  <script src="finestre.js"></script>
+  <script src="app.js"></script>
+  <script src="sez-motore.js"></script>
+  <script src="sez-trascrivi.js"></script>
+  <script src="sez-crediti.js"></script>
+  <script>avvia();</script>
+</body>
+</html>

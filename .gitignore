@@ -5,6 +5,10 @@
 # --- Output generato ---
 results/
 
+# --- Preferenze dell'interfaccia (lingua, motore, modelli scelti) ---
+# Sono abitudini di chi usa il programma, non impostazioni del progetto.
+settings.json
+
 # --- Cache librerie JS per il PDF "ricco" (MathJax/Mermaid, scaricate al volo) ---
 .pdfassets/
 
