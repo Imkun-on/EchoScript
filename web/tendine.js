@@ -22,8 +22,17 @@
  *     se cambiano, il pannello si ridisegna da solo.
  */
 
+/* Le tendine costruite finora. Serve a chi cambia .value da codice — nessun
+ * evento, nessuna modifica al documento — e vedrebbe altrimenti il bottone
+ * fermo sulla voce di prima mentre il <select> dice un'altra cosa. */
+const AGGIORNA = [];
+
 function potenziaTendine() {
   document.querySelectorAll('select').forEach(potenzia);
+}
+
+function aggiornaTendine() {
+  AGGIORNA.forEach((f) => f());
 }
 
 function potenzia(select) {
@@ -80,6 +89,11 @@ function potenzia(select) {
   }
 
   function scegli(i) {
+    // Con un elenco vuoto l'indice evidenziato resta -1, e assegnarlo
+    // svuoterebbe il <select>: partirebbe un 'change' con valore vuoto, che
+    // Python salverebbe come modello scelto — un nome di modello inesistente
+    // che si scopre solo quando la trascrizione non parte.
+    if (i < 0 || i >= select.options.length) { chiudi(); return; }
     select.selectedIndex = i;
     // L'evento va lanciato a mano: cambiare selectedIndex da codice non ne
     // genera uno, e tutto il resto del programma ascolta 'change'.
@@ -138,7 +152,13 @@ function potenzia(select) {
     if (e.key === 'ArrowDown') evidenzia(Math.min(evidenziato + 1, voci().length - 1));
     else if (e.key === 'ArrowUp') evidenzia(Math.max(evidenziato - 1, 0));
     else if (e.key === 'Enter' || e.key === ' ') scegli(evidenziato);
-    else if (e.key === 'Escape') chiudi();
+    else if (e.key === 'Escape') {
+      // Esc chiude solo l'elenco. Senza fermarlo qui l'evento arriverebbe anche
+      // a chi ascolta sul documento, e chiuderebbe insieme la finestra modale:
+      // un solo tasto per due gesti diversi, di cui uno non richiesto.
+      e.stopPropagation();
+      chiudi();
+    }
   });
 
   document.addEventListener('click', chiudi);
@@ -146,8 +166,14 @@ function potenzia(select) {
   // Chi riempie il <select> dopo non deve ricordarsi di avvisare nessuno.
   new MutationObserver(() => { if (aperto) costruisci(); else mostraValore(); })
     .observe(select, { childList: true, subtree: true, characterData: true });
+  // Un 'change' lanciato dal codice (o dal <select> nascosto) deve comunque
+  // aggiornare l'etichetta: cambiare .value non muove il documento, quindi
+  // l'osservatore qui sopra non se ne accorgerebbe.
+  select.addEventListener('change', mostraValore);
+  AGGIORNA.push(mostraValore);
 
   mostraValore();
 }
 
 window.potenziaTendine = potenziaTendine;
+window.aggiornaTendine = aggiornaTendine;

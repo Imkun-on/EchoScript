@@ -1,15 +1,30 @@
-/* Sezione «Motore»: chi fa il lavoro, e con quali modelli.
+/* I modelli delle due postazioni, «Locale» e «Cloud», e la chiave di Groq.
  *
  * E' la decisione piu' importante del programma — dove finisce l'audio, quanto
- * costa, quanto si aspetta — ed e' per questo che sta in una sezione sua invece
- * che in una riga della schermata principale: chi la prende la prende una volta
- * e poi non ci pensa piu', e chi vuole cambiarla vuole vedere le due opzioni
- * affiancate, non aprire una tendina.
+ * costa, quanto si aspetta — e non si prende con un interruttore: si prende
+ * entrando in una delle due sezioni e lavorando li' dentro. Quale sia in uso lo
+ * decide ``cambiaSezione`` in app.js; qui si riempiono i menu di ciascuna e si
+ * tiene la targhetta della barra allineata.
  *
- * I cataloghi dei modelli li manda Python: e' Python a sapere quali esistono e
+ * Le due terne di modelli fanno gli stessi tre mestieri — trascrizione,
+ * riassunto e traduzione, analisi visiva — e non si mescolano mai: sotto
+ * «Locale» solo modelli che girano su questo computer, sotto «Cloud» solo
+ * modelli che girano sui server Groq, piu' la chiave che li paga. Non li mescola
+ * nemmeno il codice qui sotto: due elenchi di menu, due pannelli distinti.
+ *
+ * I cataloghi li manda Python: e' Python a sapere quali modelli esistono e
  * quali sono gia' scaricati in Ollama. Qui si riempiono i menu e si ricorda a
  * Python cosa e' stato scelto.
  */
+
+/* Menu -> scelta, divisi per mondo. Sono la stessa cosa per il codice che li
+ * riempie, ma tenerli in due elenchi e' cio' che rende visibile — leggendo, non
+ * ricordando — che nessun modello locale finisce nella sezione Cloud. */
+const MENU_LOCALI = [['#m-whisper', 'whisper'], ['#m-ollama', 'ollama'],
+                     ['#m-vision', 'vision']];
+const MENU_GROQ = [['#m-groq', 'groq'], ['#m-groq-testo', 'groq_testo'],
+                   ['#m-groq-vista', 'groq_vista']];
+const MENU = MENU_LOCALI.concat(MENU_GROQ);
 
 let MODELLI = {};
 let CHIAVE = { presente: false, nome: '' };
@@ -19,16 +34,11 @@ function initMotore(dati) {
   riempiMenu();
   mostraChiave(dati.chiave);
 
-  document.querySelectorAll('#scelta-motore .scelta').forEach((riquadro) => {
-    riquadro.addEventListener('click', () => scegliMotore(riquadro.dataset.motore));
-  });
   sincronizzaMotore();
 
   // Ogni menu scrive la sua scelta e basta: la stima si aggiorna da se',
   // perche' salvaScelte() la richiede a Python e la rimette a schermo.
-  const menu = [['#m-whisper', 'whisper'], ['#m-ollama', 'ollama'],
-                ['#m-vision', 'vision'], ['#m-groq', 'groq']];
-  menu.forEach(([sel, chiave]) => {
+  MENU.forEach(([sel, chiave]) => {
     $(sel).addEventListener('change', (e) => salvaScelte({ [chiave]: e.target.value }));
   });
 
@@ -44,9 +54,7 @@ function initMotore(dati) {
  * scaricato), 'chiave' e' la descrizione da tradurre. Tenerle separate e'
  * quello che permette di cambiare lingua senza richiedere i cataloghi. */
 function riempiMenu() {
-  const menu = [['#m-whisper', 'whisper'], ['#m-ollama', 'ollama'],
-                ['#m-vision', 'vision'], ['#m-groq', 'groq']];
-  menu.forEach(([sel, chiave]) => {
+  MENU.forEach(([sel, chiave]) => {
     const select = $(sel);
     const voci = MODELLI[chiave] || [];
     const scelto = scelte()[chiave];
@@ -78,31 +86,23 @@ window.aggiornaModelli = (modelli) => {
   riempiMenu();
 };
 
-/* ── La scelta del motore ─────────────────────────────────────────────────── */
+/* ── Quale delle due sta lavorando ────────────────────────────────────────── */
 
-function scegliMotore(quale) {
-  salvaScelte({ motore: quale });
-  sincronizzaMotore();
-}
-
-/* Un pannello per motore, e si vede solo quello che conta: con Groq i modelli
- * locali non servono, e senza chiave Groq non si va da nessuna parte. Mostrarli
- * entrambi sempre vorrebbe dire far leggere ogni volta meta' schermata che non
- * riguarda la scelta fatta. */
+/* Le targhette nella barra laterale dicono con quale motore si sta per partire
+ * senza dover entrare da nessuna parte: e' l'informazione che si vuole piu'
+ * spesso, e la si vuole mentre si sta guardando altro. Una sola delle due porta
+ * il segno, cosi' l'occhio non deve confrontare due parole per sapere quale
+ * conta. */
 function sincronizzaMotore() {
   const motore = scelte().motore;
-  document.querySelectorAll('#scelta-motore .scelta').forEach((riquadro) => {
-    riquadro.classList.toggle('attiva', riquadro.dataset.motore === motore);
-  });
-  $('#pannello-locale').style.display = motore === 'local' ? '' : 'none';
-  $('#pannello-groq').style.display = motore === 'groq' ? '' : 'none';
+  targhetta('#targhetta-locale', motore === 'local', 'locale', 'eng.tag.offline');
+  targhetta('#targhetta-cloud', motore === 'groq', 'cloud', 'eng.tag.cloud');
+}
 
-  // La targhetta nella barra laterale dice quale motore e' scelto senza dover
-  // entrare qui: e' l'informazione che si vuole piu' spesso, e la si vuole
-  // mentre si sta guardando altro.
-  const targhetta = $('#targhetta-motore');
-  targhetta.className = 'targhetta-menu ' + (motore === 'groq' ? 'cloud' : 'locale');
-  targhetta.textContent = t(motore === 'groq' ? 'eng.tag.cloud' : 'eng.tag.offline');
+function targhetta(sel, acceso, tono, chiave) {
+  const segno = $(sel);
+  segno.className = 'targhetta-menu' + (acceso ? ' ' + tono : ' spenta');
+  segno.textContent = acceso ? t(chiave) : '';
 }
 
 /* ── La chiave Groq ───────────────────────────────────────────────────────── */
@@ -136,4 +136,5 @@ function traduciMotore() {
 
 window.initMotore = initMotore;
 window.traduciMotore = traduciMotore;
+window.sincronizzaMotore = sincronizzaMotore;
 window.chiaveCaricata = () => CHIAVE.presente;

@@ -133,16 +133,22 @@
       </div>
 
       <nav class="menu">
-        <button class="voce attiva" data-va="trascrivi">
+        <!-- Due postazioni, non due impostazioni: in ciascuna c'e' tutto il
+             lavoro — link o file, output, avvio, diario — e quello che cambia
+             sono i modelli con cui viene fatto. Si entra in una delle due e si
+             lavora li' dentro; scegliere la sezione E' scegliere il motore, che
+             e' il modo piu' corto di dirlo. La targhetta segna quella in uso. -->
+        <button class="voce attiva" data-va="locale">
           <span class="rotaia"></span>
-          <svg class="icona" viewBox="0 0 24 24"><use href="#i-onda"/></svg>
-          <span data-t="menu.trascrivi"></span>
+          <svg class="icona" viewBox="0 0 24 24"><use href="#i-casa"/></svg>
+          <span data-t="menu.locale"></span>
+          <span class="targhetta-menu" id="targhetta-locale"></span>
         </button>
-        <button class="voce" data-va="motore">
+        <button class="voce" data-va="cloud">
           <span class="rotaia"></span>
-          <svg class="icona" viewBox="0 0 24 24"><use href="#i-cpu"/></svg>
-          <span data-t="menu.motore"></span>
-          <span class="targhetta-menu" id="targhetta-motore"></span>
+          <svg class="icona" viewBox="0 0 24 24"><use href="#i-nuvola"/></svg>
+          <span data-t="menu.cloud"></span>
+          <span class="targhetta-menu" id="targhetta-cloud"></span>
         </button>
         <button class="voce" data-va="crediti">
           <span class="rotaia"></span>
@@ -162,12 +168,14 @@
 
     <main class="corpo">
 
-      <!-- ══ TRASCRIVI ══════════════════════════════════════════════════ -->
-      <div class="sezione attiva" data-sez="trascrivi">
-        <header class="intestazione">
-          <h1 data-t="sez.trascrivi.title"></h1>
-          <p data-t="sez.trascrivi.desc"></p>
-        </header>
+      <!-- ══ LA POSTAZIONE DI LAVORO ════════════════════════════════════ -->
+      <!-- Una sola, e si sposta nella sezione aperta — come il diario, e per lo
+           stesso motivo. Averne due copie vere vorrebbe dire due link incollati,
+           due schede della sorgente, due avanzamenti: passando da «Locale» a
+           «Cloud» il link appena incollato sparirebbe, che e' esattamente cio'
+           che nessuno si aspetta. Cosi' invece la postazione e' la stessa e
+           cambia solo la stanza in cui si trova. -->
+      <div id="postazione">
 
         <section class="vetro">
           <div class="riga">
@@ -282,92 +290,108 @@
             </div>
             <div id="sorgente-scheda" class="elenco"></div>
           </section>
-          <div class="slot-diario"></div>
+
+          <!-- Il diario e' uno solo: viaggia con la postazione, cosi' la
+               cronologia resta una sola anche cambiando motore. -->
+          <section class="vetro colonna" id="pannello-diario">
+            <div class="titolo-pannello">
+              <span class="spia" id="spia"></span>
+              <span data-t="log.title"></span>
+              <span class="stato" id="stato"></span>
+              <div class="spazio"></div>
+              <button id="svuota" class="bottone nudo" data-t="log.clear"></button>
+            </div>
+            <div id="diario" class="diario"></div>
+          </section>
         </div>
       </div>
 
-      <!-- ══ MOTORE ═════════════════════════════════════════════════════ -->
-      <div class="sezione" data-sez="motore">
+      <!-- ══ LOCALE ═════════════════════════════════════════════════════ -->
+      <!-- Qui dentro non compare niente che abbia bisogno della rete: e' la
+           promessa della sezione. Chi trascrive da qui trascrive sul proprio
+           computer — non c'e' un interruttore da ricordarsi, e' la stanza in
+           cui si sta. -->
+      <div class="sezione attiva" data-sez="locale">
         <header class="intestazione">
-          <h1 data-t="sez.motore.title"></h1>
-          <p data-t="sez.motore.desc"></p>
+          <h1 data-t="sez.locale.title"></h1>
+          <p data-t="sez.locale.desc"></p>
         </header>
 
-        <section class="vetro">
-          <div class="gruppo">
-            <label data-t="eng.choose"></label>
-            <div class="scelte" id="scelta-motore">
-              <button class="scelta grande" data-motore="local">
-                <span class="scelta-alto">
-                  <svg class="icona" viewBox="0 0 24 24"><use href="#i-casa"/></svg>
-                  <span class="scelta-tag" data-t="eng.tag.offline"></span>
-                </span>
-                <span class="scelta-nome" data-t="eng.local"></span>
-                <span class="scelta-nota" data-t="eng.local.desc"></span>
-              </button>
-              <button class="scelta grande" data-motore="groq">
-                <span class="scelta-alto">
-                  <svg class="icona" viewBox="0 0 24 24"><use href="#i-nuvola"/></svg>
-                  <span class="scelta-tag" data-t="eng.tag.cloud"></span>
-                </span>
-                <span class="scelta-nome" data-t="eng.groq"></span>
-                <span class="scelta-nota" data-t="eng.groq.desc"></span>
-              </button>
+        <section class="vetro colonna" id="pannello-locale">
+          <div class="titolo-pannello">
+            <svg class="icona-pannello" viewBox="0 0 24 24"><use href="#i-casa"/></svg>
+            <span data-t="eng.local.title"></span>
+          </div>
+          <p class="nota-riga" data-t="eng.local.hint"></p>
+          <div class="riga">
+            <div class="gruppo largo">
+              <label data-t="eng.model.whisper"></label>
+              <select id="m-whisper" class="campo"></select>
+            </div>
+            <div class="gruppo largo">
+              <label data-t="eng.model.ollama"></label>
+              <select id="m-ollama" class="campo"></select>
+            </div>
+            <div class="gruppo largo">
+              <label data-t="eng.model.vision"></label>
+              <select id="m-vision" class="campo"></select>
             </div>
           </div>
         </section>
 
-        <!-- Un pannello per motore, a tutta larghezza: se ne vede uno solo alla
-             volta, e affiancarli in due colonne lascerebbe mezza schermata vuota
-             ogni volta — che si legge come qualcosa che non ha finito di
-             caricare, non come una scelta. -->
-        <div class="pannelli-motore">
-          <section class="vetro colonna" id="pannello-locale">
-            <div class="titolo-pannello">
-              <svg class="icona-pannello" viewBox="0 0 24 24"><use href="#i-casa"/></svg>
-              <span data-t="eng.local.title"></span>
-            </div>
-            <p class="nota-riga" data-t="eng.local.hint"></p>
-            <div class="riga">
-              <div class="gruppo largo">
-                <label data-t="eng.model.whisper"></label>
-                <select id="m-whisper" class="campo"></select>
-              </div>
-              <div class="gruppo largo">
-                <label data-t="eng.model.ollama"></label>
-                <select id="m-ollama" class="campo"></select>
-              </div>
-              <div class="gruppo largo">
-                <label data-t="eng.model.vision"></label>
-                <select id="m-vision" class="campo"></select>
-              </div>
-            </div>
-          </section>
+        <div class="slot-lavoro"></div>
+      </div>
 
-          <section class="vetro colonna" id="pannello-groq">
-            <div class="titolo-pannello">
-              <svg class="icona-pannello" viewBox="0 0 24 24"><use href="#i-nuvola"/></svg>
-              <span data-t="eng.groq.title"></span>
+      <!-- ══ CLOUD ══════════════════════════════════════════════════════ -->
+      <!-- E qui dentro, per lo stesso motivo, solo cose che vivono sui server
+           Groq: i tre modelli e la chiave che li paga. -->
+      <div class="sezione" data-sez="cloud">
+        <header class="intestazione">
+          <h1 data-t="sez.cloud.title"></h1>
+          <p data-t="sez.cloud.desc"></p>
+        </header>
+
+        <section class="vetro colonna" id="pannello-groq">
+          <div class="titolo-pannello">
+            <svg class="icona-pannello" viewBox="0 0 24 24"><use href="#i-nuvola"/></svg>
+            <span data-t="eng.groq.title"></span>
+          </div>
+          <p class="nota-riga" data-t="eng.groq.hint"></p>
+          <div class="riga">
+            <div class="gruppo largo">
+              <label data-t="eng.model.groq"></label>
+              <select id="m-groq" class="campo"></select>
             </div>
-            <div class="riga">
-              <div class="gruppo largo">
-                <label data-t="eng.model.groq"></label>
-                <select id="m-groq" class="campo"></select>
-              </div>
-              <div class="gruppo largo">
-                <label data-t="eng.key"></label>
-                <div class="azioni azioni-chiave">
-                  <button id="carica-chiave" class="bottone contorno">
-                    <svg class="icona" viewBox="0 0 24 24"><use href="#i-chiave"/></svg>
-                    <span data-t="eng.key.load"></span>
-                  </button>
-                  <button id="ottieni-chiave" class="bottone nudo" data-t="eng.key.get"></button>
-                </div>
-                <div class="stato-chiave" id="stato-chiave"></div>
-              </div>
+            <div class="gruppo largo">
+              <label data-t="eng.model.groqtesto"></label>
+              <select id="m-groq-testo" class="campo"></select>
             </div>
-          </section>
-        </div>
+            <div class="gruppo largo">
+              <label data-t="eng.model.groqvista"></label>
+              <select id="m-groq-vista" class="campo"></select>
+            </div>
+          </div>
+        </section>
+
+        <section class="vetro colonna">
+          <div class="titolo-pannello">
+            <svg class="icona-pannello" viewBox="0 0 24 24"><use href="#i-chiave"/></svg>
+            <span data-t="eng.key"></span>
+          </div>
+          <p class="nota-riga" data-t="eng.key.hint"></p>
+          <div class="azioni azioni-chiave">
+            <button id="carica-chiave" class="bottone contorno">
+              <svg class="icona" viewBox="0 0 24 24"><use href="#i-chiave"/></svg>
+              <span data-t="eng.key.load"></span>
+            </button>
+            <button id="ottieni-chiave" class="bottone nudo" data-t="eng.key.get"></button>
+          </div>
+          <!-- Del file caricato si mostra il nome e nient'altro: la chiave e'
+               un segreto, e vederla scritta a schermo non serve a nessuno. -->
+          <div class="stato-chiave" id="stato-chiave"></div>
+        </section>
+
+        <div class="slot-lavoro"></div>
       </div>
 
       <!-- ══ CREDITI ════════════════════════════════════════════════════ -->
@@ -387,20 +411,6 @@
           <div id="crediti" class="elenco"></div>
         </section>
       </div>
-
-      <!-- Il diario e' uno solo e si sposta nella sezione aperta: tenerne tre
-           significherebbe tre cronologie diverse, e non sapere piu' dove
-           guardare. -->
-      <section class="vetro colonna" id="pannello-diario">
-        <div class="titolo-pannello">
-          <span class="spia" id="spia"></span>
-          <span data-t="log.title"></span>
-          <span class="stato" id="stato"></span>
-          <div class="spazio"></div>
-          <button id="svuota" class="bottone nudo" data-t="log.clear"></button>
-        </div>
-        <div id="diario" class="diario"></div>
-      </section>
 
     </main>
   </div>

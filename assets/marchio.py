@@ -15,6 +15,12 @@ import sys
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
+# Il binario della barra di avvio: dove va disegnato lo decide Shared/avvio.py,
+# che e' anche chi ci scrive sopra il riempimento a programma avviato. Le due
+# meta' della stessa barra, quindi le misure stanno in un posto solo.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from Shared.avvio import BINARIO
+
 # --- I colori, gli stessi di :root in web/style.css --------------------------
 F0   = (0x04, 0x04, 0x0a)      # --f0   il nero di fondo
 F2   = (0x12, 0x12, 0x2a)      # --f2   il fondo alto della piastrella
@@ -144,9 +150,14 @@ def caricamento(larghezza: int = 440, altezza: int = 260) -> Image.Image:
 
     Nessuna frase sotto il nome, di proposito: questa immagine e' disegnata una
     volta sola e non sa in che lingua girera' il programma, mentre il nome e'
-    lo stesso in tutte e due. Nemmeno la barra: qui non c'e' ancora niente da
-    misurare, e una barra ferma sembra un programma piantato. La barra comincia
-    col velo, quando i passi da contare esistono davvero.
+    lo stesso in tutte e due.
+
+    La barra invece c'e', ma qui se ne disegna solo il BINARIO vuoto: a
+    riempirlo e' il programma appena parte, scrivendoci sopra (vedi
+    Shared/avvio.py). Il binario dev'essere gia' nell'immagine perche' nei primi
+    istanti dopo il doppio clic non esiste ancora un interprete Python che possa
+    disegnare alcunche': si vede una barra vuota, che e' la verita', invece del
+    nulla.
     """
     tela = Image.new('RGBA', (larghezza, altezza), F0 + (255,))
 
@@ -176,6 +187,17 @@ def caricamento(larghezza: int = 440, altezza: int = 260) -> Image.Image:
         (round(cx - (misura[2] - misura[0]) / 2),
          round(cima + lato_segno + stacco - misura[1])),
         'EchoScript', font=tipo, fill=T0 + (255,))
+
+    # Il binario vuoto della barra. Su uno strato a parte per lo stesso motivo
+    # del bordo qui sotto: e' un viola quasi trasparente (--bordo, lo stesso
+    # fondo della barra nel velo) e ImageDraw non lo fonderebbe con cio' che
+    # trova sotto, scrivendolo a piena tinta.
+    x, y, largo, spesso = BINARIO
+    guida = Image.new('RGBA', (larghezza, altezza), (0, 0, 0, 0))
+    ImageDraw.Draw(guida).rounded_rectangle(
+        (x, y, x + largo - 1, y + spesso - 1), radius=spesso / 2,
+        fill=IRIS + (0x1f,))
+    tela = Image.alpha_composite(tela, guida)
 
     # Il filo del bordo: la finestra dello splash non ha cornice, e senza
     # questo su uno sfondo scuro non si capisce dove finisce. E' lo stesso

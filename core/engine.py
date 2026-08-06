@@ -132,6 +132,15 @@ def _set_engine_lang(options: dict) -> None:
     vm = options.get("ollama_vision_model")
     if vm:
         tx.OLLAMA_VISION_MODEL = vm
+    # Modelli Groq (cloud) scelti in GUI: gli stessi due ruoli, ma sui server.
+    # Valgono solo quando il backend è Groq — con backend locale il cloud non
+    # viene toccato affatto (vedi _resolve_summary_client).
+    gs = options.get("groq_summary_model")
+    if gs:
+        tx.GROQ_SUMMARY_MODEL = gs
+    gv = options.get("groq_vision_model")
+    if gv:
+        tx.GROQ_VISION_MODEL = gv
 
 
 def _L(key: str, **fmt) -> str:
@@ -538,6 +547,29 @@ def transcribe_only(source: str, options: dict, on_progress=_noop, resume: bool 
     meta["_video_path"] = None
     meta["_video_tmpdir"] = None
 
+    try:
+        return _transcribe_body(source, options, on_progress, meta, client, backend,
+                                model, source_kind, audio_lang, engine_label,
+                                do_visual, cp, local_cp)
+    except BaseException:
+        # La cartella del video scaricato per l'analisi visiva NON è una
+        # TemporaryDirectory: sopravvive al blocco 'with' perché i fotogrammi si
+        # estraggono nella fase successiva, ed è save_results a cancellarla. Se
+        # però si esce di qui per un guasto — crediti esauriti, niente testo
+        # trascritto — save_results non viene mai chiamata e quel video (spesso
+        # centinaia di MB) resterebbe nel temporaneo fino al riavvio.
+        if meta.get("_video_tmpdir"):
+            shutil.rmtree(meta["_video_tmpdir"], ignore_errors=True)
+            meta["_video_tmpdir"] = None
+        raise
+
+
+def _transcribe_body(source, options, on_progress, meta, client, backend, model,
+                     source_kind, audio_lang, engine_label, do_visual, cp, local_cp):
+    """Il corpo di transcribe_only: scarica/legge, trascrive e restituisce.
+
+    Sta a parte solo perché transcribe_only possa avvolgerlo in un try che
+    ripulisce il video temporaneo su qualunque uscita anomala."""
     with tempfile.TemporaryDirectory(prefix="echoscript_", ignore_cleanup_errors=True) as workdir:
         if source_kind == "local":
             audio_path = source  # fed directly to ffmpeg / whisper
@@ -753,11 +785,18 @@ def _translate_outputs(meta: dict, sections: list[dict], options: dict,
 
 
 def _resolve_summary_client(options: dict, client):
-    """Pick the chat client for the summary: the Groq transcription client if we
-    have one, otherwise build one from the loaded key, otherwise None (-> Ollama).
+    """Pick the chat client for the post-processing (visual analysis, translation,
+    summary): a Groq client when the chosen backend is Groq, None otherwise
+    (-> Ollama, i.e. everything local).
 
-    Reusing/recreating a Groq client lets a LOCAL-backend user with a Groq key
-    still get a cloud summary instead of needing Ollama installed."""
+    The backend is the whole decision, and deliberately so: choosing "on my
+    computer" is a promise that nothing leaves the machine, so a Groq key loaded
+    for other jobs must NOT silently route the summary through the cloud. The
+    two engines are two separate worlds — local models on one side, the key and
+    the cloud models on the other — and this is where that separation is
+    enforced. Anything else would make the panel lie."""
+    if (options.get("backend") or "").lower() != "groq":
+        return None
     if client is not None:
         return client
     key = (options.get("api_key") or "").strip()
@@ -1098,7 +1137,11 @@ def summary_only(meta: dict, options: dict, out_root: str, on_progress=_noop) ->
     _set_engine_lang(options)
     disk_meta, segments, engine_label = _load_saved_transcript(meta, out_root)
     video_dir = os.path.join(out_root, tx._safe_filename(disk_meta["title"]))
-    sections = (tx.load_existing_translation(out_root, disk_meta["title"])
+    # La traduzione è salvata col suffisso della lingua di destinazione, che è
+    # quella dell'interfaccia: cercarla sempre come "_it" significava, con la UI
+    # in inglese, non trovarla mai e riassumere l'originale di nascosto.
+    _ui_lang = options.get("ui_lang") or "it"
+    sections = (tx.load_existing_translation(out_root, disk_meta["title"], _ui_lang)
                 or tx._build_sections(disk_meta, segments))
     visual_notes = tx.load_visual_notes(out_root, disk_meta["title"]) or []
     created, warnings = [], []
@@ -1132,7 +1175,10 @@ def resume(meta: dict, options: dict, out_root: str, on_progress=_noop) -> dict:
                                         local=chat_client is None)
     summary_status = None
     if tx.stage_status(tx.load_state(disk_meta), "summary") in (tx.STAGE_PENDING, tx.STAGE_PARTIAL):
-        src = (translated or tx.load_existing_translation(out_root, disk_meta["title"])
+        # Stessa lingua con cui la traduzione è stata scritta (vedi summary_only).
+        src = (translated
+               or tx.load_existing_translation(out_root, disk_meta["title"],
+                                               options.get("ui_lang") or "it")
                or sections)
         visual_notes = tx.load_visual_notes(out_root, disk_meta["title"]) or []
         summary_status = _summarize_outputs(disk_meta, src, options, video_dir,

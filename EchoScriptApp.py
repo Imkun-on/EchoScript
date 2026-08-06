@@ -47,14 +47,62 @@ for _p in (os.path.join(_QUI, 'core'), _QUI):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-import webview
+# ── La barra della schermata di avvio ────────────────────────────────────────
+#
+# Questo blocco viene prima di ogni import pesante, e non e' un dettaglio di
+# stile: sono proprio quegli import l'attesa che la barra deve raccontare. Il
+# ponte con WebView2 e il motore — che si porta dietro Groq, yt-dlp e Rich —
+# prendono insieme la maggior parte dei secondi fra il doppio clic e la
+# finestra. Importandoli prima di poter disegnare, la barra resterebbe ferma
+# proprio mentre succede tutto.
+#
+# Fuori dall'eseguibile il modulo non esiste e non c'e' nessuna schermata:
+# `_avanza` diventa un giro a vuoto e il programma parte come sempre.
+try:
+    import pyi_splash as _splash          # type: ignore[import-not-found]
+except ImportError:
+    _splash = None
+
+from Shared.avvio import barra as _barra_avvio
+
+# Quanto vale ogni pezzo dell'avvio sulla barra. Non sono numeri decorativi: il
+# motore da solo pesa quanto tutto il resto messo insieme, ed e' giusto che la
+# barra ci stia sopra a lungo invece di correre e poi piantarsi.
+#
+# APERTURA e' il punto in cui questa schermata passa la mano alla pagina: da li'
+# in poi a riempire e' il velo di caricamento dentro la finestra, che riparte
+# esattamente da questo valore (BASE_AVVIO in web/app.js) invece che da zero.
+# E' l'unica ragione per cui le due schermate sembrano una barra sola.
+APERTURA = 0.62
+
+
+def _avanza(quota: float) -> None:
+    """Porta la barra della schermata di avvio a ``quota`` (da 0 a 1)."""
+    if _splash is None:
+        return
+    try:
+        _splash.update_text(_barra_avvio(quota))
+    except Exception:
+        # La schermata puo' essere gia' stata chiusa: non e' un guasto, e non
+        # deve certo impedire al programma di finire di avviarsi.
+        pass
+
+
+_avanza(0.0)
 
 from Shared import i18n
 from Shared.percorsi import dati as _dati, risorsa as _risorsa, impacchettato
 from Shared.strings_app import TESTI
+_avanza(0.06)               # i testi: sono dizionari, e' immediato
+
+import webview
+_avanza(0.22)               # il ponte con WebView2
+
+import transcriber as tx     # gli helper puri condivisi con la riga di comando
+_avanza(0.50)               # il motore: Groq, yt-dlp, Rich — il tratto piu' lungo
 
 import engine                # core/engine.py
-import transcriber as tx     # gli helper puri condivisi con la riga di comando
+_avanza(0.56)               # l'orchestrazione, che sopra il motore costa poco
 
 i18n.register(TESTI)
 
@@ -82,13 +130,21 @@ RISULTATI = _dati('results') if impacchettato() else engine.RESULTS_DIR
 # Le chiavi di descrizione seguono il nome del modello ('model.small') o il
 # numero di catalogo di transcriber.py ('om.text.2'): cosi' aggiungere un
 # modello e' una riga qui e una nel file dei testi, non una modifica al codice.
+#
+# Sono divisi in due gruppi che non si mescolano mai — quelli che girano sul
+# computer e quelli che girano sui server Groq — perche' e' cosi' che sono
+# divise le due sezioni dell'interfaccia: scegliere il motore sceglie il gruppo
+# intero, trascrizione e riassunto e analisi visiva insieme.
 
 _WHISPER = ('base', 'small', 'medium', 'large-v3', 'large-v3-turbo')
-_GROQ = ('whisper-large-v3-turbo', 'whisper-large-v3')
 _OLLAMA_TESTO = [(nome, ram, f'om.text.{k}')
                  for k, (nome, ram, _d) in tx.OLLAMA_TEXT_MODELS.items()]
 _OLLAMA_VISTA = [(nome, ram, f'om.vis.{k}')
                  for k, (nome, ram, _d) in tx.OLLAMA_VISION_MODELS.items()]
+
+_GROQ = ('whisper-large-v3-turbo', 'whisper-large-v3')
+_GROQ_TESTO = [(nome, f'gm.text.{k}') for k, (nome, _d) in tx.GROQ_TEXT_MODELS.items()]
+_GROQ_VISTA = [(nome, f'gm.vis.{k}') for k, (nome, _d) in tx.GROQ_VISION_MODELS.items()]
 
 
 # ── L'avvio: cosa si vede, e in che ordine ───────────────────────────────────
@@ -99,26 +155,24 @@ _OLLAMA_VISTA = [(nome, ram, f'om.vis.{k}')
 # clic sembra non aver funzionato e se ne fa un altro, avviando due copie. La
 # sequenza e' questa:
 #
-#   1. il bootloader di PyInstaller mostra l'immagine di caricamento;
-#   2. il programma parte e prepara la finestra, ma la tiene *nascosta*;
+#   1. il bootloader di PyInstaller mostra l'immagine di caricamento, che porta
+#      gia' disegnato il binario vuoto della barra;
+#   2. il programma parte e riempie quella barra a ogni pezzo caricato (vedi
+#      _avanza in cima al file), mentre prepara la finestra ma la tiene
+#      *nascosta*;
 #   3. la pagina si carica e chiama avvio(): li' la finestra compare, ma
 #      l'immagine resta ancora sopra;
 #   4. al primo fotogramma davvero disegnato la pagina chiama dipinta(), e
 #      l'immagine se ne va scoprendo il velo di caricamento — stesso marchio,
-#      stesso viola, nessuno stacco;
-#   5. la barra del velo si riempie per passi veri e sfuma sull'interfaccia.
+#      stesso viola, e la barra del velo riparte da dove quella dell'immagine
+#      si era fermata, quindi non si vede nessuno scambio;
+#   5. la barra finisce di riempirsi per passi veri e sfuma sull'interfaccia.
 #
-# Il punto 2 e' quello che conta. Mostrando la finestra subito, per un istante
-# si vedrebbe il bianco con cui WebView2 dipinge se stesso finche' non ha finito
-# di inizializzarsi: un lampo bianco in un programma tutto nero e viola e'
+# E' una barra sola, disegnata due volte da due programmi diversi. Il punto 2 e'
+# quello che conta per la finestra: mostrandola subito, per un istante si
+# vedrebbe il bianco con cui WebView2 dipinge se stesso finche' non ha finito di
+# inizializzarsi: un lampo bianco in un programma tutto nero e viola e'
 # esattamente cio' che si nota di piu'.
-
-try:
-    import pyi_splash as _splash          # type: ignore[import-not-found]
-except ImportError:
-    # Fuori dall'eseguibile il modulo non esiste, e non c'e' nemmeno niente da
-    # scompattare: non c'e' immagine da chiudere.
-    _splash = None
 
 _gia_mostrata = False
 _gia_chiusa = False
@@ -173,6 +227,21 @@ def _scadenza_avvio(secondi: int = 25) -> None:
     orologio.start()
 
 
+def _json_per_js(valore) -> str:
+    """JSON valido anche come pezzo di codice JavaScript.
+
+    JSON e JavaScript non coincidono del tutto: U+2028 e U+2029 sono caratteri
+    legittimi dentro una stringa JSON ma terminano una riga in JavaScript, quindi
+    finirebbero dentro ``window.funzione(...)`` spezzando l'istruzione a meta'.
+    Un titolo di video che li contiene farebbe fallire la chiamata in silenzio —
+    l'errore lo vedrebbe solo la console della pagina, che qui non si apre. Si
+    riscrivono nella loro forma con la barra rovesciata, che JSON accetta e
+    JavaScript legge come lo stesso carattere.
+    """
+    return (json.dumps(valore, ensure_ascii=False, default=str)
+            .replace('\u2028', '\\u2028').replace('\u2029', '\\u2029'))
+
+
 def _verso_pagina(funzione: str, *argomenti) -> None:
     """Esegue una funzione JavaScript della pagina, da qualunque thread.
 
@@ -183,8 +252,7 @@ def _verso_pagina(funzione: str, *argomenti) -> None:
     if _finestra is None:
         return
     try:
-        args = ', '.join(json.dumps(a, ensure_ascii=False, default=str)
-                         for a in argomenti)
+        args = ', '.join(_json_per_js(a) for a in argomenti)
         _finestra.evaluate_js(f'window.{funzione}({args})')
     except Exception:
         # Una finestra chiusa mentre un thread stava ancora riferendo non e' un
@@ -386,14 +454,22 @@ class Api:
         self.scelte = {
             'motore':  prefs.get('motore', 'local'),
             'sorgente': prefs.get('sorgente', 'youtube'),
+            # I tre modelli locali...
             'whisper': prefs.get('whisper', 'small'),
-            'groq':    prefs.get('groq', _GROQ[0]),
             'ollama':  prefs.get('ollama', tx.OLLAMA_MODEL),
             'vision':  prefs.get('vision', tx.OLLAMA_VISION_MODEL),
+            # ...e i tre di Groq, che fanno gli stessi tre mestieri sui server.
+            'groq':    prefs.get('groq', _GROQ[0]),
+            'groq_testo': prefs.get('groq_testo', tx.GROQ_SUMMARY_MODEL),
+            'groq_vista': prefs.get('groq_vista', tx.GROQ_VISION_MODEL),
             'translate': bool(prefs.get('translate', False)),
             'summarize': bool(prefs.get('summarize', False)),
             'visual':    bool(prefs.get('visual', False)),
         }
+        # La sezione crediti elenca i modelli Groq leggendoli da transcriber:
+        # allinearli subito evita che mostri i default di .env finche' non parte
+        # il primo lavoro.
+        self._applica_groq()
 
     # ── Avvio ────────────────────────────────────────────────────────────────
 
@@ -438,8 +514,19 @@ class Api:
         self._ollama_presenti = presenti
         _verso_pagina('aggiornaModelli', self._modelli())
 
+    def _applica_groq(self) -> None:
+        """Porta in transcriber i modelli Groq scelti nella sezione «Motore».
+
+        Servono anche fuori da un lavoro — la sezione crediti li elenca per
+        chiedere quanto e' rimasto — quindi non basta passarli fra le opzioni al
+        momento di partire.
+        """
+        tx.GROQ_MODEL = self.scelte['groq']
+        tx.GROQ_SUMMARY_MODEL = self.scelte['groq_testo']
+        tx.GROQ_VISION_MODEL = self.scelte['groq_vista']
+
     def _modelli(self) -> dict:
-        """I quattro cataloghi di modelli, gia' con etichetta e descrizione.
+        """I sei cataloghi di modelli, gia' con etichetta e descrizione.
 
         Le etichette le compone Python perche' e' Python a sapere quali modelli
         esistono e quali sono gia' scaricati; la pagina si limita a riempirne
@@ -460,18 +547,34 @@ class Api:
         vision = [{'valore': n, 'nome': f'{n}{spunta(n)} ({ram})', 'chiave': k}
                   for n, ram, k in _OLLAMA_VISTA]
 
-        # Un modello imposto da .env che non sta nel catalogo va comunque
-        # offerto, o il valore selezionato non esisterebbe fra le voci.
-        for elenco, corrente in ((ollama, tx.OLLAMA_MODEL), (vision, tx.OLLAMA_VISION_MODEL)):
-            if corrente not in [v['valore'] for v in elenco]:
-                elenco.insert(0, {'valore': corrente, 'nome': f'{corrente} (da .env)',
-                                  'chiave': ''})
+        # I modelli Groq non si scaricano, quindi niente ✓ e niente memoria: il
+        # nome basta a se stesso, la descrizione dice il resto.
+        groq_testo = [{'valore': n, 'nome': n, 'chiave': k} for n, k in _GROQ_TESTO]
+        groq_vista = [{'valore': n, 'nome': n, 'chiave': k} for n, k in _GROQ_VISTA]
+
+        # Un modello fuori catalogo — imposto da .env, o scelto quando il
+        # catalogo era diverso — va comunque offerto, o il valore selezionato non
+        # esisterebbe fra le voci e la pagina ripiegherebbe sulla prima,
+        # cambiando di nascosto il modello scelto. Si guarda la scelta salvata,
+        # non il valore del modulo: sono la stessa cosa solo al primo avvio.
+        for elenco, corrente in ((ollama, self.scelte['ollama']),
+                                 (vision, self.scelte['vision']),
+                                 (groq_testo, self.scelte['groq_testo']),
+                                 (groq_vista, self.scelte['groq_vista'])):
+            if corrente and corrente not in [v['valore'] for v in elenco]:
+                # Nome nudo: non si puo' sapere da dove venga (.env o una scelta
+                # di ieri), e scriverlo sbagliato sarebbe peggio che tacere.
+                elenco.insert(0, {'valore': corrente, 'nome': corrente, 'chiave': ''})
 
         return {
+            # Sul computer.
             'whisper': [{'valore': m, 'nome': '', 'chiave': f'model.{m}'} for m in _WHISPER],
-            'groq':    [{'valore': m, 'nome': '', 'chiave': f'groqm.{m}'} for m in _GROQ],
             'ollama':  ollama,
             'vision':  vision,
+            # Sui server Groq.
+            'groq':    [{'valore': m, 'nome': '', 'chiave': f'groqm.{m}'} for m in _GROQ],
+            'groq_testo': groq_testo,
+            'groq_vista': groq_vista,
         }
 
     def cambia_lingua(self, codice: str) -> dict:
@@ -489,6 +592,7 @@ class Api:
         """
         self.scelte.update({k: v for k, v in (valori or {}).items() if k in self.scelte})
         i18n.save_prefs(**self.scelte)
+        self._applica_groq()
         return {'ok': True, 'stima': self._stima()}
 
     # ── La chiave Groq ───────────────────────────────────────────────────────
@@ -724,15 +828,23 @@ class Api:
     # ── Avviare il lavoro ────────────────────────────────────────────────────
 
     def _opzioni(self, motore: str | None = None) -> dict:
-        """Il dizionario che il motore si aspetta, dalle scelte dell'interfaccia."""
+        """Il dizionario che il motore si aspetta, dalle scelte dell'interfaccia.
+
+        Passano i modelli di entrambi i mondi, ma il motore ne usa uno solo: e'
+        ``backend`` a decidere, e con «local» la chiave non parte nemmeno, cosi'
+        una trascrizione sul computer resta sul computer anche se una chiave e'
+        caricata per altri lavori.
+        """
         motore = motore or self.scelte['motore']
         return {
             'backend': motore,
             'model': self.scelte['whisper'],
-            'groq_model': self.scelte['groq'],
             'ollama_model': self.scelte['ollama'],
             'ollama_vision_model': self.scelte['vision'],
-            'api_key': self._chiave,
+            'groq_model': self.scelte['groq'],
+            'groq_summary_model': self.scelte['groq_testo'],
+            'groq_vision_model': self.scelte['groq_vista'],
+            'api_key': self._chiave if motore == 'groq' else '',
             'export': True,
             'source_kind': self.scelte['sorgente'],
             # I nomi delle cartelle seguono la lingua dell'interfaccia.
@@ -936,6 +1048,11 @@ class Api:
         """
         if self._occupato:
             return {'ok': False, 'errore': i18n.t('err.busy')}
+        # La finestra puo' restare aperta mentre si cambia il link, e cambiarlo
+        # dimentica la sorgente: senza questo controllo il lavoro partirebbe
+        # senza sapere su cosa, e fallirebbe a meta' con un errore oscuro.
+        if not self._meta:
+            return {'ok': False, 'errore': i18n.t('err.no_file')}
         self._in_thread(self._riassunto_locale)
         return {'ok': True, 'avviato': True}
 
@@ -959,6 +1076,8 @@ class Api:
         """
         if self._occupato:
             return {'ok': False, 'errore': i18n.t('err.busy')}
+        if not self._meta or not self._src:
+            return {'ok': False, 'errore': i18n.t('err.no_file')}
         self.scelte['motore'] = 'local'
         i18n.save_prefs(**self.scelte)
         self._in_thread(self._coda_in_locale)
@@ -997,15 +1116,19 @@ class Api:
         senza_crediti = False
 
         for numero, meta in enumerate(voci, 1):
+            # Il controllo «c'e' gia'» viene PRIMA di annunciare il lavoro: un
+            # video saltato non deve azzerare la barra e riscrivere il piano per
+            # poi non fare niente, che a schermo si legge come un lavoro partito
+            # e subito bloccato.
+            if tx.transcription_exists(radice, meta['title']):
+                saltati.append(meta['title'])
+                continue
+
             piano = piano_fasi(opzioni['backend'], 'youtube', opzioni)
             self._apri_lavoro(opzioni, piano)
             _verso_pagina('lavoroBatch',
                           i18n.t('playlist.batch', i=numero, n=len(voci)),
                           meta.get('title') or '?')
-
-            if tx.transcription_exists(radice, meta['title']):
-                saltati.append(meta['title'])
-                continue
             try:
                 meta2, segmenti, etichetta, cliente = engine.transcribe_only(
                     meta.get('webpage_url') or '', opzioni,
@@ -1013,6 +1136,10 @@ class Api:
                 fatti.append(engine.save_results(
                     meta2, segmenti, etichetta, opzioni, radice, cliente,
                     on_progress=self._riferisci))
+                # Come per un video singolo: l'ultima fase riferisce e poi tace,
+                # quindi senza questa la barra di ogni video resterebbe a un
+                # passo dalla fine con tutto gia' scritto sul disco.
+                self._avanz.concludi()
             except engine.RateLimitReached:
                 senza_crediti = True
                 break
@@ -1285,11 +1412,24 @@ def main() -> None:
         hidden=True,
     )
 
+    # La finestra c'e': da qui in poi l'attesa e' tutta di WebView2, che nessuno
+    # puo' misurare dall'esterno. La barra si ferma qui e riparte dentro la
+    # pagina, che sa raccontare i propri passi.
+    _avanza(APERTURA)
+
     # L'icona della finestra. Su Windows pywebview, se non gliela si passa, la
     # estrae dall'eseguibile: lanciando i sorgenti finirebbe quella di
     # python.exe, quindi gliela si indica sempre quando c'e'.
     icona = _risorsa('assets', 'EchoScript.ico')
-    webview.start(icon=icona if os.path.isfile(icona) else None)
+    # 'func' viene eseguito appena il giro della finestra e' partito, cioe' nel
+    # mezzo dell'unico tratto che nessuno puo' misurare: quello in cui WebView2
+    # si inizializza e carica la pagina. Non e' molto, ma e' un movimento vero in
+    # un momento in cui altrimenti la barra resterebbe immobile per qualche
+    # secondo — e una barra immobile e' esattamente cio' che fa pensare a un
+    # programma piantato. Resta sotto al primo passo del velo, cosi' quando le
+    # due schermate si scambiano la barra non torna mai indietro.
+    webview.start(lambda: _avanza(0.66),
+                  icon=icona if os.path.isfile(icona) else None)
 
 
 if __name__ == '__main__':

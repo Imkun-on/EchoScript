@@ -25,24 +25,26 @@ TESTI: dict[str, dict[str, str]] = {
                          'en': 'Listen  ·  Transcribe  ·  Translate'},
     'app.language':     {'it': 'Lingua', 'en': 'Language'},
 
-    'menu.trascrivi':   {'it': 'Trascrivi', 'en': 'Transcribe'},
-    'menu.motore':      {'it': 'Motore', 'en': 'Engine'},
+    'menu.locale':      {'it': 'Locale', 'en': 'Local'},
+    'menu.cloud':       {'it': 'Cloud', 'en': 'Cloud'},
     'menu.crediti':     {'it': 'Crediti', 'en': 'Credits'},
 
-    'sez.trascrivi.title': {'it': 'Da voce a testo', 'en': 'From voice to text'},
-    'sez.trascrivi.desc':  {'it': "Incolla un link YouTube o scegli un file audio. "
-                                  "Il testo, la traduzione e il riassunto finiscono in una "
-                                  "cartella ordinata, PDF compreso.",
-                            'en': 'Paste a YouTube link or pick an audio file. The text, the '
-                                  'translation and the summary land in a tidy folder, PDF '
-                                  'included.'},
-    'sez.motore.title': {'it': 'Chi fa il lavoro', 'en': 'Who does the work'},
-    'sez.motore.desc':  {'it': "Sul tuo computer, senza che l'audio esca di casa, oppure sui "
-                               "server di Groq, molto più in fretta. La scelta vale per tutto "
-                               "il resto: modelli, costi, tempi.",
-                         'en': 'On your own computer, with the audio never leaving the house, '
-                               'or on the Groq servers, far faster. The choice drives '
-                               'everything else: models, cost, time.'},
+    'sez.locale.title': {'it': 'Trascrivi sul tuo computer',
+                         'en': 'Transcribe on your computer'},
+    'sez.locale.desc':  {'it': "Quello che parte da qui gira su questa macchina, con i modelli "
+                               "scelti qui sotto: niente rete, niente chiave, niente crediti. "
+                               "L'audio non esce di casa.",
+                         'en': 'Anything started here runs on this machine, with the models '
+                               'chosen below: no network, no key, no credits. The audio never '
+                               'leaves the house.'},
+    'sez.cloud.title':  {'it': 'Trascrivi sui server Groq',
+                         'en': 'Transcribe on the Groq servers'},
+    'sez.cloud.desc':   {'it': "Quello che parte da qui gira in nuvola, con i modelli scelti "
+                               "qui sotto e a carico della chiave. Molto più veloce, ma "
+                               "l'audio viene inviato a Groq e ogni lavoro consuma crediti.",
+                         'en': 'Anything started here runs in the cloud, with the models '
+                               'chosen below and charged to the key. Far faster, but the audio '
+                               'is sent to Groq and every job spends credits.'},
     'sez.crediti.title': {'it': 'Crediti Groq', 'en': 'Groq credits'},
     'sez.crediti.desc':  {'it': "Quanto audio hai già mandato a Groq e quanto te ne resta oggi.",
                           'en': 'How much audio you already sent to Groq, and how much is left '
@@ -92,22 +94,24 @@ TESTI: dict[str, dict[str, str]] = {
     # ── Sezione «Trascrivi»: output aggiuntivi ───────────────────────────────
     'opts.title':       {'it': 'Output aggiuntivi', 'en': 'Extra outputs'},
     'opt.translate':    {'it': 'Traduci in italiano', 'en': 'Translate to English'},
-    'opt.translate.desc': {'it': 'Traduzione in /traduzioni (Groq se hai la chiave, '
-                                 'altrimenti Ollama offline).',
-                           'en': 'Translation in /translations (Groq if you have a key, '
-                                 'otherwise offline Ollama).'},
+    'opt.translate.desc': {'it': 'Traduzione in /traduzioni, con il modello di testo del '
+                                 'motore scelto (Ollama in locale, Groq in nuvola).',
+                           'en': 'Translation in /translations, using the text model of the '
+                                 'chosen engine (Ollama locally, Groq in the cloud).'},
     'opt.summary':      {'it': 'Crea riassunto', 'en': 'Create summary'},
-    'opt.summary.desc': {'it': 'Riassunto pulito per sezione in /riassunti (Groq se hai la '
-                               'chiave, altrimenti Ollama locale).',
-                         'en': 'Clean per-section summary in /summaries (Groq if you have a '
-                               'key, otherwise local Ollama).'},
+    'opt.summary.desc': {'it': 'Riassunto pulito per sezione in /riassunti, con lo stesso '
+                               'modello di testo della traduzione.',
+                         'en': 'Clean per-section summary in /summaries, using the same text '
+                               'model as the translation.'},
     'opt.visual':       {'it': 'Analisi visiva del video', 'en': 'Visual analysis of the video'},
     'opt.visual.desc':  {'it': '«Guarda» i fotogrammi ed estrae codice, formule e grafici a '
                                'schermo, nel riassunto più un documento con i frame. Più '
-                               'lento; richiede Groq (più crediti) o un modello vision Ollama.',
+                               'lento; usa il modello vision del motore scelto (Ollama in '
+                               'locale, Groq in nuvola: più crediti).',
                          'en': 'It "looks" at the frames and extracts on-screen code, formulas '
                                'and charts, into the summary plus a document with the frames. '
-                               'Slower; needs Groq (more credits) or an Ollama vision model.'},
+                               'Slower; uses the vision model of the chosen engine (Ollama '
+                               'locally, Groq in the cloud: more credits).'},
 
     # ── Scheda della sorgente ────────────────────────────────────────────────
     'info.channel':     {'it': 'Canale', 'en': 'Channel'},
@@ -149,37 +153,47 @@ TESTI: dict[str, dict[str, str]] = {
                           'en': 'Batch stopped: Groq credits exhausted. Completed videos are '
                                 'saved; resume tomorrow.'},
 
-    # ── Sezione «Motore» ─────────────────────────────────────────────────────
-    'eng.choose':       {'it': 'Dove gira la trascrizione', 'en': 'Where transcription runs'},
-    'eng.local':        {'it': 'Sul mio computer', 'en': 'On my computer'},
-    'eng.local.desc':   {'it': 'Privacy totale, offline. L\'audio non esce di qui. GPU consigliata.',
-                         'en': 'Full privacy, offline. The audio never leaves. GPU recommended.'},
-    'eng.groq':         {'it': 'Sui server Groq', 'en': 'On the Groq servers'},
-    'eng.groq.desc':    {'it': 'Velocissimo. L\'audio viene inviato a Groq e consuma crediti.',
-                         'en': 'Very fast. The audio is sent to Groq and spends credits.'},
+    # ── Sezioni «Locale» e «Cloud» ───────────────────────────────────────────
     'eng.tag.cloud':    {'it': 'CLOUD', 'en': 'CLOUD'},
     'eng.tag.offline':  {'it': 'OFFLINE', 'en': 'OFFLINE'},
 
-    'eng.local.title':  {'it': 'Modelli locali', 'en': 'Local models'},
-    'eng.local.hint':   {'it': 'I modelli che girano sul tuo PC: trascrizione (Whisper), '
-                               'riassunto e traduzione (Ollama), analisi visiva (Ollama '
-                               'vision). ✓ = già scaricato in Ollama.',
-                         'en': 'The models that run on your PC: transcription (Whisper), '
-                               'summary and translation (Ollama), visual analysis (Ollama '
-                               'vision). ✓ = already pulled in Ollama.'},
+    'eng.local.title':  {'it': 'Solo modelli sul tuo computer',
+                         'en': 'Only models on your computer'},
+    'eng.local.hint':   {'it': 'Tutto quello che serve gira qui, senza rete e senza chiave: '
+                               'trascrizione (Whisper), riassunto e traduzione (Ollama), '
+                               'analisi visiva (Ollama vision). ✓ = già scaricato in Ollama.',
+                         'en': 'Everything runs here, with no network and no key: '
+                               'transcription (Whisper), summary and translation (Ollama), '
+                               'visual analysis (Ollama vision). ✓ = already pulled in Ollama.'},
     'eng.model.whisper': {'it': 'Trascrizione (Whisper)', 'en': 'Transcription (Whisper)'},
     'eng.model.ollama':  {'it': 'Riassunto e traduzione (Ollama)',
                           'en': 'Summary and translation (Ollama)'},
     'eng.model.vision':  {'it': 'Analisi visiva (Ollama vision)',
                           'en': 'Visual analysis (Ollama vision)'},
 
-    'eng.groq.title':   {'it': 'Groq', 'en': 'Groq'},
-    'eng.model.groq':   {'it': 'Modello di trascrizione', 'en': 'Transcription model'},
+    'eng.groq.title':   {'it': 'Solo modelli sui server Groq',
+                         'en': 'Only models on the Groq servers'},
+    'eng.groq.hint':    {'it': 'Gli stessi tre mestieri, ma in nuvola e a carico della '
+                               'chiave: trascrizione, riassunto e traduzione, analisi '
+                               'visiva. Niente di tutto questo tocca il tuo computer.',
+                         'en': 'The same three jobs, but in the cloud and charged to the '
+                               'key: transcription, summary and translation, visual '
+                               'analysis. None of it touches your computer.'},
+    'eng.model.groq':   {'it': 'Trascrizione (Whisper su Groq)',
+                         'en': 'Transcription (Whisper on Groq)'},
+    'eng.model.groqtesto': {'it': 'Riassunto e traduzione (Groq)',
+                            'en': 'Summary and translation (Groq)'},
+    'eng.model.groqvista': {'it': 'Analisi visiva (Groq vision)',
+                            'en': 'Visual analysis (Groq vision)'},
     'eng.key':          {'it': 'Chiave API', 'en': 'API key'},
+    'eng.key.hint':     {'it': 'Scegli il file .txt con la chiave: viene letta e tenuta in '
+                               'memoria per questa sessione. A schermo resta solo il nome del '
+                               'file.',
+                         'en': 'Pick the .txt file with the key: it is read and kept in memory '
+                               'for this session. Only the file name stays on screen.'},
     'eng.key.load':     {'it': 'Carica da file .txt', 'en': 'Load from a .txt file'},
     'eng.key.get':      {'it': 'Ottieni una chiave →', 'en': 'Get a key →'},
-    'eng.key.loaded':   {'it': '✓ Chiave caricata da «{nome}»',
-                         'en': '✓ Key loaded from "{nome}"'},
+    'eng.key.loaded':   {'it': '✓ {nome}', 'en': '✓ {nome}'},
     'eng.key.none':     {'it': 'Nessun file caricato (in alternativa la chiave può stare '
                                'nel file .env).',
                          'en': 'No file loaded (the key can also live in the .env file).'},
@@ -205,6 +219,14 @@ TESTI: dict[str, dict[str, str]] = {
                                      'en': 'whisper-large-v3-turbo: $0.04/hr · fast, recommended'},
     'groqm.whisper-large-v3': {'it': 'whisper-large-v3: $0.111/ora · più accurato',
                                'en': 'whisper-large-v3: $0.111/hr · more accurate'},
+
+    # Modelli Groq di testo (riassunto e traduzione) e di analisi visiva, per
+    # numero di catalogo — come per Ollama, cosi' aggiungerne uno resta una riga
+    # in transcriber.py e una qui.
+    'gm.text.1':        {'it': 'qualità piena, consigliato', 'en': 'full quality, recommended'},
+    'gm.text.2':        {'it': 'più economico e rapido', 'en': 'cheaper and faster'},
+    'gm.vis.1':         {'it': 'multimodale, ottimo con slide e codice',
+                         'en': 'multimodal, great with slides and code'},
 
     # Descrizioni dei modelli Ollama, per numero di catalogo.
     'om.text.1':        {'it': 'leggero e moderno · ideale con 8 GB di RAM',

@@ -190,6 +190,9 @@ html, body {
 }
 .targhetta-menu.cloud  { color: var(--onda);  border-color: #38d6ee4d; }
 .targhetta-menu.locale { color: var(--verde); border-color: #34d3994d; }
+/* La sezione che non sta lavorando non porta targhetta: una vuota sarebbe un
+ * riquadratino grigio accanto al nome, cioe' rumore con la forma di un segno. */
+.targhetta-menu.spenta { display: none; }
 
 .piede { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
 .etichetta {
@@ -360,40 +363,9 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
   padding-left: 2px; margin-top: -6px;
 }
 
-/* ── Scelte a riquadro ──────────────────────────────────────────────────── */
-/* Il motore non e' una voce di menu: e' la decisione piu' importante del
- * programma — dove finisce l'audio, quanto costa, quanto si aspetta — e va
- * presa guardando due riquadri affiancati, non aprendo una tendina. */
-
-.scelte { display: flex; gap: var(--s3); flex-wrap: wrap; }
-.scelta {
-  flex: 1 1 128px; min-width: 118px;
-  display: flex; flex-direction: column; gap: 3px; align-items: flex-start;
-  padding: 9px 11px; border-radius: var(--r-s);
-  background: var(--incavo); border: 1px solid var(--bordo);
-  color: var(--t1); font: inherit; cursor: pointer; text-align: left;
-  transition: border-color .18s, background .18s, transform .14s var(--molla);
-}
-.scelta:hover { background: #8b7cff0f; transform: translateY(-1px); }
-.scelta.attiva {
-  border-color: var(--iris); background: #7c6cff1a;
-  box-shadow: 0 0 0 3px #7c6cff1f;
-}
-.scelta.grande { flex: 1 1 260px; padding: var(--s4); gap: 5px; }
-.scelta-alto { display: flex; align-items: center; width: 100%; margin-bottom: 6px; }
-.scelta-alto .icona {
-  width: 26px; height: 26px; color: var(--t1);
-  transition: color .18s;
-}
-.scelta.attiva .scelta-alto .icona { color: var(--lume); }
-.scelta-tag {
-  margin-left: auto; font-size: 8.5px; font-weight: 800;
-  text-transform: uppercase; letter-spacing: .8px; color: var(--t2);
-  border: 1px solid var(--bordo); border-radius: 5px; padding: 2px 6px;
-}
-.scelta.attiva .scelta-tag { color: var(--lume); border-color: #7c6cff59; }
-.scelta-nome { font-size: 14px; font-weight: 700; color: var(--t0); }
-.scelta-nota { font-size: 11px; color: var(--t2); line-height: 1.45; }
+/* I riquadri con cui si sceglieva il motore non esistono piu': il motore lo
+ * sceglie la sezione in cui si sta lavorando, e una scelta che si prende
+ * entrando in una stanza non ha bisogno di un riquadro che la ripeta. */
 
 /* ── Avanzamento ────────────────────────────────────────────────────────── */
 
@@ -475,11 +447,26 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 
 .due-colonne { display: grid; grid-template-columns: 1.1fr 1fr; gap: var(--s4); flex: 1; min-height: 0; }
 
-/* I pannelli del motore non sono due colonne: sono due facce della stessa
- * scelta, e se ne vede una alla volta. Impilarli e lasciar decidere al display
- * quale mostrare costa una riga e non lascia mai un buco. */
-.pannelli-motore { display: flex; flex-direction: column; gap: var(--s4); }
-.pannelli-motore > .colonna { flex: 0 0 auto; }
+/* Le due postazioni scorrono: i modelli, la chiave, il modulo e il diario uno
+ * sotto l'altro sono piu' alti di una finestra bassa, e senza scorrimento
+ * l'ultimo pezzo sparirebbe sotto il bordo senza che niente lo faccia
+ * sospettare. I riquadri in cima non si stirano — sono impostazioni, non
+ * pannelli da riempire — e lo spazio che avanza va al lavoro. */
+.sezione[data-sez="locale"],
+.sezione[data-sez="cloud"] { overflow-y: auto; padding-right: 4px; }
+.sezione[data-sez="locale"] > .vetro,
+.sezione[data-sez="cloud"]  > .vetro { flex: 0 0 auto; }
+
+/* Lo scomparto in cui la postazione atterra, e la postazione stessa: due
+ * colonne di riquadri con lo stesso passo del resto della sezione, cosi'
+ * spostandola non si vede che ha cambiato stanza. */
+.slot-lavoro, #postazione {
+  display: flex; flex-direction: column; gap: var(--s4); min-height: 0;
+}
+/* Sorgente e diario hanno bisogno di un'altezza loro: dentro una sezione che
+ * scorre non c'e' piu' un "resto dello schermo" da prendersi, e senza questo
+ * il diario vuoto si ridurrebbe a una fessura. */
+#postazione .due-colonne { flex: 0 0 auto; min-height: 300px; }
 
 .titolo-pannello {
   display: flex; align-items: center; gap: var(--s2);
@@ -627,8 +614,6 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 }
 @keyframes entra { from { opacity: 0; transform: translateY(6px); } }
 
-.slot-diario { display: flex; flex-direction: column; min-height: 0; }
-.slot-diario > .colonna { flex: 1; }
 
 /* ── Avvisi a comparsa ──────────────────────────────────────────────────── */
 /* Un errore dentro il diario si perde fra cinquanta righe. Qui arriva davanti,
@@ -968,7 +953,8 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
   .due-colonne { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
   /* Anche i tre menu dei modelli vanno in colonna: a 250 px l'uno il nome del
      modello e la sua descrizione finirebbero entrambi tagliati. */
-  .pannelli-motore .riga .gruppo.largo { flex-basis: 100%; }
+  .sezione[data-sez="locale"] .riga .gruppo.largo,
+  .sezione[data-sez="cloud"]  .riga .gruppo.largo { flex-basis: 100%; }
   .barra { width: 196px; flex-basis: 196px; }
 }
 

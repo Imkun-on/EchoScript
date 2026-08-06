@@ -11,7 +11,8 @@
 
 let TESTI = {};
 let LINGUA = 'it';
-let SEZIONE = 'trascrivi';
+// Nessuna, finche' l'avvio non apre quella del motore salvato.
+let SEZIONE = '';
 
 /* Le scelte dell'interfaccia: motore, modelli, interruttori. Vivono qui e in
  * Python, non nel documento, perche' devono sopravvivere al cambio di lingua
@@ -45,11 +46,30 @@ function traduciPagina() {
 
 /* ── Cambio sezione ───────────────────────────────────────────────────────── */
 
+/* Le due sezioni di lavoro e il motore che ci gira dentro. Aprire «Cloud» E'
+ * scegliere Groq: non c'e' un secondo gesto da fare ne' un interruttore da
+ * ricordare, e il bottone «Trascrivi» che si preme e' quello dentro la stanza
+ * in cui si sta. Era la cosa che l'interfaccia di prima non diceva. */
+const MOTORE_DI = { locale: 'local', cloud: 'groq' };
+const SEZIONE_DI = { local: 'locale', groq: 'cloud' };
+
+function sezioneDiLavoro() { return SEZIONE_DI[SCELTE.motore] || 'locale'; }
+
 function cambiaSezione(nome, immediato) {
   if (nome === SEZIONE && !immediato) return;
   const uscente = document.querySelector('.sezione.attiva');
   SEZIONE = nome;
   $$('.voce').forEach((v) => v.classList.toggle('attiva', v.dataset.va === nome));
+
+  // Entrando in una sezione di lavoro il motore diventa il suo. Non si fa
+  // mentre un lavoro gira: quello in corso ha gia' preso le sue opzioni, e
+  // cambiare la scelta sotto gli occhi mostrerebbe un motore diverso da quello
+  // che sta davvero lavorando.
+  if (MOTORE_DI[nome] && MOTORE_DI[nome] !== SCELTE.motore && !window.lavoroInCorso) {
+    salvaScelte({ motore: MOTORE_DI[nome] });
+    if (window.sincronizzaMotore) window.sincronizzaMotore();
+    if (window.aggiornaAvvio) window.aggiornaAvvio();
+  }
 
   // Prima la sezione che se ne va sfuma e arretra, poi entra la nuova
   // dall'altro lato. Il ritardo e' quello dell'animazione di uscita, non un
@@ -59,7 +79,7 @@ function cambiaSezione(nome, immediato) {
       s.classList.remove('uscita');
       s.classList.toggle('attiva', s.dataset.sez === nome);
     });
-    spostaDiario(nome);
+    spostaLavoro(nome);
   };
 
   if (uscente && uscente.dataset.sez !== nome && !immediato) {
@@ -71,14 +91,15 @@ function cambiaSezione(nome, immediato) {
   }
 }
 
-/* Il diario e' uno solo e si sposta: tenerne tre significherebbe tre cronologie
- * diverse, e non sapere piu' dove guardare. Dove non c'e' uno slot — la
- * sezione «Motore», che non lavora — semplicemente sparisce. */
-function spostaDiario(nome) {
-  const slot = document.querySelector(`.sezione[data-sez="${nome}"] .slot-diario`);
-  const pannello = $('#pannello-diario');
-  if (slot) { slot.appendChild(pannello); pannello.style.display = ''; }
-  else { pannello.style.display = 'none'; }
+/* La postazione — link o file, output, avvio, sorgente, diario — e' una sola e
+ * si sposta nella sezione aperta. Duplicarla vorrebbe dire due link incollati e
+ * due cronologie, e non sapere piu' quale delle due si sta guardando. Dove non
+ * c'e' uno slot — «Crediti», che non lavora — semplicemente sparisce. */
+function spostaLavoro(nome) {
+  const slot = document.querySelector(`.sezione[data-sez="${nome}"] .slot-lavoro`);
+  const posto = $('#postazione');
+  if (slot) { slot.appendChild(posto); posto.style.display = ''; }
+  else { posto.style.display = 'none'; }
 }
 
 /* ── Il diario ────────────────────────────────────────────────────────────── */
@@ -152,6 +173,10 @@ window.cambiaStato = (stato) => {
   // meta' trascrizione darebbe un risultato che non corrisponde a niente di
   // quello che si vede scritto.
   const inCorso = stato === 'working';
+  // Serve anche fuori di qui: cambiare sezione cambierebbe il motore, e mentre
+  // un lavoro gira il motore e' quello con cui e' partito, non quello della
+  // stanza in cui si e' appena entrati a guardare.
+  window.lavoroInCorso = inCorso;
 
   // Il bottone principale dice cosa sta succedendo invece di limitarsi a
   // spegnersi. Si cambia il data-t e non solo il testo, cosi' cambiare lingua a
@@ -162,7 +187,7 @@ window.cambiaStato = (stato) => {
   $('#icona-avvia').setAttribute('href', inCorso ? '#i-clessidra' : '#i-avvia');
 
   $$('.bottone.pieno, .bottone.contorno').forEach((b) => { b.disabled = inCorso; });
-  $$('.campo, .scelta, .interruttore input').forEach((c) => { c.disabled = inCorso; });
+  $$('.campo, .interruttore input').forEach((c) => { c.disabled = inCorso; });
   $$('.coda').forEach((c) => { c.disabled = inCorso; });
 
   if (!inCorso) {
@@ -284,10 +309,24 @@ const T_AVVIO = performance.now();
 const PASSI_AVVIO = 6;
 let passiFatti = 0;
 
+/* Ma i passi non cominciano qui. Prima che questa pagina esistesse, Python ha
+ * gia' caricato il ponte con WebView2 e tutto il motore, e l'ha raccontato sulla
+ * barra della schermata di avvio: quella che si vede dal doppio clic. Questo
+ * velo ne e' la seconda meta', quindi la sua barra riparte da dove l'altra si e'
+ * fermata invece che da zero — e' lo stesso valore di APERTURA in
+ * EchoScriptApp.py. Ripartire da zero farebbe tornare indietro una barra che
+ * l'utente sta guardando, che e' il modo piu' rapido di far sembrare rotto un
+ * avvio che sta andando bene. */
+const BASE_AVVIO = 0.62;
+
+function quotaAvvio() {
+  return BASE_AVVIO + (1 - BASE_AVVIO) * (passiFatti / PASSI_AVVIO);
+}
+
 function passoAvvio() {
   passiFatti = Math.min(passiFatti + 1, PASSI_AVVIO);
   const b = document.querySelector('.avvio-barra span');
-  if (b) b.style.width = (passiFatti / PASSI_AVVIO * 100).toFixed(0) + '%';
+  if (b) b.style.width = (quotaAvvio() * 100).toFixed(0) + '%';
 }
 
 /* Toglie il velo di caricamento. Si puo' chiamare quante volte si vuole.
@@ -307,6 +346,14 @@ function togliVelo() {
 }
 
 function avvia() {
+  /* La barra parte gia' riempita di cio' che Python ha fatto prima che questa
+   * pagina esistesse. Si scrive subito, prima del primo disegno: cosi' il primo
+   * fotogramma del velo mostra gia' la barra al punto giusto, invece di farla
+   * scivolare da zero sotto gli occhi di chi la stava guardando ferma piu'
+   * avanti un istante prima. */
+  const b0 = document.querySelector('.avvio-barra span');
+  if (b0) b0.style.width = (BASE_AVVIO * 100).toFixed(0) + '%';
+
   /* Se l'apertura si inceppa — un errore nel motore, una chiamata che non torna
    * — il velo deve comunque andarsene: meglio un'interfaccia a meta', che si
    * vede e si puo' chiudere, che una schermata di caricamento perpetua. */
@@ -341,7 +388,10 @@ function avvia() {
     if (window.potenziaTendine) window.potenziaTendine();
     passoAvvio();                     // 5. tutto e' nella lingua giusta
 
-    cambiaSezione('trascrivi', true);
+    // Si riapre nella stanza in cui si lavorava l'ultima volta: la scelta del
+    // motore e' salvata, e riportarla a schermo e' il modo di non far ricominciare
+    // da capo chi aveva gia' deciso.
+    cambiaSezione(sezioneDiLavoro(), true);
     window.cambiaStato('idle');
 
     $$('.voce[data-va]').forEach((v) =>
@@ -379,7 +429,9 @@ function avvia() {
       const testo = (e.dataTransfer.getData('text/uri-list')
                   || e.dataTransfer.getData('text/plain') || '').trim();
       if (!testo || !window.accettaTrascinato) return;
-      cambiaSezione('trascrivi');
+      // Chi trascina un link mentre guarda i crediti vuole trascriverlo: lo si
+      // porta nella postazione, che e' quella del motore scelto.
+      cambiaSezione(sezioneDiLavoro());
       window.accettaTrascinato(testo);
     });
 

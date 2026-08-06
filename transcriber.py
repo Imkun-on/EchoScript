@@ -224,6 +224,14 @@ LOCAL_MODELS = {
 # Default: gpt-oss-120b (Production; sostituto del deprecato llama-3.3-70b-versatile,
 # spento da Groq il 16 ago 2026 per i tier free/developer). Più economico e stabile.
 GROQ_SUMMARY_MODEL = _env_str("ECHOSCRIPT_GROQ_SUMMARY_MODEL", "openai/gpt-oss-120b")
+# Modelli di CHAT Groq selezionabili (riassunto + traduzione lato cloud). Sono
+# l'equivalente in nuvola di OLLAMA_TEXT_MODELS: catalogo corto e curato, perché
+# è la scelta di chi ha detto "fai tutto sui server" e vuole solo decidere quanto
+# spendere. Qualunque altro modello resta imponibile da .env.
+GROQ_TEXT_MODELS = {
+    "1": ("openai/gpt-oss-120b", "qualità piena (default)"),
+    "2": ("openai/gpt-oss-20b",  "più economico e rapido"),
+}
 OLLAMA_MODEL = _env_str("ECHOSCRIPT_OLLAMA_MODEL", "qwen2.5:7b")
 # Modello Ollama per la TRADUZIONE locale (vedi più sotto). Di default riusa lo
 # stesso del riassunto, così basta scaricarne uno solo per restare 100% offline.
@@ -251,6 +259,10 @@ VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
 # Modello vision su Groq. Default: qwen3.6-27b (multimodale; sostituto del
 # deprecato llama-4-scout). Cambiabile da .env.
 GROQ_VISION_MODEL = _env_str("ECHOSCRIPT_GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
+# Modelli vision Groq selezionabili, come sopra per il testo.
+GROQ_VISION_MODELS = {
+    "1": ("qwen/qwen3.6-27b", "multimodale, buon OCR (default)"),
+}
 # Modello vision su Ollama (locale). Scaricalo con: ollama pull llama3.2-vision
 OLLAMA_VISION_MODEL = _env_str("ECHOSCRIPT_OLLAMA_VISION_MODEL", "llama3.2-vision")
 
@@ -644,8 +656,18 @@ def cached_rate_limits() -> list[dict]:
 
 
 def _checkpoints_dir() -> str:
-    """Cartella dedicata ai checkpoint dei video parziali."""
-    root = os.path.dirname(os.path.abspath(__file__))
+    """Cartella dedicata ai checkpoint dei video parziali.
+
+    Dentro l'eseguibile va ACCANTO all'.exe, non accanto a questo file: da
+    impacchettati `__file__` sta in `_internal/` (o, in modalità a file unico, in
+    una cartella temporanea cancellata alla chiusura), quindi i parziali
+    finirebbero lontano dai risultati — o sparirebbero — e «Riprendi» non
+    troverebbe mai nulla da riprendere. È la stessa cartella dati che usa
+    Shared/percorsi.py, ricalcolata qui perché transcriber non dipende da Shared."""
+    if getattr(sys, "frozen", False):
+        root = os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        root = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(root, "results", ".checkpoints")
 
 
@@ -2024,9 +2046,19 @@ def split_audio(audio_path: str, duration: float, workdir: str,
     `should_stop()` permette di annullare a metà. Wrapper CLI:
     `_cli_split_audio`."""
     chunks: list[tuple[float, str]] = []
+    # Senza durata il ciclo qui sotto non entrerebbe nemmeno una volta e la
+    # trascrizione uscirebbe vuota con un «Nessun testo trascritto» che non
+    # spiega niente. Si riprova a misurarla dal file e, se non si riesce, lo si
+    # dice: il guasto è ffprobe/file illeggibile, non l'audio senza parole.
+    if not duration:
+        duration = _probe_duration(audio_path)
+    if not duration:
+        raise MediaError(
+            "Impossibile determinare la durata dell'audio: il file potrebbe "
+            "essere danneggiato o ffprobe non è raggiungibile.")
     # Number of chunks computed in advance (rounded up) to give the bar a total.
     # max(1, ...) avoids 0 chunks on very short audio.
-    n_chunks = max(1, int((duration + CHUNK_SECONDS - 1) // CHUNK_SECONDS)) if duration else 1
+    n_chunks = max(1, int((duration + CHUNK_SECONDS - 1) // CHUNK_SECONDS))
 
     start = 0.0
     idx = 0
@@ -2070,8 +2102,16 @@ def _cli_split_audio(audio_path: str, duration: float, workdir: str) -> list[tup
         def on_progress(phase, current, total, detail="") -> None:
             progress.update(task_id, completed=current or 0)
 
-        return split_audio(audio_path, duration, workdir, on_progress,
-                           should_stop=lambda: _interrupted)
+        try:
+            return split_audio(audio_path, duration, workdir, on_progress,
+                               should_stop=lambda: _interrupted)
+        except MediaError as e:
+            # Come gli altri wrapper `_cli_*`: il guasto si stampa in rosso e si
+            # restituisce il vuoto, che la pipeline sa gia' trattare come "questo
+            # video non si e' potuto fare". Lasciarlo salire farebbe uscire un
+            # traceback in mezzo a un batch, interrompendo anche gli altri file.
+            console.print(f"[error]{e}[/error]")
+            return []
 
 
 # === PHASE 3: TRANSCRIPTION WITH GROQ ===
@@ -2684,9 +2724,11 @@ def build_pdf(title: str, meta: dict, sections: list[dict], out_path: str,
 # === TRADUZIONE (Google Translate in cloud · Ollama in locale) ==============
 # Riusa una trascrizione GIÀ salvata e ne produce una versione tradotta, senza
 # ri-trascrivere (quindi senza spendere crediti di trascrizione). Due motori,
-# scelti come per il riassunto: con una chiave Groq si usa Google Translate
-# (deep_translator, endpoint gratuito, nessuna API key dedicata); senza chiave,
-# in locale, si traduce con Ollama per restare 100% offline.
+# scelti come per il riassunto — cioè dal BACKEND, non dalla presenza di una
+# chiave: col backend Groq si usa Google Translate (deep_translator, endpoint
+# gratuito, nessuna API key dedicata); col backend locale si traduce con Ollama,
+# così una lavorazione «sul mio computer» resta 100% offline anche quando una
+# chiave è caricata per altri lavori.
 
 # Google Translate accetta ~5000 caratteri per richiesta: spezziamo il testo in
 # blocchi più piccoli sui confini di frase, per stare comodi sotto il limite.
@@ -2835,7 +2877,14 @@ def _split_for_translation(text: str) -> list[str]:
     buf = ""
     for part in parts:
         while len(part) > _TRANSLATE_MAX_CHARS:
-            # Frase mostruosa: tagliala in pezzi grezzi.
+            # Frase mostruosa: tagliala in pezzi grezzi. Prima però va chiuso il
+            # blocco in preparazione: senza, i pezzi di questa frase finirebbero
+            # in coda PRIMA del testo che li precede, e la traduzione (o il
+            # riassunto, che riusa questo splitter) uscirebbe con i paragrafi
+            # scambiati di posto.
+            if buf:
+                chunks.append(buf)
+                buf = ""
             chunks.append(part[:_TRANSLATE_MAX_CHARS])
             part = part[_TRANSLATE_MAX_CHARS:]
         if len(buf) + len(part) + 1 > _TRANSLATE_MAX_CHARS:
@@ -3145,11 +3194,6 @@ def extract_keyframes(video_path: str, duration: float, workdir: str) -> list[tu
     # i video brevi ricevono comunque alcuni fotogrammi.
     min_expected = max(4, int((duration or 0) // 180))
     if len(frames) < min_expected and (duration or 0) >= 2:
-        for f in files:
-            try:
-                os.remove(f)
-            except OSError:
-                pass
         # Quanti fotogrammi vogliamo: tra min_expected e il cap, in base a quanti
         # intervalli "standard" entrano nella durata.
         want = max(min_expected,
@@ -3165,9 +3209,19 @@ def extract_keyframes(video_path: str, duration: float, workdir: str) -> list[tu
                 capture_output=True, text=True, check=True)
             ifiles = sorted(os.path.join(frames_dir, n) for n in os.listdir(frames_dir)
                             if n.startswith("iv_"))
-            frames = [(float(i) * interval, f) for i, f in enumerate(ifiles)]
         except Exception:
-            pass
+            ifiles = []
+        # I fotogrammi dei cambi scena si buttano SOLO se il campionamento a
+        # intervalli ha davvero prodotto qualcosa. Cancellandoli prima, un ffmpeg
+        # che fallisce lasciava 'frames' a puntare file ormai inesistenti: ogni
+        # lettura falliva e l'analisi visiva finiva a zero note senza motivo.
+        if ifiles:
+            frames = [(float(i) * interval, f) for i, f in enumerate(ifiles)]
+            for f in files:
+                try:
+                    os.remove(f)
+                except OSError:
+                    pass
 
     # 3) Cap: se sono troppi, campiona uniformemente lungo la timeline.
     if len(frames) > VISION_MAX_FRAMES:
@@ -4753,7 +4807,12 @@ def summarize_existing(out_root: str, title: str, client=None,
     if source_sections is not None:
         sections = source_sections
     else:
-        sections = load_existing_translation(out_root, title) or _build_sections(meta, segments)
+        # La traduzione salvata porta nel nome la lingua di destinazione, che è
+        # quella dell'interfaccia: cercandola sempre come "_it" un utente con la
+        # UI in inglese non l'avrebbe mai ritrovata, e il riassunto sarebbe stato
+        # fatto sull'originale senza dirlo.
+        sections = (load_existing_translation(out_root, title, ui_lang or "it")
+                    or _build_sections(meta, segments))
     if not sections:
         return False
 

@@ -62,6 +62,10 @@ function sincronizzaSorgente() {
   $('#ingresso-youtube').hidden = !youtube;
   $('#ingresso-file').hidden = youtube;
   $('#leggi').style.display = youtube ? '' : 'none';
+  // Il menu della sorgente lo disegna la pagina: se qualcuno ha cambiato il
+  // <select> da codice (un link trascinato dentro), il bottone mostrerebbe
+  // ancora la voce di prima mentre la scelta vera e' gia' un'altra.
+  if (window.aggiornaTendine) window.aggiornaTendine();
 }
 
 /* ── La scheda della sorgente ─────────────────────────────────────────────── */

@@ -49,17 +49,18 @@ pip install -r requirements.txt
 **Capitolo 3 — [🖥️ Due interfacce: GUI o terminale](#️-due-interfacce-gui-o-terminale)**
 
 **Capitolo 4 — [🖱️ Guida all'app desktop (per tutti)](#️-guida-allapp-desktop-per-tutti)**
-- 4.1 [In alto: lingua e pulsanti finestra](#in-alto-lingua-e-pulsanti-finestra)
-- 4.2 [Passo 1 — "Come vuoi trascrivere?"](#passo-1--come-vuoi-trascrivere)
-- 4.3 [Passo 2 — "Cosa vuoi trascrivere?"](#passo-2--cosa-vuoi-trascrivere)
-- 4.4 [La finestra di conferma del video (YouTube)](#la-finestra-di-conferma-del-video-youtube)
-- 4.5 [Le playlist YouTube](#le-playlist-youtube)
-- 4.6 [Passo 3 — "Output aggiuntivi" (opzionale)](#passo-3--output-aggiuntivi-opzionale)
-- 4.7 [Il pulsante "Trascrivi"](#il-pulsante-trascrivi)
-- 4.8 [Durante la trascrizione](#durante-la-trascrizione)
-- 4.9 [A fine trascrizione](#a-fine-trascrizione)
-- 4.10 [Il risultato](#il-risultato)
-- 4.11 [Messaggi speciali (video lungo o già fatto)](#messaggi-speciali-video-lungo-o-già-fatto)
+- 4.1 [La barra a sinistra: dove si lavora](#la-barra-a-sinistra-dove-si-lavora)
+- 4.2 [Passo 1 — I modelli della postazione](#passo-1--i-modelli-della-postazione)
+- 4.3 [Passo 2 — La chiave (solo in «Cloud»)](#passo-2--la-chiave-solo-in-cloud)
+- 4.4 [Passo 3 — "Cosa trascrivo"](#passo-3--cosa-trascrivo)
+- 4.5 [La finestra di conferma del video (YouTube)](#la-finestra-di-conferma-del-video-youtube)
+- 4.6 [Le playlist YouTube](#le-playlist-youtube)
+- 4.7 [Passo 4 — "Output aggiuntivi" (opzionale)](#passo-4--output-aggiuntivi-opzionale)
+- 4.8 [Il pulsante "Trascrivi"](#il-pulsante-trascrivi)
+- 4.9 [Durante la trascrizione](#durante-la-trascrizione)
+- 4.10 [A fine trascrizione](#a-fine-trascrizione)
+- 4.11 [Il risultato](#il-risultato)
+- 4.12 [Messaggi speciali (video lungo o già fatto)](#messaggi-speciali-video-lungo-o-già-fatto)
 
 **Capitolo 5 — [🔀 I due backend: cloud o locale](#-i-due-backend-cloud-o-locale)**
 
@@ -105,7 +106,7 @@ pip install -r requirements.txt
 **Capitolo 17 — [🧠 Riassunto automatico](#-riassunto-automatico)**
 - 17.1 [Perché serve anche un riassunto](#perché-serve-anche-un-riassunto)
 - 17.2 [Quali modelli sono stati introdotti e perché](#quali-modelli-sono-stati-introdotti-e-perché)
-- 17.3 [Scegliere il modello locale (CLI e GUI)](#scegliere-il-modello-locale-cli-e-gui)
+- 17.3 [Scegliere i modelli (CLI e GUI)](#scegliere-i-modelli-cli-e-gui)
 - 17.4 [Il problema dei video lunghi: map-reduce + contesto](#il-problema-dei-video-lunghi-map-reduce--contesto)
 - 17.5 [Il prompt usato (identico per Groq e Ollama)](#il-prompt-usato-identico-per-groq-e-ollama)
 - 17.6 [Su un video già trascritto (rigenerare senza rispendere)](#su-un-video-già-trascritto-rigenerare-senza-rispendere)
@@ -188,19 +189,23 @@ In breve: **lo controlli tu**, gira sul **tuo computer**, e non ti chiede nulla 
 
 EchoScript si usa in **due modi**, con lo **stesso motore** sotto (stessa trascrizione, stessi formati di output):
 
-- 🖥️ **App desktop (GUI)** con `python EchoScriptApp.py`: interfaccia scura a **barra laterale** (Trascrivi · Motore · Crediti), disegnata in HTML/CSS/JavaScript e mostrata dentro il **WebView già presente in Windows**. Niente motore grafico da scaricare. Pensata per chi preferisce i clic.
+- 🖥️ **App desktop (GUI)** con `python EchoScriptApp.py`: interfaccia scura a **barra laterale** (Locale · Cloud · Crediti: due postazioni complete, una per motore), disegnata in HTML/CSS/JavaScript e mostrata dentro il **WebView già presente in Windows**. Niente motore grafico da scaricare. Pensata per chi preferisce i clic.
 - ⌨️ **Terminale (CLI)** con `python transcriber.py`: la classica interfaccia testuale (Rich), comoda per batch e automazioni.
 
 > 🗂️ **Com'è fatta la GUI:** `EchoScriptApp.py` è solo il ponte verso il motore; l'aspetto sta in `web/style.css`, la struttura in `web/index.html`, il comportamento in un file JavaScript **per sezione** (`web/sez-*.js`), e le frasi in `Shared/strings_app.py`. Spostare un bottone non richiede di leggere il codice che lancia i thread.
 
+> 🏠☁️ **Due postazioni, non due impostazioni.** La barra ha **«Locale»** e **«Cloud»**, e in ciascuna c'è **tutto il lavoro**: i modelli di quel motore, il link o il file, gli output aggiuntivi, il pulsante Trascrivi, la sorgente e il diario. **Entrare in una sezione è scegliere il motore** — non c'è un interruttore da ricordare: quello che parte da «Locale» gira sul tuo computer, quello che parte da «Cloud» gira sui server Groq. La targhetta nella barra (OFFLINE / CLOUD) segna quella in uso, e all'avvio si riapre dove avevi lavorato l'ultima volta.
+
 La **GUI** aggiunge alcune comodità:
 
-- 🌍 **Lingua dell'interfaccia** italiano/inglese, con selettore a bandiere
+- 🌍 **Lingua dell'interfaccia** italiano/inglese
 - ▶️ **Anteprima del video**: caricando un URL si apre una **finestra di conferma** con copertina e dati (canale, views, mi piace, iscritti, categoria, lingua)
 - 🏷️ **Badge del motore** durante la trascrizione (Groq cloud o Locale CPU), così sai sempre con cosa stai trascrivendo
-- 📊 **Finestra di avanzamento dedicata**: barra reale, checklist dei passaggi e una frase su cosa sta avvenendo
-- 🌐 **Traduzione in italiano** e 🧠 **riassunto** attivabili con due interruttori (card "Output aggiuntivi")
-- 💰 **Crediti API Groq**: un pulsante apre, **per ogni modello** (trascrizione, riassunto, analisi visiva), i **crediti utilizzati**, **rimanenti** e il **ripristino** (quando si azzerano). I dati sono letti da una cache passiva: **il pulsante non consuma nulla** e i numeri non calano cliccandolo
+- 📊 **Avanzamento dedicato**: barra reale, checklist dei passaggi e una frase su cosa sta avvenendo
+- 🌐 **Traduzione** e 🧠 **riassunto** attivabili con due interruttori (card "Output aggiuntivi")
+- 🎚️ **Sei modelli scelti in-app**, tre per postazione: trascrizione, riassunto/traduzione e analisi visiva, sia in locale sia su Groq
+- 🔑 **Chiave Groq da file**: si carica con un clic e a schermo **resta solo il nome del file**
+- 💰 **Crediti API Groq**: una sezione mostra, **per ogni modello** (trascrizione, riassunto, analisi visiva), i **crediti utilizzati**, **rimanenti** e il **ripristino** (quando si azzerano). I dati sono letti da una cache passiva: **aprirla non consuma nulla** e i numeri non calano guardandoli
 - 📄 **PDF generato sempre** in automatico
 
 > Entrambe scrivono gli stessi file in `results/<nome>/`. Scegli quella che preferisci: il risultato è identico.
@@ -213,46 +218,66 @@ Questa sezione è pensata per chi **non è tecnico**: spieghiamo ogni schermata,
 
 > ▶️ **Come si avvia:** doppio clic sull'eseguibile (se hai la versione pacchettizzata), oppure dalla cartella del progetto esegui `python EchoScriptApp.py`.
 
-### In alto: lingua e pulsanti finestra
-- In alto a destra ci sono **due bandierine** 🇮🇹 / 🇬🇧: cliccale per cambiare la **lingua dell'interfaccia** (italiano o inglese). Tutto il testo cambia all'istante.
-- I tre pulsantini in cima (**–**, **▢**, **✕**) servono a **minimizzare**, **ingrandire** e **chiudere** la finestra, come in ogni programma.
+### La barra a sinistra: dove si lavora
+Tre voci, e le prime due sono **due postazioni complete**:
 
-### Passo 1 — "Come vuoi trascrivere?"
-Due riquadri da scegliere (si illuminano di verde quando selezionati):
-- 🔒 **Locale**: trascrive **sul tuo computer**, **senza internet** e senza inviare nulla. Al click si apre la finestra **"Modelli locali"** con le tre scelte: modello **Whisper** (trascrizione, più accurato = più lento), modello **Ollama** per riassunto/traduzione e modello **Ollama vision** per l'analisi visiva (con ✓ su quelli già scaricati). Una **riga di riepilogo** nella card mostra i modelli scelti e, cliccata, riapre la finestra. Consigliato se hai una GPU; su CPU è più lento.
-- ⚡ **Groq (cloud)**: **velocissimo**, ma l'audio viene inviato ai server Groq. Richiede una **chiave gratuita**: clicca **"Carica chiave da file .txt"** e seleziona il file con la tua chiave. Il pulsante **"Mostra crediti API Groq"** apre una finestra che, **per ogni modello** usato dall'app (trascrizione, riassunto, analisi visiva), elenca i **crediti utilizzati**, quelli **rimanenti** (secondi audio, richieste, token) e il **ripristino** (a che ora si azzerano); i modelli non ancora usati nella sessione sono comunque elencati. È tutto letto da una **cache passiva**: la finestra **non contatta Groq e non consuma crediti**, così puoi aprirla quante volte vuoi. **"Ottieni una chiave →"** apre il sito dove crearla.
+- 🏠 **Locale** — tutto quello che parte da qui gira **sul tuo computer**: niente internet, niente chiave, niente crediti. L'audio non esce di casa. Consigliato se hai una GPU; su CPU è più lento.
+- ☁️ **Cloud** — tutto quello che parte da qui gira **sui server Groq**: **velocissimo**, ma l'audio viene inviato a Groq e ogni lavoro consuma crediti. Serve una **chiave gratuita**.
+- 💰 **Crediti** — quanto hai già mandato a Groq e quanto te ne resta oggi.
 
-> A fine trascrizione, nella finestra **"Completato!"** compaiono anche i **crediti Groq usati** (audio trascritto) e quelli **residui per oggi**.
+**Non c'è un interruttore per scegliere il motore: lo scegli entrando nella sezione.** Il pulsante «Trascrivi» che premi è quello della stanza in cui sei. La **targhetta** accanto al nome (OFFLINE o CLOUD) segna quale delle due sta lavorando, e riaprendo l'app ti ritrovi dove avevi lasciato.
 
-### Passo 2 — "Cosa vuoi trascrivere?"
-- 📺 **YouTube**: incolla il **link** del video (o di una **playlist**) nel campo e clicca **"Carica info"**.
-- 🎙️ **File locale**: clicca **"Scegli file audio…"** e prendi un file dal computer (vanno bene anche **video** e **registrazioni schermo**).
+In basso a sinistra c'è il selettore della **lingua dell'interfaccia** (italiano o inglese): tutto il testo cambia all'istante.
+
+### Passo 1 — I modelli della postazione
+In cima a ogni sezione c'è il riquadro con i **tre modelli** di quel motore, uno per mestiere:
+
+| | 🏠 Locale | ☁️ Cloud |
+|---|---|---|
+| **Trascrizione** | modello **Whisper** (più accurato = più lento) | **Whisper su Groq**, col prezzo orario accanto |
+| **Riassunto e traduzione** | modello **Ollama** | modello di **chat Groq** |
+| **Analisi visiva** | modello **Ollama vision** | modello **vision di Groq** |
+
+Nei menu locali trovi la **RAM indicativa** richiesta e un **✓ sui modelli già scaricati** in Ollama. I due elenchi non si mescolano mai: nella sezione Locale non compare nulla che abbia bisogno della rete, e in Cloud nulla che giri sul tuo computer.
+
+### Passo 2 — La chiave (solo in «Cloud»)
+Sotto i modelli, il riquadro **"Chiave API"**: clicca **"Carica da file .txt"** e scegli il file con la tua chiave. Viene letta e tenuta in memoria per la sessione, e **a schermo resta solo il nome del file** — la chiave non viene mai mostrata. **"Ottieni una chiave →"** apre il sito dove crearla. In alternativa la chiave può stare nel file `.env`.
+
+### Passo 3 — "Cosa trascrivo"
+- 📺 **YouTube**: incolla il **link** del video (o di una **playlist**) nel campo e clicca **"Guarda cos'è"**.
+- 🎙️ **File locale**: scegli **"Un file dal computer"** e prendi un file (vanno bene anche **video** e **registrazioni schermo**).
+
+Il link che hai incollato **non si perde** se passi dall'altra postazione: il modulo è lo stesso, cambia solo il motore con cui partirà.
 
 ### La finestra di conferma del video (YouTube)
-Dopo **"Carica info"** si apre una finestra con la **copertina** del video e i suoi dati (canale, visualizzazioni, mi piace, iscritti, durata, lingua…). Ti chiede: *è questo il video giusto?*
+Dopo **"Guarda cos'è"** si apre una finestra con la **copertina** del video e i suoi dati (canale, visualizzazioni, mi piace, iscritti, durata, lingua…), più la **stima**: il **costo** se sei in «Cloud», il **tempo** se sei in «Locale». Ti chiede: *è questo il video giusto?*
 - **Conferma** → accetti il video (sotto compare *"✓ Video confermato"*).
 - **Annulla** → lo scarti e puoi incollarne un altro.
 
 ### Le playlist YouTube
-Se incolli il link di una **playlist** (URL con `list=`, playlist **pubblica** o **non in elenco**), dopo *"Carica info"* si apre una finestra dedicata che mostra il **nome della playlist**, il **canale**, la **durata totale** e l'**elenco numerato dei video**. Alla conferma parte il **batch**: i video vengono trascritti **uno alla volta** e salvati in un'unica cartella con il nome della playlist, con **una sottocartella per ogni video**. Durante il lavoro, in cima alla finestra di avanzamento compare *"Video 2/5"* per farti seguire il progresso, e alla fine un riepilogo con i video **trascritti / già presenti (saltati) / non riusciti**. Regole del batch: un video **già trascritto** viene saltato (non rispende crediti), un video **non disponibile** (privato/rimosso) viene saltato senza fermare gli altri, e se i **crediti Groq finiscono** il batch si ferma salvando quanto già fatto (riprendibile in seguito).
+Se incolli il link di una **playlist** (URL con `list=`, playlist **pubblica** o **non in elenco**), dopo *"Guarda cos'è"* si apre una finestra dedicata che mostra il **nome della playlist**, il **canale**, la **durata totale** e l'**elenco numerato dei video**. Alla conferma parte il **batch**: i video vengono trascritti **uno alla volta** e salvati in un'unica cartella con il nome della playlist, con **una sottocartella per ogni video**. Durante il lavoro, in cima alla finestra di avanzamento compare *"Video 2/5"* per farti seguire il progresso, e alla fine un riepilogo con i video **trascritti / già presenti (saltati) / non riusciti**. Regole del batch: un video **già trascritto** viene saltato (non rispende crediti), un video **non disponibile** (privato/rimosso) viene saltato senza fermare gli altri, e se i **crediti Groq finiscono** il batch si ferma salvando quanto già fatto (riprendibile in seguito).
 
-### Passo 3 — "Output aggiuntivi" (opzionale)
-Sotto i due riquadri c'è una card con **tre interruttori**, tutti **spenti** di default (così una trascrizione semplice resta tale):
-- 🌐 **Traduci in italiano**: se l'audio **non è già in italiano**, oltre alla trascrizione crea anche una **traduzione** nella sottocartella `traduzioni/` (Google Translate se hai la chiave Groq, altrimenti **Ollama** in locale e 100% offline).
-- 🧠 **Crea riassunto**: genera un **riassunto pulito per sezione** del testo italiano in `riassunti/`. Usa **Groq** se hai caricato la chiave, altrimenti **Ollama** in locale (se installato). Se nessuno dei due è disponibile, la trascrizione viene comunque salvata e compare un avviso.
+### Passo 4 — "Output aggiuntivi" (opzionale)
+Nello stesso riquadro ci sono **tre interruttori**, tutti **spenti** di default (così una trascrizione semplice resta tale):
+- 🌐 **Traduci in italiano**: se l'audio **non è già in italiano**, oltre alla trascrizione crea anche una **traduzione** nella sottocartella `traduzioni/`.
+- 🧠 **Crea riassunto**: genera un **riassunto pulito per sezione** del testo italiano in `riassunti/`.
 - 👁️ **Analisi visiva del video**: "guarda" i fotogrammi ed estrae **codice, formule, grafici** a schermo, includendoli nel riassunto e in un **documento dedicato** con i fotogrammi (vedi il capitolo [Analisi visiva del video](#️-analisi-visiva-del-video)). Compare solo per le sorgenti **video**.
 
+> 🏠☁️ **Chi li fa? La postazione da cui parti.** Da «Locale» riassunto, traduzione e analisi visiva girano con i **modelli Ollama** scelti lì, **senza rete e senza chiave**; da «Cloud» girano con i **modelli Groq** scelti lì, a carico della chiave. Non c'è nessun caso in cui una lavorazione locale passi di nascosto dal cloud perché avevi una chiave caricata per altro: **il motore decide tutto**. Da «Locale», quindi, riassunto e traduzione richiedono **Ollama installato**; se manca, la trascrizione viene comunque salvata e compare un avviso.
+
 ### Il pulsante "Trascrivi"
-È il grande pulsante verde in basso. Si **attiva** solo quando è tutto pronto. Se lo premi prima, compare una **finestra d'avviso** che ti **elenca cosa manca**, ad esempio:
-- *caricare la chiave API Groq* (solo se usi Groq);
+È il grande pulsante in basso a destra del riquadro. Si **attiva** solo quando è tutto pronto. Se lo premi prima, compare una **finestra d'avviso** che ti **elenca cosa manca**, ad esempio:
+- *caricare la chiave API Groq* (solo se stai lavorando in «Cloud»);
 - *caricare e confermare il video YouTube*, oppure *scegliere un file audio*.
 
 ### Durante la trascrizione
-Si apre una **finestra dedicata** con l'avanzamento (niente animazioni finte):
+Sotto il riquadro compare l'avanzamento (niente animazioni finte):
 - in alto un **badge** dice con cosa stai trascrivendo: **Groq (cloud)** (verde) o **Locale CPU** (arancione, perché può richiedere minuti);
 - una **barra reale** con il **numero di fase** (es. *"Fase 2/5"*) e la **percentuale** complessiva;
 - un **elenco dei passaggi** che si spunta man mano (Trascrizione → eventuale Traduzione → eventuale Riassunto → Salvataggio): rispecchia esattamente le opzioni che hai scelto;
 - una **breve frase** che racconta cosa sta avvenendo in quel momento e il **piano completo** del lavoro.
+
+> Mentre un lavoro gira puoi comunque andare a guardare l'altra postazione o i crediti: il motore **non cambia sotto ai piedi** di quello che sta girando, che finisce con i modelli con cui è partito. La scelta si sposta al lavoro successivo.
 
 > 🌍 **Tutto nella lingua dell'interfaccia.** Non solo le etichette: anche i **messaggi di avanzamento** (es. *«Sezione 3/10 tradotta»*, *«Riassumo le sezioni»*) e gli **avvisi** (crediti esauriti, PDF non creato, analisi visiva saltata…) sono mostrati in italiano o in inglese a seconda della lingua scelta.
 
@@ -275,14 +300,16 @@ Una finestra **"Completato!"** riassume tutto: motore usato, numero di parole/se
 
 ## 🔀 I due backend: cloud o locale
 
-All'avvio un pannello ti fa scegliere il motore di trascrizione:
+Nella **GUI** il backend è la **sezione** in cui lavori (🏠 Locale o ☁️ Cloud); nella **CLI** te lo chiede un pannello all'avvio:
 
 | Backend | Privacy | Velocità (senza GPU) | Costo | Quando usarlo |
 |---|---|---|---|---|
 | 🔒 **Locale** (faster-whisper) | **Massima**: l'audio resta sul PC | 🐢 Più lento | **Gratis** | Audio privati/sensibili, nessun limite |
 | ⚡ **Groq** (cloud) | L'audio va sui server Groq | ⚡ Velocissimo | Free tier generoso | Video YouTube pubblici, quando hai fretta |
 
-Se scegli **Groq**, un pannello (in GUI e CLI) ti fa scegliere il **modello di trascrizione cloud** — e il **costo stimato** si aggiorna di conseguenza:
+> ⚖️ **La scelta vale per l'intera lavorazione, non solo per la trascrizione.** Riassunto, traduzione e analisi visiva usano i modelli **dello stesso backend**: col locale restano su Ollama (100% offline), col cloud passano da Groq. Avere una chiave caricata **non** dirotta un lavoro locale verso la rete.
+
+Col backend **Groq** scegli il **modello di trascrizione cloud** — e il **costo stimato** si aggiorna di conseguenza:
 
 | Modello Groq | Prezzo /ora audio | Note |
 |---|---|---|
@@ -291,7 +318,16 @@ Se scegli **Groq**, un pannello (in GUI e CLI) ti fa scegliere il **modello di t
 
 > La trascrizione si paga a **ora di audio** (non a token). Il modello `distil-whisper-large-v3-en` (solo inglese, ~$0.02/ora) resta impostabile via `ECHOSCRIPT_GROQ_MODEL` ma non è nel selettore.
 
-Se scegli **Locale**, un secondo pannello ti fa scegliere il modello ogni volta:
+Nella **GUI**, accanto a questo, la sezione «Cloud» fa scegliere anche gli **altri due modelli Groq** — quello di **chat** per riassunto e traduzione e quello **vision** per l'analisi visiva:
+
+| Ruolo | Modelli offerti |
+|---|---|
+| 🤖 **Riassunto e traduzione** | `openai/gpt-oss-120b` ⭐ (qualità piena) · `openai/gpt-oss-20b` (più economico e rapido) |
+| 👁️ **Analisi visiva** | `qwen/qwen3.6-27b` ⭐ (multimodale, ottimo con slide e codice) |
+
+> Restano forzabili a un modello qualunque da `.env` con `ECHOSCRIPT_GROQ_SUMMARY_MODEL` e `ECHOSCRIPT_GROQ_VISION_MODEL`; un modello impostato così compare nel menu marcato *(da .env)*.
+
+Col backend **Locale** scegli invece il modello Whisper:
 
 | Modello | Velocità ↔ Accuratezza |
 |---|---|
@@ -303,7 +339,7 @@ Se scegli **Locale**, un secondo pannello ti fa scegliere il modello ogni volta:
 
 > Al primo uso di un modello locale, `faster-whisper` ne scarica i **pesi** da HuggingFace (una volta sola). L'**audio**, però, non viene mai inviato da nessuna parte.
 
-Sempre col backend **Locale**, la stessa finestra/pannello fa scegliere anche i **modelli Ollama** per riassunto/traduzione e analisi visiva: tutti i dettagli nel capitolo che segue.
+Sempre col backend **Locale**, lo stesso riquadro (o pannello, nella CLI) fa scegliere anche i **modelli Ollama** per riassunto/traduzione e analisi visiva: tutti i dettagli nel capitolo che segue.
 
 ---
 
@@ -401,9 +437,12 @@ Se un modello non entra nella RAM, Ollama usa il disco (swap) e diventa **molto*
 ## ✨ Caratteristiche
 
 - 🖥️ **Due interfacce**: app desktop **GUI** (`EchoScriptApp.py`) o **CLI** da terminale (`transcriber.py`)
-- 🔀 **Due backend** selezionabili da pannello: Groq (cloud, veloce) o faster-whisper (locale, privato)
+- 🔀 **Due backend**: Groq (cloud, veloce) o faster-whisper (locale, privato). Nella GUI sono **due postazioni complete** nella barra — 🏠 Locale e ☁️ Cloud — ognuna con i suoi modelli e il suo pulsante Trascrivi: **entrare nella sezione è scegliere il motore**
+- 🔒 **Separazione netta fra i due mondi**: la scelta vale per **tutta** la lavorazione (trascrizione, riassunto, traduzione, analisi visiva). Un lavoro locale **non passa mai** dal cloud, nemmeno con la chiave caricata
 - 🎚️ **Modello di trascrizione Groq scelto in-app** (GUI e CLI): `whisper-large-v3-turbo` (default, economico) o `whisper-large-v3` (più accurato); il **costo stimato** segue il modello scelto
-- 🦙 **Modelli locali scelti in-app** (GUI e CLI): finestra/pannello dedicato con modello Whisper + modelli **Ollama** per riassunto/traduzione e analisi visiva, RAM richiesta e **✓ sui modelli già scaricati** (vedi il [capitolo 6](#-i-modelli-usati-guida-completa))
+- ☁️ **Modelli Groq di testo e vision scelti in-app** (GUI): `openai/gpt-oss-120b` o `20b` per riassunto/traduzione, `qwen/qwen3.6-27b` per l'analisi visiva
+- 🦙 **Modelli locali scelti in-app** (GUI e CLI): modello Whisper + modelli **Ollama** per riassunto/traduzione e analisi visiva, RAM richiesta e **✓ sui modelli già scaricati** (vedi il [capitolo 6](#-i-modelli-usati-guida-completa))
+- 🔑 **Chiave Groq caricata da file `.txt`**, tenuta in memoria per la sessione: a schermo compare **solo il nome del file**
 - 🎙️ **Due sorgenti**: video **YouTube** (da URL) o **file audio locali** (telefono/PC), anche le **registrazioni schermo** (`mp4`/`mov`/`mkv`…), anche un'**intera cartella** in batch
 - 📋 **Scheda video** prima di partire (titolo, canale, visualizzazioni, **mi piace, iscritti, categoria, lingua**, data, durata, capitoli)
 - 🗣️ **Lingua dell'audio rilevata** automaticamente (Whisper) e mostrata nel riepilogo
@@ -795,13 +834,17 @@ Riassumere non è trascrivere: serve un **LLM** (un modello di linguaggio), perc
 | ⚡ **Groq (cloud)** | API di chat Groq | 🤖 `openai/gpt-oss-120b` | Gira sui server Groq: puoi permetterti un modello **grande da 120B** → riassunti di qualità, **velocissimi** ed economici, con la chiave gratuita che usi già per la trascrizione |
 | 🔒 **Locale** | **Ollama** (offline) | 🐉 `qwen2.5:7b` | Resta **100% offline**. **Qwen 2.5 7B** è leggero (~4,7 GB), **veloce su CPU** e particolarmente bravo **in italiano** e nel seguire istruzioni strutturate (meglio di Llama 3.1 8B di pari taglia) |
 
-> 🔄 **Perché `openai/gpt-oss-120b` (e non più `llama-3.3-70b-versatile`)?** Groq ha messo in **deprecazione** `llama-3.3-70b-versatile`, con **spegnimento il 16 agosto 2026** per i piani free/developer: dopo quella data avrebbe smesso di funzionare. Il sostituto consigliato, `openai/gpt-oss-120b`, è **più grande** (120B contro 70B), **più economico** (**$0.15/$0.60** per 1M token contro $0.59/$0.79) ed è un modello **Production** (stabile). Puoi comunque cambiarlo con `ECHOSCRIPT_GROQ_SUMMARY_MODEL`.
+> ⚖️ **Lo decide il backend, non la chiave.** Da «Locale» il riassunto è **sempre** di Ollama, anche se una chiave Groq è caricata; da «Cloud» è **sempre** di Groq. È la stessa regola per traduzione e analisi visiva, ed è ciò che rende la promessa della sezione Locale — *l'audio non esce di casa* — vera per l'intera lavorazione e non solo per la trascrizione.
+
+> 🔄 **Perché `openai/gpt-oss-120b` (e non più `llama-3.3-70b-versatile`)?** Groq ha messo in **deprecazione** `llama-3.3-70b-versatile`, con **spegnimento il 16 agosto 2026** per i piani free/developer: dopo quella data avrebbe smesso di funzionare. Il sostituto consigliato, `openai/gpt-oss-120b`, è **più grande** (120B contro 70B), **più economico** (**$0.15/$0.60** per 1M token contro $0.59/$0.79) ed è un modello **Production** (stabile). Nella GUI puoi passare a `openai/gpt-oss-20b` dal menu della sezione «Cloud»; da `.env` resta impostabile qualunque altro con `ECHOSCRIPT_GROQ_SUMMARY_MODEL`.
 
 > **Ollama** è il *programma* che fa girare il modello in locale (come un "lettore" per i modelli); **Qwen** è il *modello*. In locale serve installare Ollama una volta (https://ollama.com) e scaricare il modello: `ollama pull qwen2.5:7b`. Nessuna dipendenza pip aggiuntiva: EchoScript parla con Ollama via HTTP. Con **Groq** non serve nulla di tutto questo.
 
-### Scegliere il modello locale (CLI e GUI)
+### Scegliere i modelli (CLI e GUI)
 
-Col **backend locale** non sei vincolato al default. Nella **GUI**, cliccando su «Locale» si apre la **finestra "Modelli locali"** con le tre scelte insieme — modello **Whisper** (trascrizione), modello **Ollama** per **riassunto + traduzione**, modello **Ollama vision** per l'**analisi visiva** — e una riga di riepilogo nella card la riapre in ogni momento. Nella **CLI** compaiono gli stessi pannelli passo-passo. In entrambe vedi la **RAM indicativa** richiesta e un **✓ sui modelli già scaricati** (letti da Ollama); nella CLI puoi anche digitare un nome qualunque (es. `mistral:7b`), mentre il `.env` resta la via per forzare un modello fuori catalogo in GUI.
+Non sei vincolato ai default, da nessuna delle due parti. Nella **GUI** ogni postazione ha in cima il suo riquadro con le **tre scelte insieme**: in «Locale» il modello **Whisper** (trascrizione), il modello **Ollama** per **riassunto + traduzione** e il modello **Ollama vision** per l'**analisi visiva**; in «Cloud» i tre corrispondenti che girano sui server Groq. Nella **CLI** compaiono gli stessi pannelli passo-passo.
+
+Nei menu **locali** vedi la **RAM indicativa** richiesta e un **✓ sui modelli già scaricati** (letti da Ollama). Nella CLI puoi anche digitare un nome qualunque (es. `mistral:7b`), mentre in GUI il `.env` resta la via per forzare un modello fuori catalogo: quando lo fai, il modello compare comunque nel menu, marcato *(da .env)*.
 
 **Riassunto + traduzione** (`ollama pull <nome>`):
 
@@ -946,13 +989,13 @@ il file `.env`), senza toccare il codice. Ogni valore ha un default sensato:
 | `ECHOSCRIPT_CHUNK_SECONDS` | `600` | Durata di ogni blocco audio (solo Groq) |
 | `ECHOSCRIPT_DEVICE` | `auto` | Backend locale: `auto` (GPU se c'è) / `cpu` / `cuda` |
 | `ECHOSCRIPT_COMPUTE_TYPE` | *(auto)* | Precisione locale: vuoto = `float16` su GPU, `int8` su CPU |
-| `ECHOSCRIPT_GROQ_SUMMARY_MODEL` | `openai/gpt-oss-120b` | Modello di **chat Groq** per il riassunto (cloud) |
+| `ECHOSCRIPT_GROQ_SUMMARY_MODEL` | `openai/gpt-oss-120b` | Modello di **chat Groq** per riassunto e traduzione (cloud). Scegliibile anche **in-app** nella sezione «Cloud» fra `gpt-oss-120b` e `gpt-oss-20b`; questa variabile ne cambia il default e permette qualunque altro modello |
 | `ECHOSCRIPT_OLLAMA_MODEL` | `qwen2.5:7b` | Modello **Ollama** per il riassunto in locale (è il default proposto: **a ogni run si può cambiare dal pannello** CLI/GUI) |
 | `ECHOSCRIPT_OLLAMA_TRANSLATE_MODEL` | *(= `OLLAMA_MODEL`)* | Modello **Ollama** per la **traduzione** in locale (di default segue quello del riassunto; se impostato qui, **vince sempre**) |
 | `ECHOSCRIPT_OLLAMA_HOST` | `http://localhost:11434` | Indirizzo del server Ollama |
 | `ECHOSCRIPT_OLLAMA_NUM_CTX` | `8192` | Finestra di contesto Ollama (evita il troncamento sui blocchi lunghi) |
 | `ECHOSCRIPT_SUMMARY_MAX_CHARS` | `12000` | Soglia oltre cui una sezione viene riassunta a blocchi (map-reduce) |
-| `ECHOSCRIPT_GROQ_VISION_MODEL` | `qwen/qwen3.6-27b` | Modello **vision** su Groq (analisi visiva, cloud) |
+| `ECHOSCRIPT_GROQ_VISION_MODEL` | `qwen/qwen3.6-27b` | Modello **vision** su Groq (analisi visiva, cloud). Compare anche nel menu della sezione «Cloud»; questa variabile ne cambia il default e permette qualunque altro modello |
 | `ECHOSCRIPT_OLLAMA_VISION_MODEL` | `llama3.2-vision` | Modello **vision** su Ollama (analisi visiva, locale; anche questo **si cambia dal pannello** CLI/GUI) |
 | `ECHOSCRIPT_VISION_SCENE` | `0.4` | Soglia di cambio scena per scegliere i fotogrammi (più basso = più fotogrammi) |
 | `ECHOSCRIPT_VISION_MAX_FRAMES` | `60` | Tetto massimo di fotogrammi analizzati per video (costo/tempo) |
@@ -1010,9 +1053,3 @@ In breve — **non è un riassunto legale, fa fede il testo della licenza**:
 - 📎 Se lo ridistribuisci, devi **allegare la licenza** (o il suo URL) e mantenere la riga `Required Notice:`.
 
 > Serve un uso commerciale? Scrivimi: una licenza separata è negoziabile.
-
----
-
-<div align="center">
-🇬🇧 <a href="README_eng.md">Read this in English</a>
-</div>
