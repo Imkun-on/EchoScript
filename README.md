@@ -26,9 +26,7 @@
   <b>Niente abbonamenti, niente limiti giornalieri, niente minutaggio ridotto.</b>
 </p>
 
-<img src="docs/Ita.png" alt="EchoScript — l'app desktop: scelta del backend (locale/Groq), sorgente (YouTube/file), output aggiuntivi e pulsante Trascrivi" width="920">
-
-<p align="center"><i>L'app desktop: scegli il motore, incolla un link (o un file) e premi <b>Trascrivi</b>.</i></p>
+<img src="docs/image.png" alt="EchoScript — l'app desktop: scelta del backend (locale/Groq), sorgente (YouTube/file), output aggiuntivi e pulsante Trascrivi" width="920">
 
 </div>
 
