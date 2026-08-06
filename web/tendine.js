@@ -163,6 +163,14 @@ function potenzia(select) {
 
   document.addEventListener('click', chiudi);
   window.addEventListener('resize', chiudi);
+  // E anche quando la pagina scorre. Il pannello e' a posizione fissa sullo
+  // schermo e la sua posizione viene calcolata UNA VOLTA, all'apertura, da dove
+  // si trova il bottone in quell'istante: scorrendo, il bottone se ne va e il
+  // pannello resta inchiodato a mezz'aria, staccato dal campo a cui appartiene.
+  // Si ascolta in fase di cattura perche' l'evento di scorrimento non risale:
+  // a scorrere non e' la finestra ma il contenitore della sezione, e senza
+  // 'true' qui non arriverebbe mai.
+  document.addEventListener('scroll', chiudi, true);
   // Chi riempie il <select> dopo non deve ricordarsi di avvisare nessuno.
   new MutationObserver(() => { if (aperto) costruisci(); else mostraValore(); })
     .observe(select, { childList: true, subtree: true, characterData: true });
