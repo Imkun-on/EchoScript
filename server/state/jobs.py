@@ -218,32 +218,48 @@ def has_resumable_state(meta: dict) -> bool:
 # (transcriptions/translations) instead of the Italian defaults. The CLI is
 # Italian-only, so it always uses the "it" names; the GUI passes its current UI
 # language down so the folders match what the user sees on screen.
-TRANS_SUBDIRS = {"it": "trascrizioni", "en": "transcriptions"}
-TRANSL_SUBDIRS = {"it": "traduzioni", "en": "translations"}
-SUMMARY_SUBDIRS = {"it": "riassunti", "en": "summaries"}
-VISUAL_SUBDIRS = {"it": "analisi_visiva", "en": "visual_analysis"}
-# Suffix added to the summary file name, per UI language.
-SUMMARY_SUFFIX = {"it": "riassunto", "en": "summary"}
+# I nomi delle sottocartelle in cui finisce ogni cosa.
+TRANS_SUBDIR = "trascrizioni"
+TRANSL_SUBDIR = "traduzioni"
+SUMMARY_SUBDIR = "riassunti"
+VISUAL_SUBDIR = "analisi_visiva"
+
+# Il pezzo che si aggiunge al nome del file del riassunto.
+SUMMARY_SUFFIX = "riassunto"
+
+# I nomi che queste cartelle avevano quando l'interfaccia poteva essere in
+# inglese. Non ci si scrive piu' dentro, ma si continua a GUARDARCI.
+#
+# Il motivo non e' nostalgia: chi aveva gia' trascritto dei video con
+# l'interfaccia in inglese ha quelle cartelle sul proprio disco, con dentro il
+# proprio lavoro. Togliendo questa riga il programma gli direbbe che quei video
+# non li ha mai fatti, e glieli rifarebbe da capo.
+NOMI_VECCHI = {
+    TRANS_SUBDIR: "transcriptions",
+    TRANSL_SUBDIR: "translations",
+    SUMMARY_SUBDIR: "summaries",
+    VISUAL_SUBDIR: "visual_analysis",
+}
 
 
-def trans_subdir(lang: str | None = "it") -> str:
-    """Name of the TRANSCRIPTION subfolder for the given UI language."""
-    return TRANS_SUBDIRS.get(lang or "it", TRANS_SUBDIRS["it"])
+def trans_subdir() -> str:
+    """Il nome della sottocartella delle TRASCRIZIONI."""
+    return TRANS_SUBDIR
 
 
-def transl_subdir(lang: str | None = "it") -> str:
-    """Name of the TRANSLATION subfolder for the given UI language."""
-    return TRANSL_SUBDIRS.get(lang or "it", TRANSL_SUBDIRS["it"])
+def transl_subdir() -> str:
+    """Il nome della sottocartella delle TRADUZIONI."""
+    return TRANSL_SUBDIR
 
 
-def summary_subdir(lang: str | None = "it") -> str:
-    """Name of the SUMMARY subfolder for the given UI language."""
-    return SUMMARY_SUBDIRS.get(lang or "it", SUMMARY_SUBDIRS["it"])
+def summary_subdir() -> str:
+    """Il nome della sottocartella dei RIASSUNTI."""
+    return SUMMARY_SUBDIR
 
 
-def visual_subdir(lang: str | None = "it") -> str:
-    """Name of the VISUAL-ANALYSIS subfolder for the given UI language."""
-    return VISUAL_SUBDIRS.get(lang or "it", VISUAL_SUBDIRS["it"])
+def visual_subdir() -> str:
+    """Il nome della sottocartella dell'ANALISI VISIVA."""
+    return VISUAL_SUBDIR
 
 
 def transcription_exists(out_root: str, title: str) -> bool:
@@ -253,7 +269,7 @@ def transcription_exists(out_root: str, title: str) -> bool:
     rilevamento funziona anche se il video era stato trascritto con l'interfaccia
     in un'altra lingua."""
     base = os.path.join(out_root, _safe_filename(title))
-    for sub in TRANS_SUBDIRS.values():
+    for sub in (TRANS_SUBDIR, NOMI_VECCHI[TRANS_SUBDIR]):
         d = os.path.join(base, sub)
         if os.path.isdir(_lp(d)) and any(
                 n.lower().endswith((".md", ".txt", ".json", ".pdf")) for n in os.listdir(_lp(d))):
@@ -269,7 +285,7 @@ def load_existing_transcript(out_root: str, title: str):
     Cerca il .json in tutti i possibili nomi cartella (italiano e inglese)."""
     safe = _safe_filename(title)
     p = None
-    for sub in TRANS_SUBDIRS.values():
+    for sub in (TRANS_SUBDIR, NOMI_VECCHI[TRANS_SUBDIR]):
         cand = os.path.join(out_root, safe, sub, safe + ".json")
         if os.path.isfile(_lp(cand)):
             p = cand
@@ -302,7 +318,7 @@ def load_existing_translation(out_root: str, title: str, target: str = "it"):
     Cerca `<titolo>_<target>.json` in tutti i possibili nomi cartella traduzioni
     (italiano/inglese). Restituisce la lista di sezioni {start,title,text}."""
     safe = _safe_filename(title)
-    for sub in TRANSL_SUBDIRS.values():
+    for sub in (TRANSL_SUBDIR, NOMI_VECCHI[TRANSL_SUBDIR]):
         p = os.path.join(out_root, safe, sub, f"{safe}_{target}.json")
         if os.path.isfile(_lp(p)):
             try:

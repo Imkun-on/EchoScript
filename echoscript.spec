@@ -57,6 +57,7 @@ hiddenimports = ['transcriber',
                  'server.controllers', 'server.controllers.api',
                  'server.controllers.bridge',
                  'server.services', 'server.services.pipeline',
+                 'server.enrichment', 'server.enrichment.summary',
                  'server.state', 'server.state.checkpoints',
                  'server.state.credits', 'server.state.jobs',
                  'server.utils', 'server.utils.text']

@@ -275,8 +275,8 @@ from server.state.credits import (
 )
 from server.state.jobs import (
     PIPELINE_STAGES, STAGE_DONE, STAGE_PARTIAL, STAGE_PENDING, STAGE_SKIP,
-    SUMMARY_SUBDIRS, SUMMARY_SUFFIX, TRANSL_SUBDIRS, TRANS_SUBDIRS,
-    VISUAL_SUBDIRS, _empty_state, delete_state, has_resumable_state,
+    NOMI_VECCHI, SUMMARY_SUBDIR, SUMMARY_SUFFIX, TRANSL_SUBDIR, TRANS_SUBDIR,
+    VISUAL_SUBDIR, _empty_state, delete_state, has_resumable_state,
     load_existing_transcript, load_existing_translation, load_state,
     resume_plan, resume_sections, save_state, stage_sections, stage_status,
     state_path, summary_subdir, trans_subdir, transcription_exists,
@@ -2802,7 +2802,7 @@ def save_visual_notes(out_root: str, meta: dict, notes: list[dict],
         return
     safe = _safe_filename(meta["title"])
     video_dir = os.path.join(out_root, safe)
-    vdir = os.path.join(video_dir, visual_subdir(ui_lang))
+    vdir = os.path.join(video_dir, visual_subdir())
     frames_dir = os.path.join(vdir, "frames")
     os.makedirs(_lp(vdir), exist_ok=True)
     base = os.path.join(vdir, f"{safe}_visivo")
@@ -2840,7 +2840,7 @@ def save_visual_notes(out_root: str, meta: dict, notes: list[dict],
     with open(_lp(base + ".md"), "w", encoding="utf-8") as f:
         f.write(_companion_md("frames/"))
     if not quiet:
-        console.print(f"  {SYM_OK} Analisi visiva salvata in [info]{visual_subdir(ui_lang)}/[/info]")
+        console.print(f"  {SYM_OK} Analisi visiva salvata in [info]{visual_subdir()}/[/info]")
 
     # PDF "ricco": fotogramma + testo estratto, uno per nota (immagini con percorso
     # ASSOLUTO). Solo se l'export è attivo e ci sono davvero dei fotogrammi salvati.
@@ -2861,7 +2861,7 @@ def save_visual_notes(out_root: str, meta: dict, notes: list[dict],
 def load_visual_notes(out_root: str, title: str) -> list[dict]:
     """Rilegge le note visive salvate (per arricchire il riassunto). [] se assenti."""
     safe = _safe_filename(title)
-    for sub in VISUAL_SUBDIRS.values():
+    for sub in (VISUAL_SUBDIR, NOMI_VECCHI[VISUAL_SUBDIR]):
         p = os.path.join(out_root, safe, sub, f"{safe}_visivo.json")
         if os.path.isfile(_lp(p)):
             try:
@@ -3235,7 +3235,7 @@ def _save_outputs(meta: dict, segments: list[dict], engine_label: str,
     files_tbl.add_column("Folder", style="bold bright_white", no_wrap=True)
     files_tbl.add_column("Files", style="info")
     for folder, exts in groups.items():
-        icon = "📂" if folder in TRANS_SUBDIRS.values() else "🌐"
+        icon = "📂" if folder in (TRANS_SUBDIR, NOMI_VECCHI[TRANS_SUBDIR]) else "🌐"
         files_tbl.add_row(f"{icon} {folder}/", "  ".join(exts))
 
     body = Group(
@@ -3279,7 +3279,7 @@ def translate_existing(out_root: str, title: str, target: str = "it",
 
     safe_title = _safe_filename(meta["title"])
     video_dir = os.path.join(out_root, safe_title)
-    trad_dir = os.path.join(video_dir, transl_subdir(ui_lang))
+    trad_dir = os.path.join(video_dir, transl_subdir())
     os.makedirs(_lp(trad_dir), exist_ok=True)
     base = os.path.join(trad_dir, f"{safe_title}_{target}")
     lang_label = _lang_name(target) or target
@@ -3353,188 +3353,13 @@ def translate_existing(out_root: str, title: str, target: str = "it",
     return translated
 
 
-# === RIASSUNTO (via LLM: Groq cloud o Ollama locale) =========================
-# Dal testo italiano (la traduzione, oppure la trascrizione se l'audio era già
-# italiano) produce un riassunto PER SEZIONE: pulisce intercalari, ripetizioni e
-# autocorrezioni e tiene i concetti. Groq usa un modello di chat; in locale ci si
-# appoggia a Ollama (nessuna dipendenza pip aggiuntiva: si parla via HTTP).
-
-# Istruzioni date al modello: sono il cuore della qualità del riassunto.
-_SUMMARY_SYSTEM_PROMPT = (
-    "Sei un editor professionista specializzato nella rielaborazione di "
-    "contenuti parlati. Ricevi la trascrizione di una sezione di un video "
-    "(testo in italiano) e la trasformi in un riassunto fedele, dettagliato e "
-    "scorrevole, redatto interamente in italiano secondo le regole seguenti.\n"
-    "Pulizia del testo: elimina intercalari, riempitivi ed esitazioni (ehm, "
-    "uhm, cioè, tipo, no?, allora, insomma) e rimuovi ripetizioni, frasi "
-    "interrotte e autocorrezioni di chi parla, conservando soltanto la versione "
-    "corretta e definitiva di ciascun passaggio.\n"
-    "Fedeltà ai contenuti: conserva integralmente tutti i concetti, i dati, i "
-    "nomi propri, le cifre e gli esempi rilevanti. Non aggiungere informazioni "
-    "assenti nel testo, non inventare e non introdurre interpretazioni o "
-    "commenti personali.\n"
-    "Inglesismi e termini tecnici: mantieni in inglese i termini tecnici e gli "
-    "inglesismi ormai di uso comune in italiano (per esempio «fine tuning», "
-    "«deploy», «streaming», «feedback», «machine learning», «commit», «buffer», "
-    "«dataset», «prompt»). NON tradurli né italianizzarli: scrivili nella forma "
-    "inglese corrente, esattamente come li userebbe chi lavora nel settore.\n"
-    "Errori di trascrizione: il testo proviene da una trascrizione AUTOMATICA del "
-    "parlato e può contenere sviste (parole storpiate, omofoni sbagliati, "
-    "spaziature o concordanze errate, un termine tecnico reso male). Quando dal "
-    "contesto riconosci con ragionevole certezza un evidente errore di "
-    "trascrizione, correggilo in silenzio ripristinando la parola o l'espressione "
-    "corretta; se invece il dubbio è genuino, conserva il testo originale senza "
-    "inventare. Non segnalare, non elencare e non commentare le correzioni.\n"
-    "Stile e struttura: redigi il riassunto in prosa continua e articolata, "
-    "privilegiando un testo discorsivo che ricostruisca con ricchezza il filo "
-    "del discorso e ne approfondisca i passaggi anziché comprimerli. Punta a un "
-    "riassunto esteso e particolareggiato, non a una sintesi telegrafica. "
-    "Per facilitare la lettura, evidenzia in grassetto Markdown (**testo**) "
-    "soltanto le parole o le brevissime locuzioni chiave — concetti centrali, "
-    "termini tecnici, nomi propri e cifre rilevanti — usando il grassetto con "
-    "parsimonia e mai su intere frasi (deve risaltare, non saturare il testo). "
-    "Ricorri agli elenchi puntati solo quando indispensabili (ad esempio per "
-    "enumerazioni di voci eterogenee presenti nell'originale) e mai come "
-    "struttura predefinita. Mantieni un registro professionale, chiaro e coeso, "
-    "con transizioni fluide tra i concetti.\n"
-    "Vincoli di output: rispondi esclusivamente con il riassunto, senza "
-    "preamboli, intestazioni o commenti. Non aprire mai il testo con formule "
-    "del tipo \"Ecco i punti chiave\", \"In questo video si parla di\" o simili: "
-    "entra direttamente nel contenuto."
-)
-
-# Estensione del prompt usata quando il testo contiene anche le note dell'ANALISI
-# VISIVA: istruisce il modello a integrare codice, formule e diagrammi visti a
-# schermo e ad aggiungere una mappa concettuale quando il contenuto è visuale.
-_SUMMARY_VISUAL_BASE = (
-    "\nIl testo può contenere annotazioni nel formato «[A SCHERMO — mm:ss] …» che "
-    "riportano ciò che era VISIBILE nel video in quel momento (codice, formule, "
-    "grafici, diagrammi, slide). Trattale come fonte attendibile quanto il parlato "
-    "e INTEGRALE nel riassunto in modo naturale, secondo queste regole aggiuntive:\n"
-    "• riporta il CODICE in blocchi markdown delimitati da ``` con il linguaggio "
-    "indicato, preservandolo fedelmente;\n"
-    "• scrivi le FORMULE e le relative dimostrazioni in LaTeX (`$...$` in linea, "
-    "`$$...$$` per i passaggi), includendo tutti i passaggi mostrati;\n"
-    "• descrivi GRAFICI, DIAGRAMMI e TABELLE riportandone dati, assi, relazioni e "
-    "la conclusione.\n"
-    "Importante: se la stessa slide, definizione o diagramma compare in più "
-    "annotazioni (perché restava a schermo a lungo), trattalo UNA volta sola e non "
-    "ripetere paragrafi o concetti già esposti. Non limitarti a citare le "
-    "annotazioni: fondile nel discorso come parte integrante della spiegazione."
-)
-# Variante CON mappa concettuale (attivabile via ECHOSCRIPT_CONCEPT_MAP=1).
-_SUMMARY_VISUAL_MAP = (
-    "\nSe (e solo se) il contenuto è prevalentemente concettuale o animato, "
-    "aggiungi UNA SOLA mappa concettuale complessiva alla fine, in un blocco "
-    "```mermaid con sintassi `graph TD` e archi nel formato corretto "
-    "`A -->|etichetta| B` (MAI `A -->|etichetta|> B`); non ripetere lo stesso "
-    "diagramma più volte."
-)
-# Variante SENZA mappa (default): vietiamo esplicitamente i diagrammi mermaid.
-_SUMMARY_VISUAL_NOMAP = (
-    "\nNON generare mappe concettuali, diagrammi né blocchi ```mermaid: limitati a "
-    "prosa, elenchi essenziali, codice e formule."
-)
-_SUMMARY_SYSTEM_PROMPT_VISUAL = _SUMMARY_SYSTEM_PROMPT + _SUMMARY_VISUAL_BASE + _SUMMARY_VISUAL_NOMAP
-_SUMMARY_SYSTEM_PROMPT_VISUAL_MAP = _SUMMARY_SYSTEM_PROMPT + _SUMMARY_VISUAL_BASE + _SUMMARY_VISUAL_MAP
-
-# --- Versione INGLESE dei prompt (usata quando l'interfaccia è in inglese) ----
-# Un utente con la UI in inglese si aspetta gli output nella sua lingua: il
-# riassunto viene quindi prodotto in inglese, con le stesse regole redazionali.
-_SUMMARY_SYSTEM_PROMPT_EN = (
-    "You are a professional editor specialized in reworking spoken content. You "
-    "receive the transcription of a section of a video and turn it into a "
-    "faithful, detailed and fluent summary, written entirely in English "
-    "according to the following rules.\n"
-    "Text cleanup: remove fillers, hesitations and discourse markers (uh, um, you "
-    "know, like, I mean, so, well) and remove repetitions, interrupted sentences "
-    "and the speaker's self-corrections, keeping only the correct, final version "
-    "of each passage.\n"
-    "Fidelity to content: preserve in full all concepts, data, proper names, "
-    "figures and relevant examples. Do not add information not present in the "
-    "text, do not invent, and do not introduce personal interpretations or "
-    "comments.\n"
-    "Technical terms: keep technical terms, code identifiers, product names and "
-    "established jargon exactly as they appear; do not alter their spelling.\n"
-    "Transcription errors: the text comes from an AUTOMATIC transcription of "
-    "speech and may contain mistakes (garbled words, wrong homophones, spacing or "
-    "agreement errors, a mishandled technical term). When the context lets you "
-    "recognize with reasonable certainty an obvious transcription error, fix it "
-    "silently by restoring the correct word or expression; if the doubt is "
-    "genuine, keep the original text without inventing. Do not flag, list or "
-    "comment on corrections.\n"
-    "Style and structure: write the summary in continuous, articulated prose, "
-    "favoring a discursive text that reconstructs the thread of the discourse "
-    "richly and deepens its passages rather than compressing them. Aim for an "
-    "extended, detailed summary, not a telegraphic synthesis. To aid reading, use "
-    "Markdown bold (**text**) only on key words or very short key phrases — "
-    "central concepts, technical terms, proper names and relevant figures — using "
-    "bold sparingly and never on whole sentences (it must stand out, not saturate "
-    "the text). Resort to bullet lists only when indispensable (for example for "
-    "enumerations of heterogeneous items present in the original) and never as a "
-    "default structure. Keep a professional, clear and cohesive register, with "
-    "smooth transitions between concepts.\n"
-    "Output constraints: reply exclusively with the summary, without preambles, "
-    "headings or comments. Never open the text with phrases like \"Here are the "
-    "key points\", \"In this video we talk about\" or similar: get straight into "
-    "the content."
-)
-_SUMMARY_VISUAL_BASE_EN = (
-    "\nThe text may contain annotations in the format «[ON SCREEN — mm:ss] …» that "
-    "report what was VISIBLE in the video at that moment (code, formulas, charts, "
-    "diagrams, slides). Treat them as a source as reliable as the speech and "
-    "INTEGRATE them into the summary naturally, following these additional rules:\n"
-    "• render CODE in markdown blocks delimited by ``` with the language "
-    "indicated, preserving it faithfully;\n"
-    "• write FORMULAS and their derivations in LaTeX (`$...$` inline, `$$...$$` "
-    "for steps), including all the steps shown;\n"
-    "• describe CHARTS, DIAGRAMS and TABLES reporting their data, axes, "
-    "relationships and conclusion.\n"
-    "Important: if the same slide, definition or diagram appears in multiple "
-    "annotations (because it stayed on screen for a while), treat it ONCE only and "
-    "do not repeat paragraphs or concepts already covered. Do not merely cite the "
-    "annotations: blend them into the discourse as an integral part of the "
-    "explanation."
-)
-_SUMMARY_VISUAL_MAP_EN = (
-    "\nIf (and only if) the content is mostly conceptual or animated, add ONE "
-    "SINGLE overall concept map at the end, in a ```mermaid block with `graph TD` "
-    "syntax and edges in the correct format `A -->|label| B` (NEVER "
-    "`A -->|label|> B`); do not repeat the same diagram multiple times."
-)
-_SUMMARY_VISUAL_NOMAP_EN = (
-    "\nDo NOT generate concept maps, diagrams or ```mermaid blocks: stick to "
-    "prose, essential lists, code and formulas."
-)
-_SUMMARY_SYSTEM_PROMPT_VISUAL_EN = _SUMMARY_SYSTEM_PROMPT_EN + _SUMMARY_VISUAL_BASE_EN + _SUMMARY_VISUAL_NOMAP_EN
-_SUMMARY_SYSTEM_PROMPT_VISUAL_MAP_EN = _SUMMARY_SYSTEM_PROMPT_EN + _SUMMARY_VISUAL_BASE_EN + _SUMMARY_VISUAL_MAP_EN
-
-# Lingua del riassunto prodotto: segue la lingua dell'interfaccia (la CLI è
-# italiano-only, quindi resta "it"). Impostata dai punti d'ingresso del riassunto.
-_SUMMARY_LANG = "it"
-# Override temporaneo del prompt di sistema del riassunto (impostato da
-# summarize_existing quando ci sono note visive da integrare). None = prompt base.
-_SUMMARY_PROMPT_OVERRIDE = None
-
-
-def _summary_base_prompt(lang: str | None = None) -> str:
-    """Prompt base del riassunto nella lingua richiesta (default: _SUMMARY_LANG)."""
-    lang = lang or globals().get("_SUMMARY_LANG", "it")
-    return _SUMMARY_SYSTEM_PROMPT_EN if lang == "en" else _SUMMARY_SYSTEM_PROMPT
-
-
-def _summary_visual_prompt(lang: str, concept_map: bool) -> str:
-    """Prompt «visivo» del riassunto (con/senza mappa) nella lingua richiesta."""
-    if lang == "en":
-        return _SUMMARY_SYSTEM_PROMPT_VISUAL_MAP_EN if concept_map else _SUMMARY_SYSTEM_PROMPT_VISUAL_EN
-    return _SUMMARY_SYSTEM_PROMPT_VISUAL_MAP if concept_map else _SUMMARY_SYSTEM_PROMPT_VISUAL
-
-
-def _active_summary_prompt() -> str:
-    """Prompt di sistema del riassunto attualmente attivo (base o «visivo»),
-    nella lingua corrente (_SUMMARY_LANG)."""
-    return globals().get("_SUMMARY_PROMPT_OVERRIDE") or _summary_base_prompt()
-
+# === RIASSUNTO: sta in server/enrichment/summary.py ==========================
+#
+# Erano le istruzioni che si danno al modello, in due copie: una italiana e una
+# inglese, perche' il riassunto seguiva la lingua dell'interfaccia. Da quando
+# il programma parla solo italiano la seconda non la raggiungeva piu' nessuno,
+# quindi e' uscita insieme alla prima.
+from server.enrichment import summary
 
 # === PDF "RICCO": HTML (MathJax + Mermaid) stampato da un browser headless =====
 
@@ -3878,7 +3703,7 @@ def _summarize_groq(client, text: str, section_title: str | None) -> str:
     resp = _groq_chat_capture(
         client, settings.GROQ_SUMMARY_MODEL,
         messages=[
-            {"role": "system", "content": _active_summary_prompt()},
+            {"role": "system", "content": summary.prompt_attivo()},
             {"role": "user", "content": _summary_user_prompt(text, section_title)},
         ],
         temperature=0.3,
@@ -3905,7 +3730,7 @@ def _summarize_ollama(text: str, section_title: str | None) -> str:
     payload = {
         "model": settings.OLLAMA_MODEL,
         "messages": [
-            {"role": "system", "content": _active_summary_prompt()},
+            {"role": "system", "content": summary.prompt_attivo()},
             {"role": "user", "content": _summary_user_prompt(text, section_title)},
         ],
         "stream": False,
@@ -4041,9 +3866,9 @@ def summarize_existing(out_root: str, title: str, client=None,
 
     safe_title = _safe_filename(meta["title"])
     video_dir = os.path.join(out_root, safe_title)
-    sum_dir = os.path.join(video_dir, summary_subdir(ui_lang))
+    sum_dir = os.path.join(video_dir, summary_subdir())
     os.makedirs(_lp(sum_dir), exist_ok=True)
-    suffix = SUMMARY_SUFFIX.get(ui_lang or "it", SUMMARY_SUFFIX["it"])
+    suffix = SUMMARY_SUFFIX
     base = os.path.join(sum_dir, f"{safe_title}_{suffix}")
 
     console.print()
@@ -4057,9 +3882,8 @@ def summarize_existing(out_root: str, title: str, client=None,
     # Lingua del riassunto = lingua dell'interfaccia (la CLI passa "it"). Attiva il
     # prompt «visivo» solo durante questo riassunto (reset nel finally), nella
     # lingua giusta e con/senza mappa concettuale a seconda di CONCEPT_MAP.
-    globals()["_SUMMARY_LANG"] = ui_lang or "it"
-    globals()["_SUMMARY_PROMPT_OVERRIDE"] = (
-        _summary_visual_prompt(ui_lang or "it", CONCEPT_MAP) if visual_notes else None)
+    summary.PROMPT_ATTIVO = (
+        summary.prompt_visivo(CONCEPT_MAP) if visual_notes else None)
     if done_secs:
         console.print(f"  [dim]↻ Riprendo il riassunto dalla sezione "
                       f"{len(done_secs) + 1}/{len(sections)}.[/dim]")
@@ -4105,8 +3929,8 @@ def summarize_existing(out_root: str, title: str, client=None,
     frame_notes = [n for n in visual_notes if n.get("image")] if SUMMARY_FRAMES else []
     sections_md, sections_pdf = summarized, summarized
     if frame_notes:
-        frames_dir = os.path.join(video_dir, visual_subdir(ui_lang), "frames")
-        rel_prefix = f"../{visual_subdir(ui_lang)}/frames/"
+        frames_dir = os.path.join(video_dir, visual_subdir(), "frames")
+        rel_prefix = f"../{visual_subdir()}/frames/"
         sections_md = _append_frames_to_sections(summarized, frame_notes, lambda img: rel_prefix + img)
         sections_pdf = _append_frames_to_sections(summarized, frame_notes,
                                                   lambda img: os.path.join(frames_dir, img))

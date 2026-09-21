@@ -36,6 +36,7 @@ import subprocess
 import tempfile
 
 from server.config import paths, settings
+from server.enrichment import summary
 from server.utils import text
 
 # La radice del progetto deve essere raggiungibile, altrimenti `import
@@ -753,7 +754,7 @@ def _translate_outputs(meta: dict, sections: list[dict], options: dict,
     # UI inglese -> inglese (un utente straniero vuole gli output nella sua lingua).
     target = options.get("ui_lang", "it") or "it"
     safe_title = text._safe_filename(meta["title"])
-    trad_dir = os.path.join(video_dir, tx.transl_subdir(options.get("ui_lang", "it")))
+    trad_dir = os.path.join(video_dir, tx.transl_subdir())
     base = os.path.join(trad_dir, f"{safe_title}_{target}")
     lang_label = tx._lang_name(target, _ENGINE_LANG) or target
 
@@ -847,8 +848,8 @@ def _summarize_outputs(meta: dict, sections: list[dict], options: dict,
 
     safe_title = text._safe_filename(meta["title"])
     ui_lang = options.get("ui_lang", "it")
-    sum_dir = os.path.join(video_dir, tx.summary_subdir(ui_lang))
-    suffix = tx.SUMMARY_SUFFIX.get(ui_lang or "it", tx.SUMMARY_SUFFIX["it"])
+    sum_dir = os.path.join(video_dir, tx.summary_subdir())
+    suffix = tx.SUMMARY_SUFFIX
     base = os.path.join(sum_dir, f"{safe_title}_{suffix}")
 
     # Arricchimento visivo: fonde le note nelle sezioni e attiva il prompt giusto.
@@ -866,9 +867,11 @@ def _summarize_outputs(meta: dict, sections: list[dict], options: dict,
     on_progress("summarize", len(done_secs), n, _L("summarizing"))
     # Lingua del riassunto = lingua dell'interfaccia; il prompt «visivo» (se ci
     # sono note visive) viene scelto nella stessa lingua.
-    tx._SUMMARY_LANG = ui_lang or "it"
-    tx._SUMMARY_PROMPT_OVERRIDE = (
-        tx._summary_visual_prompt(ui_lang or "it", tx.CONCEPT_MAP) if visual_notes else None)
+    # Se per questo video ci sono anche le note di cio' che si vede, al modello
+    # si danno istruzioni diverse: deve intrecciarle al parlato invece di
+    # riassumere solo quello.
+    summary.PROMPT_ATTIVO = (
+        summary.prompt_visivo(tx.CONCEPT_MAP) if visual_notes else None)
     try:
         summarized = tx.summarize_sections(
             sections, summarize_fn,
@@ -884,8 +887,10 @@ def _summarize_outputs(meta: dict, sections: list[dict], options: dict,
         warnings.append(_L("sum_fail", e=e))
         return "error"
     finally:
-        tx._SUMMARY_PROMPT_OVERRIDE = None
-        tx._SUMMARY_LANG = "it"
+        # Si rimette com'era: il prompt visivo vale per QUESTO video, e
+        # lasciarlo acceso lo applicherebbe anche al prossimo, che magari non
+        # ha nessuna nota visiva da intrecciare.
+        summary.PROMPT_ATTIVO = None
 
     # Pulizia diagrammi: corregge le frecce Mermaid e, se la mappa concettuale è
     # disattivata, rimuove eventuali blocchi mermaid sfuggiti al modello.
@@ -899,8 +904,8 @@ def _summarize_outputs(meta: dict, sections: list[dict], options: dict,
     frame_notes = [n for n in visual_notes if n.get("image")] if tx.SUMMARY_FRAMES else []
     sections_md, sections_pdf = summarized, summarized
     if frame_notes:
-        frames_dir = os.path.join(video_dir, tx.visual_subdir(ui_lang), "frames")
-        rel_prefix = f"../{tx.visual_subdir(ui_lang)}/frames/"
+        frames_dir = os.path.join(video_dir, tx.visual_subdir(), "frames")
+        rel_prefix = f"../{tx.visual_subdir()}/frames/"
         sections_md = tx._append_frames_to_sections(summarized, frame_notes, lambda img: rel_prefix + img)
         sections_pdf = tx._append_frames_to_sections(summarized, frame_notes,
                                                     lambda img: os.path.join(frames_dir, img))
@@ -958,7 +963,7 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
 
     safe_title = text._safe_filename(meta["title"])
     video_dir = os.path.join(out_root, safe_title)
-    trans_dir = os.path.join(video_dir, tx.trans_subdir(options.get("ui_lang", "it")))
+    trans_dir = os.path.join(video_dir, tx.trans_subdir())
     base_orig = os.path.join(trans_dir, safe_title)
 
     sections = tx._build_sections(meta, segments)
@@ -1018,7 +1023,7 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
         try:
             vis_label = (f"Groq · {settings.GROQ_VISION_MODEL}" if chat_client is not None
                          else f"Ollama · {settings.OLLAMA_VISION_MODEL}")
-            frames_out = os.path.join(video_dir, tx.visual_subdir(options.get("ui_lang", "it")), "frames")
+            frames_out = os.path.join(video_dir, tx.visual_subdir(), "frames")
             with tempfile.TemporaryDirectory(prefix="echoscript_vis_", ignore_cleanup_errors=True) as vwork:
                 visual_notes = tx.analyze_video_visuals(
                     meta["_video_path"], meta.get("duration") or 0.0, vwork,
@@ -1031,7 +1036,7 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
                 visual_info = {
                     "count": len(visual_notes),
                     "with_image": sum(1 for n in visual_notes if n.get("image")),
-                    "dir": os.path.join(video_dir, tx.visual_subdir(options.get("ui_lang", "it"))),
+                    "dir": os.path.join(video_dir, tx.visual_subdir()),
                 }
             else:
                 # Nessuna nota: spiega il MOTIVO (prima era silenzioso — cartella
