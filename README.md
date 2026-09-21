@@ -77,6 +77,8 @@ pip install -r requirements.txt
 **Capitolo 9 — [📦 Installazione da sorgente (sviluppatori)](#-installazione-da-sorgente-sviluppatori)**
 - 9.1 [Requisiti](#requisiti)
 - 9.2 [Passi](#passi)
+- 9.3 [Costruire l'installatore](#costruire-linstallatore)
+- 9.4 [Pubblicare una versione](#pubblicare-una-versione)
 
 **Capitolo 10 — [🔑 Come ottenere una API key Groq](#-come-ottenere-una-api-key-groq)**
 
@@ -465,30 +467,37 @@ Se un modello non entra nella RAM, Ollama usa il disco (swap) e diventa **molto*
 
 ## ⬇️ Scarica l'app pronta (.exe)
 
-Se **non sei uno sviluppatore** e vuoi solo usare il programma, non serve installare Python né altro: scarica l'app già pronta.
+Se **non sei uno sviluppatore** e vuoi solo usare il programma, non serve installare Python né altro: c'è un normale programma di installazione, come quelli di qualunque altra app.
 
 1. Vai alla pagina **[Releases](https://github.com/Imkun-on/EchoScript/releases/latest)** del progetto su GitHub.
-2. Scarica il file **`EchoScript.zip`** dell'ultima versione.
-3. **Estrai** lo ZIP in una cartella a piacere (Desktop, Documenti…). Tieni i file **insieme**: serve sia `EchoScript.exe` sia la cartella **`_internal`** che lo accompagna.
-4. Doppio click su **`EchoScript.exe`**. Fatto: si apre l'app, **senza installare nulla**.
+2. Scarica il file **`EchoScript-Setup-<versione>.exe`** dell'ultima versione.
+3. Doppio click. Avanti, accetta la licenza, Installa.
+4. Fatto: trovi l'**icona di EchoScript sul desktop** e la voce nel menu Start.
 
-> 🛡️ **Primo avvio – Windows SmartScreen:** poiché l'app non è firmata digitalmente, Windows può mostrare *"Windows ha protetto il PC"*. Clicca **"Ulteriori informazioni" → "Esegui comunque"**. È normale per i programmi gratuiti non firmati.
+> 🔓 **Non serve essere amministratore.** L'app si installa per il tuo account, dentro `%LOCALAPPDATA%\Programs\EchoScript`, e Windows non chiede nessuna conferma di sicurezza. Funziona anche sul computer dell'ufficio o su un account senza privilegi.
+
+> 🛡️ **Windows SmartScreen:** poiché il programma non è firmato digitalmente, Windows può mostrare *"Windows ha protetto il PC"*. Clicca **"Ulteriori informazioni" → "Esegui comunque"**. È normale per i programmi gratuiti non firmati.
 >
 > Se preferisci controllare di aver scaricato davvero il file pubblicato, confronta la sua impronta con quella scritta nelle note della release:
 >
 > ```powershell
-> Get-FileHash .\EchoScript.zip -Algorithm SHA256
+> Get-FileHash .\EchoScript-Setup-1.0.0.exe -Algorithm SHA256
 > ```
 
 > ⏳ **Il primo avvio è il più lento.** Dal doppio clic compare subito la schermata con il marchio, e la finestra arriva una decina di secondi dopo: nel frattempo Windows sta leggendo dal disco qualche centinaio di megabyte, e la volta successiva ci mette molto meno. L'immagine resta a schermo finché la finestra non ha davvero disegnato, quindi finché la vedi il programma sta lavorando.
 
 **Cosa è incluso e cosa no:**
 - ✅ **Tutto incluso**: non servono Python, ffmpeg o altre installazioni.
+- 🪟 **WebView2**, il componente con cui Windows disegna la finestra, c'è già su Windows 11 e su Windows 10 aggiornato. Se manca, l'installazione se ne accorge e lo scarica da Microsoft (2 MB) prima di procedere.
 - 📥 La **prima volta** che usi il backend **locale**, l'app scarica una tantum il modello da HuggingFace (poi resta in cache, anche offline).
 - ⚡ Per il backend **Groq** (cloud) serve solo una **chiave gratuita** (vedi più sotto).
-- 💻 La release `.exe` è per **Windows**. Le versioni per **macOS/Linux** arrivano dai rispettivi build (vedi sezione installazione da sorgente nel frattempo).
+- 💻 L'installatore è per **Windows 10/11 a 64 bit**. Per **macOS/Linux** si usa per ora l'installazione da sorgente (capitolo seguente).
 
-> Per **disinstallare** basta cancellare la cartella: l'app non scrive nel registro di sistema. (Le trascrizioni stanno in `results/` accanto all'eseguibile.)
+**Dove finiscono le tue trascrizioni.** In `results/`, dentro la cartella del programma. Il modo più rapido per arrivarci è la scorciatoia **"Trascrizioni salvate"** che l'installazione mette nel menu Start, accanto a quella dell'app.
+
+**Aggiornare.** Scarica il nuovo `EchoScript-Setup-*.exe` e lancialo: riconosce la versione già presente e la sostituisce. Le trascrizioni, le preferenze e la chiave Groq restano dove sono.
+
+**Disinstallare.** Impostazioni → App → App installate → EchoScript → Disinstalla. Alla fine viene chiesto se cancellare anche le trascrizioni e le preferenze: rispondendo **No** restano sul disco.
 
 ---
 
@@ -527,28 +536,72 @@ sudo apt install ffmpeg
 
 > ⭐ **File da lanciare:** la **GUI** da `EchoScriptApp.py`, la **CLI** da `transcriber.py`.
 
-### Costruire l'eseguibile
+### Costruire l'installatore
 
-Serve solo se vuoi produrre da te il pacchetto della sezione [Scarica l'app pronta](#️-scarica-lapp-pronta-exe). Per usare il programma **non serve**.
+Serve solo se vuoi produrre da te il file della sezione [Scarica l'app pronta](#️-scarica-lapp-pronta-exe). Per usare il programma **non serve**.
 
-```bash
+**I due passaggi, e perché sono due.** Si sente spesso dire "usiamo Inno Setup *invece di* PyInstaller": non è un'alternativa, sono due mestieri diversi e servono entrambi.
+
+| | Cosa fa | Cosa produce |
+|---|---|---|
+| **PyInstaller** | prende il codice Python e ci impacchetta dentro l'interprete e tutte le librerie | `dist/EchoScript/` — `EchoScript.exe` + `_internal/` |
+| **Inno Setup** | prende quella cartella e la chiude in un programma di installazione | `installer/output/EchoScript-Setup-*.exe` — un file solo |
+
+Senza il primo non esiste nessun `.exe` da installare (Inno Setup da solo spedirebbe file `.py` che sul computer di chi li riceve non partono). Senza il secondo esiste una cartella che chi la riceve deve estrarre, tenere insieme e mettersi in ordine da sé — ed è esattamente il passaggio che l'icona sul desktop elimina.
+
+**Cosa serve, una volta sola:**
+
+```powershell
+winget install Gyan.FFmpeg          # finisce DENTRO il pacchetto (vedi sotto)
+winget install JRSoftware.InnoSetup # il compilatore dell'installatore (serve la 6.3+)
 pip install pyinstaller
-pyinstaller echoscriptapp.spec --noconfirm
 ```
 
-Risultato in `dist/EchoScript/`: `EchoScript.exe` più la cartella `_internal`. **Vanno tenuti insieme**, ed è la cartella intera che si comprime per pubblicarla.
+**Costruire:**
 
-> ⚠️ **Comprimi prima di provarlo, o ripulisci dopo.** L'eseguibile scrive accanto a sé: `settings.json` con le preferenze (lingua, motore, modelli scelti) al primo avvio, e `results/` con le trascrizioni appena ne fai una. Se comprimi dopo aver fatto una prova, quella roba finisce nell'archivio e chi lo scarica si ritrova le tue scelte e i tuoi file. Cancella entrambi prima di pubblicare.
+```powershell
+.\costruisci.ps1                  # versione 1.0.0
+.\costruisci.ps1 -Versione 1.1.0  # a ogni release pubblicata
+```
 
-Sulla macchina di riferimento la costruzione dura **circa 8 minuti** e produce **~730 MB**, di cui 402 sono `ffmpeg.exe` e `ffprobe.exe`.
+Lo script fa i due passaggi in fila, ripulisce `dist/` da eventuali file di una tua prova e stampa alla fine il percorso, il peso e l'impronta SHA256 del file da allegare alla release.
 
-**Tre cose dello spec che non sono ovvie:**
+| Opzione | A cosa serve |
+|---|---|
+| `-Versione 1.1.0` | numero di versione: nome del file, voce in "App installate", proprietà dell'eseguibile |
+| `-SoloInstallatore` | salta PyInstaller e riusa `dist/`. Quando stai lavorando sull'`.iss`: un minuto invece di otto |
+| `-Forza` | non chiede conferma prima di cancellare da `dist/` i file rimasti da una prova |
+
+> ⚠️ **L'eseguibile scrive accanto a sé.** Se apri `dist/EchoScript.exe` per una prova, in quella cartella restano `settings.json` con le *tue* preferenze e `results/` con le *tue* trascrizioni. Impacchettate, finirebbero addosso a chiunque installi il programma. `costruisci.ps1` se ne accorge e chiede di cancellarle, e l'`.iss` le esclude comunque: due reti, perché il giorno in cui si salta lo script la seconda regge.
+
+Sulla macchina di riferimento PyInstaller dura **circa 8 minuti** e produce **~730 MB**, di cui 402 sono `ffmpeg.exe` e `ffprobe.exe`; Inno Setup ne impiega altri due o tre per comprimerli.
+
+**Tre cose dello spec di PyInstaller che non sono ovvie:**
 
 - **ffmpeg viene preso dal `PATH` al momento della costruzione** e incorporato, così l'eseguibile è autosufficiente. Se non lo trovi nel `PATH` mentre costruisci, il pacchetto verrà senza, e a chi lo usa servirà ffmpeg installato.
 - **`tkinter` deve restare** fra i pacchetti raccolti: la schermata di avvio è disegnata dal bootloader con Tcl/Tk, e senza quelle librerie l'oggetto `Splash` non si costruisce. È l'unico motivo per cui c'è.
 - **La lista degli `excludes` vale metà del peso.** I `collect_all` raccolgono *tutti* i sottomoduli di ogni pacchetto, comprese le integrazioni facoltative verso librerie che qui nessuno usa: senza quelle esclusioni il pacchetto passa da 730 MB a **1360**, e l'avvio da 10 secondi a 34. Le voci più pesanti sono Qt (628 MB, arriva da pywebview che porta un backend per ogni sistema) e le integrazioni di `huggingface_hub` (OpenCV, NLTK, pyarrow, numba, scipy, transformers).
 
 Se aggiungi una dipendenza e il pacchetto raddoppia, guarda lì prima di cercare altrove.
+
+### Pubblicare una versione
+
+Costruire a mano va bene per provare. Per pubblicare c'è `.github/workflows/pacchetti.yml`, che fa fare il lavoro a un computer prestato da GitHub:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Una quindicina di minuti dopo, la pagina **Releases** ha il suo installatore, con peso e impronta SHA256 già scritti nelle note. Nessun file da caricare a mano.
+
+Per provare senza pubblicare niente c'è il pulsante **"Run workflow"** nella scheda *Actions*: costruisce il pacchetto e lo lascia scaricabile per trenta giorni dalla pagina della costruzione, senza creare nessuna release.
+
+**Perché non basta costruire sul proprio computer.** Perché PyInstaller non sa fare pacchetti per un sistema diverso da quello su cui gira. Da Windows esce solo roba Windows: per il pacchetto macOS serve un Mac acceso, per quello Linux una macchina Linux. GitHub presta entrambe, gratis per i progetti pubblici, ed è così che si pubblicano tre pacchetti possedendo un computer solo.
+
+Il workflow lancia **lo stesso `costruisci.ps1`** che si lancia a mano, non una copia dei comandi: una correzione allo script vale per tutti e due senza doverla ricopiare.
+
+> ⚠️ **ffmpeg non si installa con Chocolatey, lì dentro.** Lo spec cerca ffmpeg nel `PATH` e copia nel pacchetto il file che trova; Chocolatey nel `PATH` mette un programma-ponte che sa dove sta quello vero. Il pacchetto si porterebbe dietro il ponte, e sul computer di chi installa il ponte non troverebbe più niente a cui puntare. Per questo il workflow scarica l'archivio ufficiale e usa gli eseguibili veri.
 
 ---
 

@@ -1,0 +1,204 @@
+# =============================================================================
+#  Costruisce i pacchetti di EchoScript su computer che non sono il tuo.
+# =============================================================================
+#  Il problema che risolve
+#  -----------------------
+#  PyInstaller non sa fare pacchetti per un sistema diverso da quello su cui
+#  gira. Da Windows esce solo roba Windows: per un pacchetto macOS serve un Mac
+#  acceso, per uno Linux serve una macchina Linux. Comprarsi un Mac per
+#  pubblicare un programma gratuito non sta in piedi.
+#
+#  GitHub presta quelle macchine. A ogni versione pubblicata accende un computer
+#  Windows (e piu' avanti anche un Mac e una macchina Linux), ci costruisce
+#  sopra il pacchetto e lo allega alla release. Chi scrive il codice resta sul
+#  suo computer e non installa niente.
+#
+#  Come si usa
+#  -----------
+#  Per pubblicare una versione, si mette un'etichetta e la si spedisce:
+#
+#      git tag v1.0.0
+#      git push origin v1.0.0
+#
+#  Dopo una quindicina di minuti la pagina Releases ha il suo installatore.
+#  Per una prova senza pubblicare niente c'e' il pulsante "Run workflow" nella
+#  scheda Actions: costruisce e basta, senza creare nessuna release.
+#
+#  Cosa c'e' e cosa manca
+#  ----------------------
+#  Per ora c'e' il solo lavoro Windows, perche' e' l'unico gia' pronto. I lavori
+#  macOS e Linux si aggiungono qui sotto quando i rispettivi script esistono:
+#  la forma e' la stessa, cambia la macchina e cambia l'ultimo passo.
+# =============================================================================
+
+name: Pacchetti
+
+on:
+  # Un'etichetta che comincia per v (v1.0.0, v1.2.3) vuol dire "pubblica".
+  push:
+    tags:
+      - 'v*'
+  # Il pulsante manuale: costruisce senza pubblicare, per provare.
+  workflow_dispatch:
+    inputs:
+      versione:
+        description: 'Numero di versione (senza la v davanti)'
+        required: true
+        default: '0.0.0-prova'
+
+# Se si spedisce una correzione mentre la costruzione precedente sta ancora
+# girando, quella vecchia viene fermata: due pacchetti della stessa versione
+# non servono a nessuno e la seconda costruzione sarebbe comunque quella buona.
+concurrency:
+  group: pacchetti-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  # Serve solo a creare la release e ad allegarci i file. Tutto il resto, di
+  # proposito, resta in sola lettura.
+  contents: write
+
+jobs:
+  windows:
+    name: Windows (installatore .exe)
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Scarica il codice
+        uses: actions/checkout@v4
+
+      # --------------------------------------------------------------------
+      # Da dove esce il numero di versione
+      # --------------------------------------------------------------------
+      # Due strade, perche' ci sono due modi di far partire questa costruzione.
+      # Con l'etichetta (v1.0.0) il numero e' nell'etichetta stessa e basta
+      # togliere la v davanti. Col pulsante manuale lo scrive chi preme.
+      # Il risultato finisce in una variabile che i passi successivi leggono.
+      - name: Decidi il numero di versione
+        id: versione
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $v = $env:GITHUB_REF -replace '^refs/tags/v', ''
+          } else {
+            $v = '${{ github.event.inputs.versione }}'
+          }
+          "valore=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Versione: $v"
+
+      - name: Prepara Python
+        uses: actions/setup-python@v5
+        with:
+          # Non la versione piu' nuova in assoluto, ma quella per cui tutte le
+          # librerie pesanti (av, ctranslate2, onnxruntime, pythonnet) hanno
+          # gia' i pacchetti gia' compilati. Con una versione appena uscita pip
+          # proverebbe a compilarli sul momento, e su una macchina prestata a
+          # tempo quella e' la strada per un errore dopo venti minuti.
+          python-version: '3.12'
+          cache: 'pip'
+
+      # --------------------------------------------------------------------
+      # ffmpeg: si scarica quello vero, non una scorciatoia
+      # --------------------------------------------------------------------
+      # Lo spec di PyInstaller cerca ffmpeg nel PATH con shutil.which() e copia
+      # DENTRO il pacchetto il file che trova. Installandolo con Chocolatey, nel
+      # PATH finisce un piccolo programma-ponte che sa dove sta quello vero: il
+      # pacchetto si porterebbe dietro il ponte, e sul computer di chi installa
+      # il ponte non troverebbe piu' niente a cui puntare.
+      # Quindi si scarica l'archivio e si mette nel PATH la cartella con i due
+      # eseguibili veri, gli stessi che si userebbero costruendo a mano.
+      - name: Procura ffmpeg
+        shell: pwsh
+        run: |
+          $url = 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip'
+          $zip = "$env:RUNNER_TEMP\ffmpeg.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath "$env:RUNNER_TEMP\ffmpeg" -Force
+          $bin = (Get-ChildItem "$env:RUNNER_TEMP\ffmpeg" -Directory | Select-Object -First 1).FullName + '\bin'
+          if (-not (Test-Path "$bin\ffmpeg.exe")) { throw "ffmpeg.exe non trovato in $bin" }
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          Write-Host "ffmpeg: $bin"
+
+      - name: Procura Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress --yes
+          # costruisci.ps1 lo cerca da solo nei posti consueti, qui basta
+          # controllare che ci sia davvero prima di andare avanti: meglio
+          # fermarsi adesso che dopo i dieci minuti di PyInstaller.
+          # Niente "ISCC.exe /?" per la prova: quel comando stampa l'aiuto e
+          # poi esce segnalando un errore, e il passo fallirebbe pur essendo
+          # andato tutto bene.
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe non trovato dopo l'installazione" }
+          Write-Host ("Inno Setup " + (Get-Item $iscc).VersionInfo.ProductVersion)
+
+      - name: Installa le librerie del progetto
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
+
+      # --------------------------------------------------------------------
+      # La costruzione vera: lo STESSO script che si lancia a mano
+      # --------------------------------------------------------------------
+      # Non una copia dei comandi, proprio costruisci.ps1. Cosi' quello che esce
+      # da qui e quello che esce dal tuo computer sono la stessa cosa, e una
+      # correzione allo script vale per tutti e due senza doverla ricopiare.
+      # -Forza perche' qui non c'e' nessuno che possa rispondere a una domanda.
+      - name: Costruisci il pacchetto
+        shell: pwsh
+        run: .\costruisci.ps1 -Versione '${{ steps.versione.outputs.valore }}' -Forza
+
+      # Il pacchetto resta scaricabile dalla pagina della costruzione per 30
+      # giorni anche quando non si sta pubblicando niente. E' cosi' che si prova
+      # una versione prima di darle un'etichetta.
+      - name: Conserva il pacchetto
+        uses: actions/upload-artifact@v4
+        with:
+          name: EchoScript-Setup-${{ steps.versione.outputs.valore }}
+          path: installer/output/EchoScript-Setup-*.exe
+          retention-days: 30
+          compression-level: 0   # e' gia' compresso da Inno Setup, rifarlo non toglie niente
+
+      # --------------------------------------------------------------------
+      # La release, solo quando c'e' un'etichetta
+      # --------------------------------------------------------------------
+      # L'impronta SHA256 viene scritta nelle note: e' il modo con cui chi
+      # scarica puo' controllare di aver preso davvero il file pubblicato qui e
+      # non qualcosa che gli e' stato messo davanti per strada. Il README spiega
+      # gia' come confrontarla.
+      - name: Pubblica la release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = '${{ steps.versione.outputs.valore }}'
+          $file = "installer\output\EchoScript-Setup-$v.exe"
+          $impronta = (Get-FileHash $file -Algorithm SHA256).Hash
+          $peso = '{0:N1}' -f ((Get-Item $file).Length / 1MB)
+          # Le note si costruiscono riga per riga invece che con un blocco di
+          # testo unico. Il blocco unico di PowerShell (@"..."@) vuole la sua
+          # chiusura attaccata al bordo sinistro della riga, e qui dentro il
+          # bordo sinistro appartiene a YAML, che pretende il rientro: le due
+          # regole non possono valere insieme. Un elenco di righe non ha bordi
+          # e si rientra quanto serve.
+          $righe = @(
+            "## EchoScript $v",
+            "",
+            "Scarica **EchoScript-Setup-$v.exe** qui sotto e fai doppio clic.",
+            "Non serve essere amministratore: si installa per il tuo account e",
+            "mette l'icona sul desktop.",
+            "",
+            "**Peso:** $peso MB",
+            "**SHA256:** $impronta",
+            "",
+            "Windows puo' mostrare l'avviso «Windows ha protetto il PC», perche'",
+            "il programma non e' firmato: clicca «Ulteriori informazioni» e poi",
+            "«Esegui comunque»."
+          )
+          Set-Content -Path note.md -Value $righe -Encoding utf8
+          gh release create "v$v" $file --title "EchoScript $v" --notes-file note.md

@@ -109,29 +109,52 @@ SYM_OK, SYM_FAIL, SYM_ARROW, SYM_DOT = "✓", "✗", "→", "•"
 
 
 # === .env LOADING + CONFIG HELPERS ===========================================
-# Load the .env (next to this file) into os.environ at IMPORT time, so the
-# configuration constants further down can be overridden WITHOUT editing the
-# code. Values already present in the real environment win over the .env file.
+# Load the .env into os.environ at IMPORT time, so the configuration constants
+# further down can be overridden WITHOUT editing the code. Values already
+# present in the real environment win over the .env file.
+def _env_candidates() -> list[str]:
+    """Dove cercare il .env, nell'ordine in cui vince chi arriva prima.
+
+    Da sorgenti c'è un posto solo: accanto a questo file. Dentro l'eseguibile
+    ce ne sono due, e non sono equivalenti.
+
+    Il primo è la cartella dell'.exe, cioè, dopo l'installazione, quella che
+    l'installatore apre da «Programs/EchoScript» dentro %LOCALAPPDATA%. È
+    l'unico che una persona sappia trovare («apri la cartella del programma»),
+    ed è l'unico che sopravvive a un aggiornamento: l'installazione rifà
+    `_internal` da zero ogni volta.
+
+    Il secondo è accanto a questo file, che da impacchettati sta dentro
+    `_internal`. Resta solo per non rompere chi ci aveva già messo il suo .env
+    quando quello era l'unico posto in cui il programma guardava."""
+    accanto_al_file = os.path.dirname(os.path.abspath(__file__))
+    if getattr(sys, "frozen", False):
+        accanto_all_exe = os.path.dirname(os.path.abspath(sys.executable))
+        return [os.path.join(accanto_all_exe, ".env"),
+                os.path.join(accanto_al_file, ".env")]
+    return [os.path.join(accanto_al_file, ".env")]
+
+
 def _load_env_file() -> None:
     """Read KEY=value lines from a sibling .env into os.environ (no overwrite)."""
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-    try:
-        with open(env_path, "r", encoding="utf-8") as f:
-            for raw in f:
-                line = raw.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if line.startswith("export "):
-                    line = line[len("export "):]
-                if "=" not in line:
-                    continue
-                key, _, value = line.partition("=")
-                key = key.strip()
-                value = value.strip().strip('"').strip("'")
-                if key and key not in os.environ:
-                    os.environ[key] = value
-    except OSError:
-        pass
+    for env_path in _env_candidates():
+        try:
+            with open(env_path, "r", encoding="utf-8") as f:
+                for raw in f:
+                    line = raw.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if line.startswith("export "):
+                        line = line[len("export "):]
+                    if "=" not in line:
+                        continue
+                    key, _, value = line.partition("=")
+                    key = key.strip()
+                    value = value.strip().strip('"').strip("'")
+                    if key and key not in os.environ:
+                        os.environ[key] = value
+        except OSError:
+            continue
 
 
 def _env_str(key: str, default: str) -> str:
@@ -655,20 +678,28 @@ def cached_rate_limits() -> list[dict]:
     return list(_RATE_LIMIT_CACHE.values())
 
 
+def _data_root() -> str:
+    """La cartella di chi usa il programma: dove si scrive, e dove resta scritto.
+
+    Dentro l'eseguibile è ACCANTO all'.exe, non accanto a questo file: da
+    impacchettati `__file__` sta in `_internal/` (o, in modalità a file unico, in
+    una cartella temporanea cancellata alla chiusura). Con l'installatore quella
+    distinzione conta il doppio, perché `_internal` viene rifatta da zero a ogni
+    aggiornamento: quello che sta lì dentro è materiale del programma, e sparisce
+    con lui. È la stessa cartella dati che usa Shared/percorsi.py, ricalcolata
+    qui perché transcriber non dipende da Shared."""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
 def _checkpoints_dir() -> str:
     """Cartella dedicata ai checkpoint dei video parziali.
 
-    Dentro l'eseguibile va ACCANTO all'.exe, non accanto a questo file: da
-    impacchettati `__file__` sta in `_internal/` (o, in modalità a file unico, in
-    una cartella temporanea cancellata alla chiusura), quindi i parziali
-    finirebbero lontano dai risultati — o sparirebbero — e «Riprendi» non
-    troverebbe mai nulla da riprendere. È la stessa cartella dati che usa
-    Shared/percorsi.py, ricalcolata qui perché transcriber non dipende da Shared."""
-    if getattr(sys, "frozen", False):
-        root = os.path.dirname(os.path.abspath(sys.executable))
-    else:
-        root = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(root, "results", ".checkpoints")
+    Sta dentro `results/` per lo stesso motivo per cui ci stanno le trascrizioni:
+    se i parziali finissero altrove, «Riprendi» non troverebbe mai nulla da
+    riprendere."""
+    return os.path.join(_data_root(), "results", ".checkpoints")
 
 
 def _checkpoint_key(meta: dict) -> str:
@@ -4345,8 +4376,12 @@ def _active_summary_prompt() -> str:
 
 # === PDF "RICCO": HTML (MathJax + Mermaid) stampato da un browser headless =====
 
-PDF_ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".pdfassets")
+PDF_ASSETS_DIR = os.path.join(_data_root(), ".pdfassets")
 # Librerie JS scaricate UNA volta in cache locale (poi funziona anche offline).
+# Accanto all'.exe, non dentro `_internal`: è una cache che si riempie mentre il
+# programma gira, e `_internal` viene rifatta da zero a ogni aggiornamento:
+# ogni nuova versione ripartirebbe a scaricarle. Da sorgenti le due cartelle
+# coincidono, quindi qui non cambia nulla.
 _PDF_ASSET_URLS = {
     "tex-svg.js": "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js",
     "mermaid.min.js": "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js",

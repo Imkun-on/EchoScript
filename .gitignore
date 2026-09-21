@@ -12,9 +12,10 @@ settings.json
 # --- Cache librerie JS per il PDF "ricco" (MathJax/Mermaid, scaricate al volo) ---
 .pdfassets/
 
-# --- Build PyInstaller (.exe) ---
+# --- Costruzione: PyInstaller (l'.exe) e Inno Setup (l'installatore) ---
 build/
 dist/
+installer/output/
 
 # --- Python ---
 __pycache__/
