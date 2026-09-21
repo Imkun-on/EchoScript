@@ -57,6 +57,8 @@ hiddenimports = ['transcriber',
                  'server.controllers', 'server.controllers.api',
                  'server.controllers.bridge',
                  'server.services', 'server.services.pipeline',
+                 'server.state', 'server.state.checkpoints',
+                 'server.state.credits', 'server.state.jobs',
                  'server.utils', 'server.utils.text']
 
 for _pacchetto in ('webview', 'faster_whisper', 'av', 'ctranslate2',
