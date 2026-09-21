@@ -1309,10 +1309,20 @@ def main() -> None:
         'EchoScript',
         _risorsa('client', 'index.html'),
         js_api=Api(),
-        # A schermo intero. Le misure restano come ripiego per i sistemi dove
-        # lo schermo intero non e' concesso, e perche' sono quelle che la
-        # finestra riprende se la si riduce.
-        fullscreen=True,
+        # Massimizzata, non a schermo intero, e la differenza si vede subito.
+        #
+        # «Schermo intero» in pywebview vuol dire senza cornice: la finestra
+        # copre tutto, compresa la barra delle applicazioni, e con la cornice
+        # spariscono anche i tre pulsanti in alto a destra. Per un lettore
+        # video va bene; per un programma con cui si lavora no, perche' per
+        # chiuderlo o metterlo da parte bisogna sapere una scorciatoia da
+        # tastiera.
+        #
+        # «Massimizzata» occupa lo stesso spazio ma resta una finestra normale:
+        # barra del titolo, riduci a icona, ingrandisci, chiudi, e la barra
+        # delle applicazioni sotto. Le misure qui sotto non sono un doppione,
+        # sono quelle a cui torna quando la si rimpicciolisce.
+        maximized=True,
         width=1180,
         height=800,
         min_size=(940, 640),
