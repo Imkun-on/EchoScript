@@ -36,6 +36,7 @@ import subprocess
 import tempfile
 
 from server.config import paths, settings
+from server.utils import text
 
 # La radice del progetto deve essere raggiungibile, altrimenti `import
 # transcriber` qui sotto non trova niente.
@@ -92,8 +93,8 @@ class RateLimitReached(EngineError):
         self.total = total
         self.done_seconds = done_seconds
         self.total_seconds = total_seconds
-        at = tx._format_timestamp(done_seconds)
-        of = tx._format_timestamp(total_seconds) if total_seconds else None
+        at = text._format_timestamp(done_seconds)
+        of = text._format_timestamp(total_seconds) if total_seconds else None
         where = f"{at} su {of}" if of else at
         super().__init__(
             "I crediti gratuiti Groq per oggi sono esauriti. La trascrizione si è "
@@ -473,21 +474,21 @@ def _ensure_dir(path: str) -> None:
     Called right before every write: on OneDrive-synced folders the directory
     can be briefly renamed/locked while syncing, which would otherwise cause a
     'No such file or directory' (Errno 2) error mid-run. Il percorso passa da
-    tx._lp: con titoli lunghi la cartella supera i 260 caratteri di Windows e
+    text._lp: con titoli lunghi la cartella supera i 260 caratteri di Windows e
     makedirs fallirebbe."""
     parent = os.path.dirname(path)
     if parent:
-        os.makedirs(tx._lp(parent), exist_ok=True)
+        os.makedirs(text._lp(parent), exist_ok=True)
 
 
 def _write(path: str, content: str, created: list[str], root: str) -> None:
     """Write a UTF-8 file and record its path relative to 'root' (for the result).
 
-    Ponte verso tx.write_text_file, che ricrea la directory e riprova una volta
+    Ponte verso text.write_text_file, che ricrea la directory e riprova una volta
     sui guasti transitori di OneDrive E applica il prefisso per i percorsi lunghi
     di Windows (_lp): quest'ultimo qui mancava, quindi un titolo di video lungo
     faceva fallire la scrittura dalla GUI mentre da CLI funzionava."""
-    tx.write_text_file(path, content, created, root)
+    text.write_text_file(path, content, created, root)
 
 
 # === HIGH-LEVEL ORCHESTRATION ===
@@ -751,7 +752,7 @@ def _translate_outputs(meta: dict, sections: list[dict], options: dict,
     # La traduzione punta alla lingua dell'INTERFACCIA: UI italiana -> italiano,
     # UI inglese -> inglese (un utente straniero vuole gli output nella sua lingua).
     target = options.get("ui_lang", "it") or "it"
-    safe_title = tx._safe_filename(meta["title"])
+    safe_title = text._safe_filename(meta["title"])
     trad_dir = os.path.join(video_dir, tx.transl_subdir(options.get("ui_lang", "it")))
     base = os.path.join(trad_dir, f"{safe_title}_{target}")
     lang_label = tx._lang_name(target, _ENGINE_LANG) or target
@@ -844,7 +845,7 @@ def _summarize_outputs(meta: dict, sections: list[dict], options: dict,
         warnings.append(_L("sum_unavail", e=e))
         return "skipped"
 
-    safe_title = tx._safe_filename(meta["title"])
+    safe_title = text._safe_filename(meta["title"])
     ui_lang = options.get("ui_lang", "it")
     sum_dir = os.path.join(video_dir, tx.summary_subdir(ui_lang))
     suffix = tx.SUMMARY_SUFFIX.get(ui_lang or "it", tx.SUMMARY_SUFFIX["it"])
@@ -955,7 +956,7 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
     _set_engine_lang(options)
     do_export = bool(options.get("export"))
 
-    safe_title = tx._safe_filename(meta["title"])
+    safe_title = text._safe_filename(meta["title"])
     video_dir = os.path.join(out_root, safe_title)
     trans_dir = os.path.join(video_dir, tx.trans_subdir(options.get("ui_lang", "it")))
     base_orig = os.path.join(trans_dir, safe_title)
@@ -1135,7 +1136,7 @@ def translate_only(meta: dict, options: dict, out_root: str, on_progress=_noop) 
     trascrizione; la traduzione usa Google Translate (o Ollama se offline)."""
     _set_engine_lang(options)
     disk_meta, segments, engine_label = _load_saved_transcript(meta, out_root)
-    video_dir = os.path.join(out_root, tx._safe_filename(disk_meta["title"]))
+    video_dir = os.path.join(out_root, text._safe_filename(disk_meta["title"]))
     sections = tx._build_sections(disk_meta, segments)
     created, warnings = [], []
     chat_client = _resolve_summary_client(options, None)
@@ -1153,7 +1154,7 @@ def summary_only(meta: dict, options: dict, out_root: str, on_progress=_noop) ->
     concluderlo in locale)."""
     _set_engine_lang(options)
     disk_meta, segments, engine_label = _load_saved_transcript(meta, out_root)
-    video_dir = os.path.join(out_root, tx._safe_filename(disk_meta["title"]))
+    video_dir = os.path.join(out_root, text._safe_filename(disk_meta["title"]))
     # La traduzione è salvata col suffisso della lingua di destinazione, che è
     # quella dell'interfaccia: cercarla sempre come "_it" significava, con la UI
     # in inglese, non trovarla mai e riassumere l'originale di nascosto.
@@ -1179,7 +1180,7 @@ def resume(meta: dict, options: dict, out_root: str, on_progress=_noop) -> dict:
     offrire di finirlo in locale."""
     _set_engine_lang(options)
     disk_meta, segments, engine_label = _load_saved_transcript(meta, out_root)
-    video_dir = os.path.join(out_root, tx._safe_filename(disk_meta["title"]))
+    video_dir = os.path.join(out_root, text._safe_filename(disk_meta["title"]))
     created, warnings = [], []
     chat_client = _resolve_summary_client(options, None)
     sections = tx._build_sections(disk_meta, segments)

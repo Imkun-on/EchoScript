@@ -39,6 +39,7 @@ import traceback
 import webview
 
 from server.config import i18n, settings
+from server.utils import text
 from server.controllers import bridge
 from server.controllers.bridge import verso_pagina as _verso_pagina
 
@@ -619,7 +620,7 @@ class Api:
         if not voci:
             _verso_pagina('erroreSorgente', i18n.t('playlist.none'))
             return
-        sottocartella = tx._safe_filename(
+        sottocartella = text._safe_filename(
             playlist.get('title') or playlist.get('channel') or 'playlist')
         self._playlist = {'title': playlist.get('title'),
                           'channel': playlist.get('channel'),
@@ -670,14 +671,14 @@ class Api:
         """
         righe = [
             ('info.channel', meta.get('channel') or '—'),
-            ('info.views', tx._format_views(meta.get('views'))),
-            ('info.date', tx._format_upload_date(meta.get('upload_date'))),
-            ('info.duration', tx._format_duration(meta.get('duration'))),
+            ('info.views', text._format_views(meta.get('views'))),
+            ('info.date', text._format_upload_date(meta.get('upload_date'))),
+            ('info.duration', text._format_duration(meta.get('duration'))),
         ]
         if meta.get('likes') is not None:
-            righe.append(('info.likes', tx._format_views(meta['likes'])))
+            righe.append(('info.likes', text._format_views(meta['likes'])))
         if meta.get('subscribers') is not None:
-            righe.append(('info.subs', tx._format_views(meta['subscribers'])))
+            righe.append(('info.subs', text._format_views(meta['subscribers'])))
         if meta.get('category'):
             righe.append(('info.category', meta['category']))
         lingua = tx._lang_name(meta.get('detected_language') or meta.get('language'),
@@ -707,11 +708,11 @@ class Api:
             'righe': [
                 {'chiave': 'info.channel', 'valore': playlist.get('channel') or '—'},
                 {'chiave': 'info.videos', 'valore': str(len(voci))},
-                {'chiave': 'info.duration', 'valore': tx._format_duration(totale)},
+                {'chiave': 'info.duration', 'valore': text._format_duration(totale)},
             ],
             'stima': self._stima({'duration': totale}),
             'voci': [{'titolo': m.get('title') or '?',
-                      'durata': tx._format_duration(m.get('duration'))} for m in voci],
+                      'durata': text._format_duration(m.get('duration'))} for m in voci],
         }
 
     def _scheda_file(self, meta: dict, percorso: str) -> dict:
@@ -722,7 +723,7 @@ class Api:
             'righe': [
                 {'chiave': 'info.file', 'valore': os.path.basename(percorso)},
                 {'chiave': 'info.duration',
-                 'valore': tx._format_duration(meta.get('duration'))},
+                 'valore': text._format_duration(meta.get('duration'))},
             ],
             'stima': self._stima(meta),
         }
@@ -746,7 +747,7 @@ class Api:
         if stima['backend'] == 'groq':
             return i18n.t('est.cost', c=f"{stima['cost_usd']:.3f}", m=modello)
         dispositivo = 'GPU' if stima.get('device') == 'cuda' else 'CPU'
-        return i18n.t('est.time', t=tx._format_duration(stima['seconds']), d=dispositivo)
+        return i18n.t('est.time', t=text._format_duration(stima['seconds']), d=dispositivo)
 
     # ── Avviare il lavoro ────────────────────────────────────────────────────
 
@@ -862,8 +863,8 @@ class Api:
         durata = int(parziale.get('duration', 0) or 0)
         if durata:
             fatti = min(fatti, durata)
-        return {'fatto': tx._format_timestamp(fatti),
-                'totale': tx._format_timestamp(durata)}
+        return {'fatto': text._format_timestamp(fatti),
+                'totale': text._format_timestamp(durata)}
 
     def esegui(self, azione: str = 'nuova') -> dict:
         """Avvia davvero il lavoro, con l'azione scelta.
@@ -1129,9 +1130,9 @@ class Api:
                        for c, f in gruppi.items()],
             'crediti': ([
                 {'chiave': 'res.credits.used',
-                 'valore': tx._format_timestamp(crediti.get('audio_seconds_used') or 0)},
+                 'valore': text._format_timestamp(crediti.get('audio_seconds_used') or 0)},
             ] + ([{'chiave': 'res.credits.left',
-                   'valore': tx._format_timestamp(residuo)}] if residuo is not None else [])
+                   'valore': text._format_timestamp(residuo)}] if residuo is not None else [])
             ) if crediti else [],
             'visiva': ({'n': visiva['count'], 'cartella': visiva.get('dir', '')}
                        if visiva.get('count') else None),
@@ -1209,7 +1210,7 @@ class Api:
         _verso_pagina('creditiFiniti', {
             'titolo': i18n.t('rate.title'),
             'testo': i18n.t('rate.msg',
-                            fatto=tx._format_timestamp(int(getattr(exc, 'done_seconds', 0) or 0)),
-                            totale=tx._format_timestamp(int(getattr(exc, 'total_seconds', 0) or 0))),
+                            fatto=text._format_timestamp(int(getattr(exc, 'done_seconds', 0) or 0)),
+                            totale=text._format_timestamp(int(getattr(exc, 'total_seconds', 0) or 0))),
             'puo_locale': self._src != '' and self._meta is not None,
         })

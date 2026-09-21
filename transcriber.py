@@ -193,114 +193,16 @@ def _print_banner() -> None:
     ))
 
 
-# === FORMATTING UTILITIES ===
-
-def _format_duration(seconds) -> str:
-    """Convert a number of seconds into 'H:MM:SS' (or 'M:SS' if under an hour).
-
-    E.g. 3725 -> '1:02:05'. If the value is not a valid number, returns '?'."""
-    try:
-        seconds = int(seconds)
-    except (ValueError, TypeError):
-        return "?"
-    h, rem = divmod(seconds, 3600)   # divmod returns (quotient, remainder)
-    m, s = divmod(rem, 60)
-    if h:
-        return f"{h}:{m:02d}:{s:02d}"
-    return f"{m}:{s:02d}"
-
-
-def _format_timestamp(seconds: float) -> str:
-    """Convert seconds (including decimals) into 'HH:MM:SS' for the timings in the text.
-
-    E.g. 75.4 -> '00:01:15'. Used in front of every transcribed sentence."""
-    total = int(seconds)
-    h, rem = divmod(total, 3600)
-    m, s = divmod(rem, 60)
-    return f"{h:02d}:{m:02d}:{s:02d}"
-
-
-def _format_views(value) -> str:
-    """Format the view count using the dot as the thousands separator (IT style).
-
-    E.g. 1234567 -> '1.234.567'. If it is not a valid number, returns it as is."""
-    try:
-        return f"{int(value):,}".replace(",", ".")
-    except (ValueError, TypeError):
-        return str(value) if value not in (None, "") else "?"
-
-
-def _format_upload_date(raw) -> str:
-    """yt-dlp provides the date as a 'YYYYMMDD' string (e.g. '20240115').
-
-    Here we transform it into 'DD/MM/YYYY'. If the format is not the expected
-    one, we return the raw value without crashing."""
-    if not raw:
-        return "?"
-    try:
-        return datetime.strptime(str(raw), "%Y%m%d").strftime("%d/%m/%Y")
-    except ValueError:
-        return str(raw)
-
-
-def _safe_filename(name: str) -> str:
-    """Clean up a title so that it is a valid file name on Windows.
-
-    Replaces the forbidden characters (\\ / : * ? \" < > |) with an underscore and
-    shortens overly long titles, so as not to break the filesystem."""
-    name = re.sub(r'[<>:"/\\|?*]', "_", name)
-    return name.strip()[:120] or "trascrizione"
-
-
-def _lp(path: str) -> str:
-    """Restituisce il percorso in forma 'extended-length' (prefisso \\\\?\\) su
-    Windows, così le operazioni su file non incappano nel vecchio limite di 260
-    caratteri (MAX_PATH): con titoli lunghi il percorso completo può superarlo e
-    open()/makedirs falliscono con FileNotFoundError. No-op su altri sistemi o se
-    il prefisso è già presente. Richiede un percorso ASSOLUTO con backslash, che
-    os.path.abspath garantisce su Windows."""
-    if os.name != "nt":
-        return path
-    abs_path = os.path.abspath(path)
-    if abs_path.startswith("\\\\?\\"):
-        return abs_path
-    if abs_path.startswith("\\\\"):          # percorso di rete \\server\share
-        return "\\\\?\\UNC" + abs_path[1:]   # -> \\?\UNC\server\share
-    return "\\\\?\\" + abs_path
-
-
-def write_text_file(path: str, content: str, created: list[str] | None = None,
-                    root: str | None = None) -> None:
-    """Scrive un file UTF-8 con LE DUE protezioni che servono su questo sistema.
-
-    Ogni scrittura dell'app passa di qui perché due guasti diversi, entrambi
-    reali, colpiscono percorsi diversi:
-
-    1. TITOLI LUNGHI (Windows): il percorso completo, che contiene il titolo del
-       video, supera facilmente il vecchio limite di 260 caratteri. Senza il
-       prefisso di `_lp()` open() fallisce con FileNotFoundError.
-    2. ONEDRIVE: durante la sincronizzazione la cartella può essere
-       rinominata/bloccata per un istante, e la scrittura fallisce con OSError
-       anche se il percorso è giusto. Si ricrea la directory e si riprova una
-       volta dopo una breve pausa.
-
-    Se `created` e `root` sono dati, il percorso del file viene aggiunto alla
-    lista in forma relativa a `root` (per l'elenco dei file prodotti)."""
-    for attempt in (1, 2):
-        try:
-            parent = os.path.dirname(path)
-            if parent:
-                os.makedirs(_lp(parent), exist_ok=True)
-            with open(_lp(path), "w", encoding="utf-8") as f:
-                f.write(content)
-            break
-        except OSError:
-            if attempt == 2:
-                raise
-            time.sleep(0.4)  # lascia finire OneDrive, poi riprova una volta
-    if created is not None and root is not None:
-        created.append(os.path.relpath(path, root).replace("\\", "/"))
-
+# === MESSA IN BELLA: sta in server/utils/text.py =============================
+#
+# Durate, date, numeri, nomi di file sicuri. Sono uscite di qui perche' le usa
+# tutto il programma e non appartengono alle trascrizioni piu' che a qualunque
+# altra cosa. Si importano per nome perche' sono funzioni, e una funzione non
+# cambia sotto i piedi a nessuno.
+from server.utils.text import (
+    _format_duration, _format_timestamp, _format_upload_date, _format_views,
+    _lp, _safe_filename, write_text_file,
+)
 
 # === RATE LIMIT + CHECKPOINT (ripresa dei video lunghi su Groq) =============
 

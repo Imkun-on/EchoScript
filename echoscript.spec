@@ -56,7 +56,8 @@ hiddenimports = ['transcriber',
                  'server.config.strings',
                  'server.controllers', 'server.controllers.api',
                  'server.controllers.bridge',
-                 'server.services', 'server.services.pipeline']
+                 'server.services', 'server.services.pipeline',
+                 'server.utils', 'server.utils.text']
 
 for _pacchetto in ('webview', 'faster_whisper', 'av', 'ctranslate2',
                    'onnxruntime', 'tokenizers', 'huggingface_hub', 'yt_dlp',
