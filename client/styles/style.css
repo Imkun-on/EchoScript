@@ -209,6 +209,13 @@ html, body {
   padding: var(--s5) var(--s5) var(--s4);
   display: flex; flex-direction: column; gap: var(--s4);
 }
+/* A schermo intero la finestra puo' essere larga il doppio di quanto serve, e
+ * senza un limite i riquadri si stirerebbero fino a diventare strisce: tre
+ * menu a tendina larghi mezzo metro, un titolo solo in cima a un campo lungo
+ * come tutto lo schermo. Si mette un tetto alla larghezza e si tiene il
+ * contenuto al centro, cosi' su uno schermo grande si legge come su uno
+ * piccolo invece di dover spostare gli occhi da un bordo all'altro. */
+.corpo > * { width: 100%; max-width: 1400px; margin-inline: auto; }
 
 .intestazione h1 {
   margin: 0 0 5px; font-size: 25px; font-weight: 800; letter-spacing: -.5px;
@@ -447,15 +454,30 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 
 .due-colonne { display: grid; grid-template-columns: 1.1fr 1fr; gap: var(--s4); flex: 1; min-height: 0; }
 
-/* Le due postazioni scorrono: i modelli, la chiave, il modulo e il diario uno
- * sotto l'altro sono piu' alti di una finestra bassa, e senza scorrimento
- * l'ultimo pezzo sparirebbe sotto il bordo senza che niente lo faccia
- * sospettare. I riquadri in cima non si stirano — sono impostazioni, non
- * pannelli da riempire — e lo spazio che avanza va al lavoro. */
+/* Le due postazioni ci stanno intere, senza scorrere.
+ *
+ * Prima scorrevano, perche' la finestra era alta 800 pixel e i pezzi impilati
+ * erano piu' alti di cosi'. Ma una sezione che scorre ha un difetto che si
+ * paga tutti i giorni: quello che sta sotto il bordo non si vede e niente lo
+ * fa sospettare, quindi chi apre «Locale» per la prima volta non sa che sotto
+ * i modelli c'e' dell'altro.
+ *
+ * Adesso la finestra si apre a schermo intero e lo spazio c'e'. Invece di
+ * lasciar scorrere si divide: i riquadri delle impostazioni tengono l'altezza
+ * che gli serve, ne' piu' ne' meno, e tutto quello che avanza va al lavoro.
+ *
+ * Se lo spazio non bastasse lo stesso, su uno schermo molto basso, a scorrere
+ * sono gli elenchi DENTRO i riquadri (la scheda della sorgente, il diario),
+ * che hanno gia' il loro scorrimento e una barra che si vede. Scorre la cosa
+ * che ha troppo contenuto, non la pagina intera. */
 .sezione[data-sez="locale"],
-.sezione[data-sez="cloud"] { overflow-y: auto; padding-right: 4px; }
+.sezione[data-sez="cloud"] { overflow: hidden; }
 .sezione[data-sez="locale"] > .vetro,
 .sezione[data-sez="cloud"]  > .vetro { flex: 0 0 auto; }
+.sezione[data-sez="locale"] > .intestazione,
+.sezione[data-sez="cloud"]  > .intestazione { flex: 0 0 auto; }
+.sezione[data-sez="locale"] > .slot-lavoro,
+.sezione[data-sez="cloud"]  > .slot-lavoro { flex: 1; min-height: 0; }
 
 /* Lo scomparto in cui la postazione atterra, e la postazione stessa: due
  * colonne di riquadri con lo stesso passo del resto della sezione, cosi'
@@ -463,10 +485,23 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 .slot-lavoro, #postazione {
   display: flex; flex-direction: column; gap: var(--s4); min-height: 0;
 }
-/* Sorgente e diario hanno bisogno di un'altezza loro: dentro una sezione che
- * scorre non c'e' piu' un "resto dello schermo" da prendersi, e senza questo
- * il diario vuoto si ridurrebbe a una fessura. */
-#postazione .due-colonne { flex: 0 0 auto; min-height: 300px; }
+/* Sorgente e diario si prendono tutto lo spazio che avanza.
+ *
+ * Avevano un'altezza fissa di 300 pixel perche' la sezione scorreva e non
+ * esisteva un "resto dello schermo" da cui attingere: senza quel numero il
+ * diario vuoto si sarebbe ridotto a una fessura. Adesso il resto dello schermo
+ * c'e' di nuovo, quindi il numero fisso se ne va e al suo posto c'e' un
+ * minimo, che serve solo a non far collassare i due riquadri su una finestra
+ * ridotta a mano. */
+/* Zero, e non un minimo: e' l'ultimo riquadro della colonna, quindi e' lui a
+ * pagare quando lo spazio non basta. Con un minimo di 240 pixel, su una
+ * finestra bassa, non si restringeva abbastanza e veniva tagliato dal bordo:
+ * il fondo dei due riquadri finiva fuori schermo, e senza scorrimento non
+ * c'era modo di arrivarci. Adesso si stringe finche' serve, e a scorrere sono
+ * gli elenchi che ci stanno dentro, che hanno la loro barra visibile. */
+#postazione .due-colonne { flex: 1; min-height: 0; }
+#postazione { flex: 1; min-height: 0; }
+.slot-lavoro { flex: 1; min-height: 0; }
 
 .titolo-pannello {
   display: flex; align-items: center; gap: var(--s2);
