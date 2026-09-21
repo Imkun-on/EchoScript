@@ -330,3 +330,25 @@ def load_existing_translation(out_root: str, title: str, target: str = "it"):
             if sections:
                 return sections
     return None
+
+
+# Etichette leggibili delle fasi, per i messaggi di ripresa (CLI e GUI).
+STAGE_LABELS_IT = {
+    "transcription": "trascrizione", "translation": "traduzione", "summary": "riassunto",
+}
+def resume_info_text(meta: dict) -> str:
+    """Breve testo «da dove riprende» per il video, o "" se non c'è nulla.
+
+    Es. "riassunto — sezione 8/20". Usato nei menu CLI/GUI per spiegare all'utente
+    cosa farà «Riprendi da dove si è interrotto»."""
+    plan = resume_plan(load_state(meta))
+    stage = plan.get("stage")
+    if not stage:
+        return ""
+    labels = STAGE_LABELS_IT
+    name = labels.get(stage, stage)
+    done, total = plan.get("done", 0), plan.get("total", 0)
+    if total and plan.get("status") == STAGE_PARTIAL:
+        sec = "sezione"
+        return f"{name} — {sec} {done + 1}/{total}"
+    return name

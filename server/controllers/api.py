@@ -42,10 +42,14 @@ from server.config import i18n, settings
 from server.utils import text
 from server.controllers import bridge
 from server.controllers.bridge import verso_pagina as _verso_pagina
+from server.config import settings
+from server.services import estimate
+from server.sources import metadata
+from server.state import checkpoints, jobs
+from server.utils import media, ollama
 
 
 # I due nomi del motore restano vuoti finche' non li riempie carica_motore().
-tx = None                   # transcriber.py: gli aiutanti condivisi con la CLI
 engine = None               # il direttore d'orchestra
 RISULTATI = ''              # dove finiscono le trascrizioni: lo sa engine
 
@@ -56,14 +60,14 @@ MOTORE_PRONTO = threading.Event()
 
 # Le tappe del caricamento, con quanto pesa ciascuna sulla barra.
 #
-# I numeri sono misurati, non scelti a occhio: importare transcriber costa
-# cinque volte quanto importare il ponte con la finestra, perche' si porta
-# dietro Groq, yt-dlp e Rich. Dando a ogni tappa la stessa fetta la barra
-# correrebbe fino a meta' e poi si pianterebbe, che e' esattamente il difetto
-# che si voleva togliere.
+# I numeri sono misurati, non scelti a occhio: importare il motore costa cinque
+# volte quanto importare il ponte con la finestra, perche' si porta dietro Groq,
+# yt-dlp e Rich. Dando a ogni tappa la stessa fetta la barra correrebbe fino a
+# meta' e poi si pianterebbe, che e' esattamente il difetto che si voleva
+# togliere.
 _TAPPA_PARTENZA = 0.15
-_TAPPA_MOTORE = 0.55        # transcriber: il tratto lungo
-_TAPPA_ORCHESTRA = 0.70     # engine: sopra transcriber costa quasi niente
+_TAPPA_MOTORE = 0.55        # i moduli pesanti: il tratto lungo
+_TAPPA_ORCHESTRA = 0.70     # il direttore d'orchestra, che sopra costa poco
 _TAPPA_PRONTO = 0.80        # da qui in poi riempie la pagina
 
 
@@ -82,16 +86,21 @@ def carica_motore() -> None:
         l'errore vero viene a galla invece di restare nascosto dietro
         un'attesa infinita.
     """
-    global tx, engine, RISULTATI
+    global engine, RISULTATI
     try:
         _avanzamento(_TAPPA_PARTENZA)
-        import transcriber as _transcriber
-        tx = _transcriber
-        riempi_cataloghi()
-        _avanzamento(_TAPPA_MOTORE)
 
+        # Importare il direttore d'orchestra tira dentro tutto il resto: Groq,
+        # yt-dlp, Rich, faster-whisper. E' il tratto lungo dell'avvio, e l'unico
+        # che valga la pena raccontare sulla barra.
         from server.services import pipeline as _pipeline
         engine = _pipeline
+        _avanzamento(_TAPPA_MOTORE)
+
+        # Gli elenchi dei modelli: si leggono dalle impostazioni, quindi
+        # costano niente. Stanno dopo l'import pesante solo per tenere in
+        # ordine il racconto della barra.
+        riempi_cataloghi()
         _avanzamento(_TAPPA_ORCHESTRA)
 
         # Fuori dall'eseguibile e' la stessa cartella della riga di comando,
@@ -153,22 +162,22 @@ _GROQ_VISTA: list = []
 
 
 def riempi_cataloghi() -> None:
-    """Costruisce gli elenchi di modelli leggendoli da transcriber.py.
+    """Costruisce gli elenchi dei modelli leggendoli dalle impostazioni.
 
-    Ogni voce porta con se' la chiave del testo che la descrive
-    ('om.text.2', 'gm.vis.1'): cosi' aggiungere un modello resta una riga nel
-    catalogo di transcriber e una nel file dei testi, senza toccare il codice
-    che disegna i menu.
+    Ogni voce si porta dietro la chiave del testo che la descrive
+    ('om.text.2', 'gm.vis.1'). E' il motivo per cui aggiungere un modello resta
+    una riga nelle impostazioni e una nel file dei testi: il codice che disegna
+    i menu non sa quali modelli esistono, li chiede.
     """
     global _OLLAMA_TESTO, _OLLAMA_VISTA, _GROQ_TESTO, _GROQ_VISTA
     _OLLAMA_TESTO = [(nome, ram, f'om.text.{k}')
-                     for k, (nome, ram, _d) in tx.OLLAMA_TEXT_MODELS.items()]
+                     for k, (nome, ram, _d) in settings.OLLAMA_TEXT_MODELS.items()]
     _OLLAMA_VISTA = [(nome, ram, f'om.vis.{k}')
-                     for k, (nome, ram, _d) in tx.OLLAMA_VISION_MODELS.items()]
+                     for k, (nome, ram, _d) in settings.OLLAMA_VISION_MODELS.items()]
     _GROQ_TESTO = [(nome, f'gm.text.{k}')
-                   for k, (nome, _d) in tx.GROQ_TEXT_MODELS.items()]
+                   for k, (nome, _d) in settings.GROQ_TEXT_MODELS.items()]
     _GROQ_VISTA = [(nome, f'gm.vis.{k}')
-                   for k, (nome, _d) in tx.GROQ_VISION_MODELS.items()]
+                   for k, (nome, _d) in settings.GROQ_VISION_MODELS.items()]
 
 
 
@@ -437,7 +446,7 @@ class Api:
         Serve solo per i ✓ nei menu. Se Ollama non gira la risposta e' None e
         non succede nulla: e' un'informazione in piu', non un requisito.
         """
-        presenti = tx._ollama_installed_models()
+        presenti = ollama._ollama_installed_models()
         if not presenti:
             return
         self._ollama_presenti = presenti
@@ -465,7 +474,7 @@ class Api:
         def spunta(nome: str) -> str:
             if self._ollama_presenti is None:
                 return ''
-            return ' ✓' if tx._ollama_has_model(nome, self._ollama_presenti) else ''
+            return ' ✓' if ollama._ollama_has_model(nome, self._ollama_presenti) else ''
 
         # La memoria richiesta e' un inciso, non una voce a se': fra parentesi
         # attaccata al nome. Con un separatore la riga finiva con tre stacchi in
@@ -632,10 +641,10 @@ class Api:
         """Apre il selettore di file del sistema per un audio o un video.
 
         I formati accettati sono esattamente quelli che accetta la riga di
-        comando: il filtro si costruisce da ``tx.AUDIO_EXTENSIONS``, cosi'
+        comando: il filtro si costruisce da ``settings.AUDIO_EXTENSIONS``, cosi'
         aggiungerne uno vale per tutt'e due senza toccare questo file.
         """
-        estensioni = ' '.join(f'*{e}' for e in sorted(tx.AUDIO_EXTENSIONS))
+        estensioni = ' '.join(f'*{e}' for e in sorted(settings.AUDIO_EXTENSIONS))
         try:
             scelti = bridge.attuale().create_file_dialog(
                 _DLG_APRI, allow_multiple=False,
@@ -646,7 +655,7 @@ class Api:
             return {'ok': True, 'annullato': True}
 
         percorso = scelti[0]
-        meta = tx.local_file_meta(percorso)
+        meta = metadata.local_file_meta(percorso)
         self._meta, self._src, self._playlist = meta, percorso, None
         return {'ok': True, 'scheda': self._scheda_file(meta, percorso)}
 
@@ -681,7 +690,7 @@ class Api:
             righe.append(('info.subs', text._format_views(meta['subscribers'])))
         if meta.get('category'):
             righe.append(('info.category', meta['category']))
-        lingua = tx._lang_name(meta.get('detected_language') or meta.get('language'),
+        lingua = media._lang_name(meta.get('detected_language') or meta.get('language'),
                               i18n.LINGUA)
         if lingua:
             righe.append(('info.language', lingua))
@@ -743,7 +752,7 @@ class Api:
                                     for m in self._playlist['items'])}
         motore = self.scelte['motore']
         modello = self.scelte['groq'] if motore == 'groq' else self.scelte['whisper']
-        stima = tx.estimate_job(meta, motore, modello)
+        stima = estimate.estimate_job(meta, motore, modello)
         if stima['backend'] == 'groq':
             return i18n.t('est.cost', c=f"{stima['cost_usd']:.3f}", m=modello)
         dispositivo = 'GPU' if stima.get('device') == 'cuda' else 'CPU'
@@ -810,7 +819,7 @@ class Api:
             return {'ok': True, 'stato': 'pronto'}
 
         meta = self._meta
-        if tx.transcription_exists(RISULTATI, meta['title']):
+        if jobs.transcription_exists(RISULTATI, meta['title']):
             voci = [{'azione': 'nuova', 'icona': 'rifai', 'tono': 'attenzione',
                      'titolo': i18n.t('already.again'),
                      'desc': i18n.t('already.again.desc')}]
@@ -829,8 +838,8 @@ class Api:
             return {'ok': True, 'stato': 'gia', 'titolo': i18n.t('already.title'),
                     'desc': i18n.t('already.desc'), 'voci': voci}
 
-        parziale = (tx.load_checkpoint(meta) if self.scelte['motore'] == 'groq'
-                    else tx.load_local_checkpoint(meta))
+        parziale = (checkpoints.load_checkpoint(meta) if self.scelte['motore'] == 'groq'
+                    else checkpoints.load_local_checkpoint(meta))
         if parziale:
             return {'ok': True, 'stato': 'ripresa', 'titolo': i18n.t('resume.title'),
                     'desc': i18n.t('resume.desc'),
@@ -857,7 +866,7 @@ class Api:
         if 'done_seconds' in parziale:
             fatti = int(parziale.get('done_seconds', 0))
         else:
-            blocco = parziale.get('chunk_seconds') or tx.CHUNK_SECONDS
+            blocco = parziale.get('chunk_seconds') or settings.CHUNK_SECONDS
             fatti = int(parziale.get('done_chunks', 0)) * blocco
         durata = int(parziale.get('duration', 0) or 0)
         if durata:
@@ -884,8 +893,8 @@ class Api:
 
         if azione == 'ricomincia':
             meta = self._meta
-            (tx.delete_local_checkpoint if self.scelte['motore'] == 'local'
-             else tx.delete_checkpoint)(meta)
+            (checkpoints.delete_local_checkpoint if self.scelte['motore'] == 'local'
+             else checkpoints.delete_checkpoint)(meta)
             azione = 'nuova'
 
         if azione in ('traduci', 'riassumi', 'riprendi_post'):
@@ -1043,7 +1052,7 @@ class Api:
             # video saltato non deve azzerare la barra e riscrivere il piano per
             # poi non fare niente, che a schermo si legge come un lavoro partito
             # e subito bloccato.
-            if tx.transcription_exists(radice, meta['title']):
+            if jobs.transcription_exists(radice, meta['title']):
                 saltati.append(meta['title'])
                 continue
 

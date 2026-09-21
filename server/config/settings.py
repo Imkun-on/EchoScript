@@ -154,6 +154,13 @@ AUDIO_BITRATE = _env_str("ECHOSCRIPT_BITRATE", "64k")          # chunk bitrate (
 MAX_RETRIES = _env_int("ECHOSCRIPT_MAX_RETRIES", 3)            # attempts per chunk before giving up
 # Audio language: None = auto-detect (Whisper). Force with e.g. "it"/"en" via the
 # ECHOSCRIPT_AUDIO_LANG env var or, per-run, the GUI/CLI selector.
+# Il valore che vuol dire "usa quella scritta qui sopra".
+#
+# Serve perche' None e' gia' preso: None significa "riconosci da sola che
+# lingua e'". Senza un terzo valore non ci sarebbe modo di distinguere
+# "lasciami decidere" da "non lo so", che sono due richieste diverse.
+_USE_CONFIG = object()
+
 LANGUAGE = _env_opt("ECHOSCRIPT_AUDIO_LANG")
 # Word-level timestamps: ask Groq/faster-whisper for per-WORD timings (enables
 # precise subtitles later). On by default; disable with ECHOSCRIPT_WORD_TIMESTAMPS=0.

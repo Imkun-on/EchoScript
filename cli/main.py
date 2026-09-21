@@ -40,6 +40,18 @@
 # older Python versions without runtime errors.
 from __future__ import annotations
 
+import os as _os
+import sys as _sys
+
+# La radice del progetto raggiungibile anche lanciando `python cli/main.py`.
+#
+# Senza, Python cerca i moduli solo accanto a questo file e dentro cli/ non
+# c'e' nessun server/. Le due righe qui sotto risalgono di una cartella e la
+# mettono in cima all'elenco dei posti dove cercare.
+_RADICE = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _RADICE not in _sys.path:
+    _sys.path.insert(0, _RADICE)
+
 # --- Python standard library (already included, no installation) ---
 import os                                          # environment variables, paths, files
 import re                                          # regular expressions (file name cleanup)
@@ -90,23 +102,15 @@ if getattr(sys, "frozen", False):
     _bundle_dir = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
     os.environ["PATH"] = _bundle_dir + os.pathsep + os.environ.get("PATH", "")
 
-# === CONSOLE AND THEME ===
-# We define a small palette of style names so that in the rest of the code we
-# write [info]...[/info] instead of repeating the colors everywhere.
-_theme = Theme({
-    "info": "bright_cyan",
-    "success": "bright_green",
-    "warning": "yellow",
-    "error": "bold red",
-    "title": "bold bright_cyan",
-    "phase": "bold bright_blue",
-    "dim_label": "dim",
-})
-console = Console(theme=_theme)
-
-# Symbols used in messages (✓ ✗ → •). Keeping them here makes them easy to change.
-SYM_OK, SYM_FAIL, SYM_ARROW, SYM_DOT = "✓", "✗", "→", "•"
-
+# === LA CONSOLE: sta in server/utils/console.py ==============================
+#
+# Una sola per tutti e due i modi di usare il programma: quando gira dentro una
+# finestra, e' la finestra a dirottare l'uscita standard e a raccogliere queste
+# righe per il diario. Chi scrive il codice del motore non deve sapere chi lo
+# sta guardando.
+from server.utils.console import (
+    SYM_ARROW, SYM_DOT, SYM_FAIL, SYM_OK, console,
+)
 
 # === LE MANOPOLE: stanno in server/config/settings.py ========================
 #
@@ -139,18 +143,24 @@ from server.config.settings import (
 )
 
 # === GRACEFUL SHUTDOWN ===
-# A flag that becomes True on the first Ctrl+C: the loops check it to stop in an
-# orderly way. On the second Ctrl+C we exit immediately.
-_interrupted = False
-
-
 def _signal_handler(signum, frame):
-    """Called automatically when the user presses Ctrl+C."""
-    global _interrupted
-    if _interrupted:
+    """Chiamata da sola quando si preme Ctrl+C.
+
+    La prima volta non ferma niente di brutale: segna che si vuole smettere e
+    lascia finire il pezzo in corso. Il motivo e' che in mezzo a un pezzo c'e'
+    quasi sempre una scrittura su disco, e interromperla a meta' lascia un file
+    rotto che poi nessuno capisce da dove sia uscito.
+
+    La seconda volta si esce subito, perche' a quel punto chi preme lo sta
+    chiedendo sul serio.
+
+    La bandiera non sta qui ma in server/utils/contract.py, perche' a doverla
+    LEGGERE sono le funzioni di lavoro, che di tastiere non sanno niente.
+    """
+    if fermarsi():
         console.print("\n[error]Interruzione forzata.[/error]")
         os._exit(1)
-    _interrupted = True
+    chiedi_di_fermarsi()
     console.print("\n[warning]Interruzione richiesta, completo il passaggio in corso...[/warning]")
 
 
@@ -218,6 +228,7 @@ from server.utils.ollama import (
     _check_ollama, _ollama_has_model, _ollama_installed_models,
 )
 from server.utils.contract import (
+    chiedi_di_fermarsi, fermarsi,
     GroqRateLimit, MediaError, TranscriptionInterrupted, _is_rate_limit,
     _never_stop, _noop_progress,
 )
@@ -507,32 +518,12 @@ def choose_existing_action(title: str, can_resume: bool = False,
         console.print("[warning]Scelta non valida, riprova.[/warning]")
 
 
-# Etichette leggibili delle fasi, per i messaggi di ripresa (CLI e GUI).
-STAGE_LABELS_IT = {
-    "transcription": "trascrizione", "translation": "traduzione", "summary": "riassunto",
-}
-STAGE_LABELS_EN = {
-    "transcription": "transcription", "translation": "translation", "summary": "summary",
-}
-
-
-def resume_info_text(meta: dict) -> str:
-    """Breve testo «da dove riprende» per il video, o "" se non c'è nulla.
-
-    Es. "riassunto — sezione 8/20". Usato nei menu CLI/GUI per spiegare all'utente
-    cosa farà «Riprendi da dove si è interrotto»."""
-    plan = resume_plan(load_state(meta))
-    stage = plan.get("stage")
-    if not stage:
-        return ""
-    labels = STAGE_LABELS_IT
-    name = labels.get(stage, stage)
-    done, total = plan.get("done", 0), plan.get("total", 0)
-    if total and plan.get("status") == STAGE_PARTIAL:
-        sec = "sezione"
-        return f"{name} — {sec} {done + 1}/{total}"
-    return name
-
+# === temporaneo ==============================================================
+#
+# temporaneo
+from server.state.jobs import (
+    STAGE_LABELS_IT, resume_info_text,
+)
 
 def init_run_state(meta: dict, backend: str, want_translate: bool,
                    want_summary: bool) -> dict:
@@ -859,7 +850,7 @@ def _cli_download_audio(url: str, workdir: str) -> str | None:
     try:
         with progress:
             return download_audio(url, workdir, on_progress,
-                                  should_stop=lambda: _interrupted)
+                                  should_stop=fermarsi)
     except KeyboardInterrupt:
         return None
     except MediaError as e:
@@ -895,7 +886,7 @@ def _cli_split_audio(audio_path: str, duration: float, workdir: str) -> list[tup
 
         try:
             return split_audio(audio_path, duration, workdir, on_progress,
-                               should_stop=lambda: _interrupted)
+                               should_stop=fermarsi)
         except MediaError as e:
             # Come gli altri wrapper `_cli_*`: il guasto si stampa in rosso e si
             # restituisce il vuoto, che la pipeline sa gia' trattare come "questo
@@ -907,139 +898,13 @@ def _cli_split_audio(audio_path: str, duration: float, workdir: str) -> list[tup
 
 # === PHASE 3: TRANSCRIPTION WITH GROQ ===
 
-# Sentinel telling a function to fall back to the module-level settings.LANGUAGE config
-# (we cannot use None for that, since None is itself a valid value = "auto-detect").
-_USE_CONFIG = object()
-
-
-def _coerce(obj, key):
-    """Read 'key' from an item that may be a dict OR an object (the Groq SDK
-    returns both depending on version): obj['key'] if a mapping, else
-    getattr(obj, key)."""
-    if isinstance(obj, dict):
-        return obj.get(key)
-    return getattr(obj, key, None)
-
-
-def _extract_words(result) -> list[dict]:
-    """Normalize Groq's per-word timestamps (when requested) to a flat list of
-    {word, start, end}. Returns [] if the response carries no word timings."""
-    raw = getattr(result, "words", None) or []
-    words = []
-    for w in raw:
-        txt = _coerce(w, "word")
-        start, end = _coerce(w, "start"), _coerce(w, "end")
-        if txt is None or start is None or end is None:
-            continue
-        words.append({"word": str(txt), "start": float(start), "end": float(end)})
-    return words
-
-
-def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
-                      return_language: bool = False, language=_USE_CONFIG,
-                      want_words: bool | None = None, on_headers=None):
-    """Send ONE audio chunk to Groq and return the list of its segments.
-
-    Uses response_format='verbose_json' to receive, in addition to the text, the
-    start/end timestamps of each sentence ('segments'). 'prompt' contains the
-    tail of the previous transcription: giving Whisper a bit of context improves
-    continuity (proper names, terminology) from one chunk to the next.
-    Retries up to MAX_RETRIES times in case of a network/API error.
-
-    'language' forces the audio language (e.g. 'it'/'en'); the _USE_CONFIG
-    sentinel means "use the settings.LANGUAGE config" (None there = auto-detect).
-    'want_words' requests per-word timestamps (defaults to the WORD_TIMESTAMPS
-    config); when on, each segment also carries a 'words' list (start/end/word).
-
-    'on_headers' (optional): if given, the call uses the raw response and passes
-    its HTTP headers to on_headers(headers) — so the engine can read the
-    x-ratelimit-* budget. None (the CLI default) keeps the plain call unchanged.
-
-    If return_language=True, returns (segments, language) where 'language' is the
-    ISO code Whisper auto-detected (e.g. 'en'/'it'), otherwise just the segments
-    (backward-compatible default for the CLI)."""
-    lang_opt = settings.LANGUAGE if language is _USE_CONFIG else language
-    words_on = WORD_TIMESTAMPS if want_words is None else want_words
-    granularities = ["segment", "word"] if words_on else ["segment"]
-
-    def _ret(segs, lang):
-        return (segs, lang) if return_language else segs
-
-    def _attach_words(seg_start: float, seg_end: float, words: list[dict]) -> list[dict]:
-        """Pick the words whose start falls inside this segment's [start, end)."""
-        return [w for w in words if seg_start - 0.05 <= w["start"] < seg_end + 0.05]
-
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            with open(chunk_path, "rb") as f:
-                params = dict(
-                    file=(os.path.basename(chunk_path), f.read()),
-                    model=settings.GROQ_MODEL,
-                    response_format="verbose_json",
-                    timestamp_granularities=granularities,
-                    language=lang_opt,            # None = auto-detection
-                    prompt=prompt[-400:],         # last ~400 characters as context
-                    temperature=0.0,             # 0 = more deterministic/faithful output
-                )
-                if on_headers is not None:
-                    # Raw response so the caller can read the x-ratelimit-* headers
-                    # (the Groq "credits"); .parse() yields the same parsed object.
-                    # Header reading must NEVER cost us the transcription: on any
-                    # unexpected SDK error (but not rate-limit/auth) we fall back to
-                    # the plain call and simply skip the credit info.
-                    try:
-                        raw = client.audio.transcriptions.with_raw_response.create(**params)
-                    except Exception as raw_err:
-                        rmsg = str(raw_err)
-                        if _is_rate_limit(rmsg) or "401" in rmsg or "403" in rmsg:
-                            raise
-                        result = client.audio.transcriptions.create(**params)
-                    else:
-                        try:
-                            on_headers(raw.headers)
-                        except Exception:
-                            pass
-                        # Crediti: registra i limiti del modello di trascrizione
-                        # (a costo zero, dalla risposta che stiamo già leggendo).
-                        record_rate_limits(settings.GROQ_MODEL, raw.headers)
-                        result = raw.parse()
-                else:
-                    result = client.audio.transcriptions.create(**params)
-            lang = getattr(result, "language", None)
-            # result.segments is a list of objects with .start, .end, .text
-            segments = getattr(result, "segments", None)
-            if segments is None:
-                # If for some reason there are no segments, we fall back to the whole text.
-                return _ret([{"start": 0.0, "end": 0.0, "text": getattr(result, "text", "").strip()}], lang)
-            words = _extract_words(result) if words_on else []
-            out_segs = []
-            for s in segments:
-                ss, se = float(s["start"]), float(s["end"])
-                seg = {"start": ss, "end": se, "text": s["text"].strip()}
-                if words:
-                    seg["words"] = _attach_words(ss, se, words)
-                out_segs.append(seg)
-            return _ret(out_segs, lang)
-        except GroqRateLimit:
-            raise
-        except Exception as e:
-            msg = str(e)
-            # Limite Groq (429 / token-al-giorno): inutile insistere, fermiamoci
-            # subito così chi chiama può salvare un checkpoint e riprendere dopo.
-            if _is_rate_limit(msg):
-                raise GroqRateLimit(msg)
-            # Authentication/access errors (401/403): there is NO point retrying,
-            # they do not resolve on their own. We stop immediately with a clear message.
-            if "401" in msg or "403" in msg or "invalid_api_key" in msg:
-                console.print(f"  [error]Accesso a Groq negato (chiave/rete): {e}[/error]")
-                return _ret([], None)
-            if attempt == MAX_RETRIES:
-                console.print(f"  [error]Blocco fallito dopo {MAX_RETRIES} tentativi: {e}[/error]")
-                return _ret([], None)
-            # Increasing wait between one attempt and the next (linear backoff).
-            time.sleep(2 * attempt)
-    return _ret([], None)
-
+# === LA TRASCRIZIONE SU GROQ: sta in server/transcription/groq_api.py ========
+#
+# Un blocco di audio alla volta verso i server di Groq, e cosa fare quando
+# la risposta e' «hai finito i crediti per oggi», che non e' un guasto.
+from server.transcription.groq_api import (
+    _coerce, _extract_words, _transcribe_chunk,
+)
 
 def transcribe(client: Groq, chunks: list[tuple[float, str]],
                start_index: int = 0, prior_segments: list | None = None,
@@ -1074,7 +939,7 @@ def transcribe(client: Groq, chunks: list[tuple[float, str]],
         task_id = progress.add_task(f"Invio blocco {start_index + 1}/{n} a Groq",
                                     total=n, completed=start_index)
         for i in range(start_index, n):
-            if _interrupted:
+            if fermarsi():
                 break
             offset, path = chunks[i]
             # We update the description BEFORE the call: the rich spinner keeps
@@ -1109,141 +974,12 @@ def transcribe(client: Groq, chunks: list[tuple[float, str]],
 
 # === LOCAL BACKEND: TRANSCRIPTION WITH faster-whisper ===
 
-def _resolve_device() -> tuple[str, str]:
-    """Pick (device, compute_type) for faster-whisper, honoring the config.
-
-    LOCAL_DEVICE 'auto' (the default) selects CUDA when a GPU is available (5-20x
-    faster), otherwise CPU. An empty LOCAL_COMPUTE_TYPE auto-picks the fast,
-    low-loss default for the device: float16 on GPU, int8 on CPU. Both can be
-    forced via .env (ECHOSCRIPT_DEVICE / ECHOSCRIPT_COMPUTE_TYPE)."""
-    device = LOCAL_DEVICE.strip().lower()
-    if device in ("", "auto"):
-        device = "cpu"
-        try:
-            import torch  # optional: only present if the user installed it
-            if torch.cuda.is_available():
-                device = "cuda"
-        except Exception:
-            pass
-    compute = LOCAL_COMPUTE_TYPE.strip() or ("float16" if device == "cuda" else "int8")
-    return device, compute
-
-
-def transcribe_local(model_name: str, audio_path: str, duration: float,
-                     on_progress=_noop_progress, should_stop=_never_stop,
-                     language=_USE_CONFIG, meta: dict | None = None,
-                     resume_cp: dict | None = None, workdir: str | None = None):
-    """Transcribe the entire audio LOCALLY with faster-whisper (no data over the network).
-
-    Returns (segments, detected_language). Solleva MediaError se il modello non
-    si carica o la trascrizione fallisce.
-
-    Unlike Groq, no splitting is needed: faster-whisper processes the whole file
-    and returns the segments incrementally (a generator), so progress can be
-    reported as we go: `on_progress` riceve il secondo di audio raggiunto sul
-    totale della durata.
-
-    'language' forza la lingua dell'audio; il default `_USE_CONFIG` significa
-    "usa settings.LANGUAGE dalla configurazione" (None sarebbe ambiguo: vale già
-    "autorileva"). `should_stop()` interrompe il ciclo a fine segmento.
-
-    RESUME: if 'meta' is given, the partial result is checkpointed every
-    LOCAL_CHECKPOINT_EVERY seconds of audio. If a matching checkpoint exists (and
-    'workdir' is available for the trimmed file), we trim the audio from the saved
-    point with ffmpeg, transcribe only the remainder, and shift its timestamps
-    back, so an interrupted long run resumes instead of starting over. Se il
-    ciclo viene fermato da `should_stop`, il parziale resta salvato per la
-    ripresa; se arriva in fondo, il checkpoint viene cancellato.
-
-    PRIVACY: on the first use of a model, faster-whisper downloads its "weights"
-    from HuggingFace (once only, then they stay cached). The AUDIO, however, is
-    never sent anywhere: the transcription happens on your PC.
-
-    Versione senza interfaccia. Wrapper CLI: `_cli_transcribe_local`."""
-    # Silence the HuggingFace warning about symlinks (irrelevant: the cache works
-    # anyway). It must be set BEFORE importing faster-whisper.
-    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
-    # "Lazy" import: only those who use the local backend need faster-whisper.
-    try:
-        from faster_whisper import WhisperModel
-    except ImportError:
-        raise MediaError("faster-whisper non installato. Esegui: pip install faster-whisper")
-
-    if language is _USE_CONFIG:
-        language = settings.LANGUAGE
-
-    # Device/precision: GPU (CUDA) when available, else CPU (see _resolve_device).
-    device, compute_type = _resolve_device()
-    dev_note = "GPU (CUDA)" if device == "cuda" else "CPU"
-
-    # Resume point (if a matching checkpoint exists): reuse prior segments and feed
-    # faster-whisper only the not-yet-transcribed tail of the audio.
-    start_offset, all_segments, detected = _local_resume_point(model_name, duration, resume_cp)
-    transcribe_path = audio_path
-    if start_offset > 0:
-        if workdir is None:
-            start_offset, all_segments, detected = 0.0, [], None  # cannot trim: full re-run
-        else:
-            try:
-                transcribe_path = _trim_audio(audio_path, start_offset, workdir)
-            except Exception:
-                start_offset, all_segments, detected = 0.0, [], None  # trim failed: full re-run
-
-    # Loading the model (on first use it downloads the weights) e avvio: il
-    # chiamante mostra l'attesa come preferisce (spinner CLI, stato nella GUI).
-    note = msg("resume_from", ts=_format_timestamp(start_offset)) if start_offset > 0 else ""
-    on_progress("transcribe", None, None,
-                msg("model_load", model=model_name, dev=dev_note, note=note))
-    try:
-        model = WhisperModel(model_name, device=device, compute_type=compute_type)
-        # transcribe() returns (segment_generator, info). The segments are produced
-        # as the audio is processed. vad_filter skips the silences; word_timestamps
-        # asks for per-word timings (so segments carry a 'words' list).
-        segments_gen, info = model.transcribe(
-            transcribe_path, language=language, vad_filter=True, beam_size=5,
-            word_timestamps=WORD_TIMESTAMPS,
-        )
-    except Exception as e:
-        raise MediaError(f"Errore nella trascrizione locale: {e}")
-    detected = detected or getattr(info, "language", None)
-
-    last_abs_end = start_offset   # highest audio time reached (absolute)
-    last_saved = start_offset     # audio time at the last checkpoint save
-    completed_fully = True
-    for seg in segments_gen:
-        if should_stop():
-            completed_fully = False
-            break
-        # Shift the tail's timestamps back to their absolute position.
-        abs_start, abs_end = float(seg.start) + start_offset, float(seg.end) + start_offset
-        entry = {"start": abs_start, "end": abs_end, "text": seg.text.strip()}
-        seg_words = getattr(seg, "words", None) or []
-        if seg_words:
-            entry["words"] = [
-                {"word": w.word, "start": float(w.start) + start_offset,
-                 "end": float(w.end) + start_offset}
-                for w in seg_words if w.start is not None and w.end is not None
-            ]
-        all_segments.append(entry)
-        last_abs_end = abs_end
-        if duration:
-            # min() avoids exceeding 100% if the last segment overruns the estimate.
-            on_progress("transcribe", min(abs_end, duration), duration, msg("transcribing"))
-        # Periodic checkpoint, so an interruption loses at most a couple of minutes.
-        if meta and (abs_end - last_saved) >= LOCAL_CHECKPOINT_EVERY:
-            save_local_checkpoint(meta, all_segments, abs_end, model_name, duration, detected)
-            last_saved = abs_end
-    if duration and completed_fully:
-        on_progress("transcribe", duration, duration, msg("transcribed"))
-
-    # Done -> drop the checkpoint; interrupted -> keep the latest partial to resume.
-    if meta:
-        if completed_fully:
-            delete_local_checkpoint(meta)
-        else:
-            save_local_checkpoint(meta, all_segments, last_abs_end, model_name, duration, detected)
-    return all_segments, detected
-
+# === IL BACKEND LOCALE: sta in server/transcription/local_whisper.py =========
+#
+# Trascrivere su questo computer: piu' lento, gratuito, e niente esce di casa.
+from server.transcription.local_whisper import (
+    _resolve_device, transcribe_local,
+)
 
 def _cli_transcribe_local(model_name: str, audio_path: str, duration: float,
                           meta: dict | None = None, resume_cp: dict | None = None,
@@ -1284,7 +1020,7 @@ def _cli_transcribe_local(model_name: str, audio_path: str, duration: float,
     try:
         with progress:
             return transcribe_local(model_name, audio_path, duration, on_progress,
-                                    should_stop=lambda: _interrupted, meta=meta,
+                                    should_stop=fermarsi, meta=meta,
                                     resume_cp=resume_cp, workdir=workdir)
     except MediaError as e:
         console.print(f"[error]{e}[/error]")
@@ -1321,24 +1057,13 @@ from server.enrichment.translation import (
 
 # === API KEY ===
 
-def load_dotenv() -> None:
-    """Load the variables from a '.env' file next to the script, if present.
-
-    Thin public wrapper around _load_env_file() (the same loader used at import
-    time): kept for backward compatibility, since the engine and the GUI call
-    tx.load_dotenv() before reading the Groq/DeepL keys. It reads KEY=value lines
-    (ignoring comments/blank lines, tolerating an 'export ' prefix), strips any
-    surrounding quotes, and sets each variable ONLY if not already defined, so a
-    real environment variable always wins over the .env file.
-
-    The .env file must NOT be committed (it is already in .gitignore): keep it
-    only locally, it contains your secret keys."""
-    _load_env_file()
-
-
-# Placeholder value of the .env file: it must be treated as "key not entered".
-_GROQ_KEY_PLACEHOLDER = "gsk_la-tua-chiave-qui"
-
+# === LA CHIAVE DI GROQ: sta in server/config/groq_key.py =====================
+#
+# Da dove si prende, e perche' il segnaposto del file di esempio conta come
+# «chiave assente» invece che come chiave sbagliata.
+from server.config.groq_key import (
+    _GROQ_KEY_PLACEHOLDER, load_dotenv,
+)
 
 def get_groq_client() -> Groq | None:
     """Create (and VALIDATE) the Groq client by reading the API key from
@@ -1417,61 +1142,12 @@ def _print_ratelimit_notice(title: str, done_seconds: float, total_seconds: floa
 
 # === ANALISI VISIVA: estrazione fotogrammi + lettura con un modello vision ====
 
-def _has_video_stream(path: str) -> bool:
-    """True se il file ha una traccia VIDEO (evita l'analisi su mp3/audio puri)."""
-    if os.path.splitext(path)[1].lower() in VIDEO_EXTENSIONS:
-        return True
-    try:
-        out = subprocess.run(
-            ["ffprobe", "-v", "error", "-select_streams", "v:0",
-             "-show_entries", "stream=codec_type", "-of",
-             "default=noprint_wrappers=1:nokey=1", path],
-            capture_output=True, text=True, check=True)
-        return "video" in out.stdout
-    except Exception:
-        return False
-
-
-def download_video(url: str, workdir: str, on_progress=_noop_progress,
-                   should_stop=_never_stop) -> str:
-    """Scarica il VIDEO (capped a VISION_YT_MAX_HEIGHT) per l'analisi visiva.
-
-    A differenza di download_audio (solo audio), qui serve l'immagine: scarichiamo
-    un file muxed a risoluzione contenuta, da cui poi si estraggono SIA i
-    fotogrammi SIA l'audio per la trascrizione (un solo download). Versione senza
-    interfaccia: restituisce il percorso del video e solleva MediaError su
-    errore. Wrapper CLI: `_cli_download_video`."""
-    out_template = os.path.join(workdir, "video.%(ext)s")
-
-    def _hook(d: dict) -> None:
-        if should_stop():
-            raise KeyboardInterrupt
-        if d["status"] == "downloading":
-            total = d.get("total_bytes") or d.get("total_bytes_estimate")
-            done = d.get("downloaded_bytes", 0)
-            on_progress("download", done, total, msg("dl_video"))
-        elif d["status"] == "finished":
-            on_progress("download", None, None, msg("prep_video"))
-
-    h = VISION_YT_MAX_HEIGHT
-    ydl_opts = {
-        # Video+audio muxed con altezza limitata; preferiamo mp4 per compatibilità.
-        "format": f"bestvideo[height<={h}]+bestaudio/best[height<={h}]/best",
-        "merge_output_format": "mp4",
-        "outtmpl": out_template,
-        "quiet": True, "no_warnings": True, "noprogress": True,
-        "progress_hooks": [_hook],
-    }
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-    except Exception as e:
-        raise MediaError(f"Errore nel download video: {e}")
-    for fname in os.listdir(workdir):
-        if fname.startswith("video."):
-            return os.path.join(workdir, fname)
-    raise MediaError("File video non trovato dopo il download.")
-
+# === temporaneo ==============================================================
+#
+# temporaneo
+from server.sources.download import (
+    _has_video_stream, download_video,
+)
 
 def _cli_download_video(url: str, workdir: str) -> str | None:
     """download_video per la CLI: barra rich, Ctrl+C e None su errore."""
@@ -1479,7 +1155,7 @@ def _cli_download_video(url: str, workdir: str) -> str | None:
     try:
         with progress:
             return download_video(url, workdir, on_progress,
-                                  should_stop=lambda: _interrupted)
+                                  should_stop=fermarsi)
     except KeyboardInterrupt:
         return None
     except MediaError as e:
@@ -1487,682 +1163,20 @@ def _cli_download_video(url: str, workdir: str) -> str | None:
         return None
 
 
-def _parse_showinfo_times(stderr: str) -> list[float]:
-    """Estrae i pts_time (secondi) dalle righe 'showinfo' di ffmpeg, in ordine."""
-    times: list[float] = []
-    for line in stderr.splitlines():
-        idx = line.find("pts_time:")
-        if idx == -1:
-            continue
-        rest = line[idx + len("pts_time:"):].strip()
-        token = rest.split()[0] if rest else ""
-        try:
-            times.append(float(token))
-        except ValueError:
-            continue
-    return times
-
-
-def _collapse_close_frames(frames: list[tuple[float, str]],
-                           min_gap: float) -> list[tuple[float, str]]:
-    """Raggruppa i fotogrammi entro 'min_gap' secondi (finestra a partire dal
-    primo del gruppo) e tiene l'ULTIMO di ogni gruppo. Serve a eliminare le coppie
-    ravvicinate che il rilevamento scene produce sulle transizioni (un frame a
-    metà stacco + uno assestato): l'ultimo è di norma quello leggibile/ravvicinato.
-    'frames' = [(timestamp, percorso)] ordinati per tempo. Non tocca i file."""
-    if min_gap <= 0 or len(frames) < 2:
-        return frames
-    kept: list[tuple[float, str]] = []
-    cluster_start = frames[0][0]
-    last = frames[0]
-    for t, p in frames[1:]:
-        if t - cluster_start <= min_gap:
-            last = (t, p)              # stesso gruppo: l'ultimo vince
-        else:
-            kept.append(last)
-            cluster_start = t
-            last = (t, p)
-    kept.append(last)
-    return kept
-
-
-def extract_keyframes(video_path: str, duration: float, workdir: str) -> list[tuple[float, str]]:
-    """Estrae i FOTOGRAMMI CHIAVE di un video, con il loro timestamp (secondi).
-
-    Strategia: rilevamento di CAMBIO SCENA via ffmpeg (cattura un frame quando
-    l'immagine cambia davvero: nuova slide, nuovo codice, nuova formula), così di
-    natura non si ripetono fotogrammi quasi identici. Se il video è quasi statico
-    e le scene rilevate sono troppo poche, ripiega su un campionamento a intervalli
-    regolari. Limita il totale a VISION_MAX_FRAMES (campionamento uniforme).
-    Restituisce una lista di (timestamp, percorso_jpg) ordinata per tempo."""
-    frames_dir = os.path.join(workdir, "frames")
-    os.makedirs(frames_dir, exist_ok=True)
-
-    # 1) Rilevamento cambio scena.
-    pattern = os.path.join(frames_dir, "kf_%05d.jpg")
-    vf = (f"select='gt(scene,{VISION_SCENE_THRESHOLD})',"
-          f"scale={VISION_FRAME_WIDTH}:-2,showinfo")
-    try:
-        proc = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-i", video_path, "-vf", vf,
-             "-vsync", "vfr", "-q:v", "3", pattern],
-            capture_output=True, text=True)
-        times = _parse_showinfo_times(proc.stderr)
-    except Exception as e:
-        console.print(f"[warning]Estrazione fotogrammi non riuscita: {e}[/warning]")
-        return []
-    files = sorted(os.path.join(frames_dir, n) for n in os.listdir(frames_dir)
-                   if n.startswith("kf_"))
-    frames = list(zip(times, files))  # l'ordine di showinfo coincide con quello dei file
-    # Elimina le coppie ravvicinate (doppio scatto sulla stessa transizione): tiene
-    # un solo fotogramma per finestra, così non finiscono nel riassunto due frame
-    # quasi identici (uno spesso "vuoto") e si risparmiano chiamate al modello.
-    frames = _collapse_close_frames(frames, VISION_MIN_GAP)
-
-    # 2) Fallback: video quasi statico o senza stacchi netti -> pochi cambi scena.
-    # Campiona a intervalli regolari, con un passo ADATTIVO alla durata così anche
-    # i video brevi ricevono comunque alcuni fotogrammi.
-    min_expected = max(4, int((duration or 0) // 180))
-    if len(frames) < min_expected and (duration or 0) >= 2:
-        # Quanti fotogrammi vogliamo: tra min_expected e il cap, in base a quanti
-        # intervalli "standard" entrano nella durata.
-        want = max(min_expected,
-                   min(VISION_MAX_FRAMES,
-                       int((duration or 0) // VISION_FALLBACK_INTERVAL) or min_expected))
-        interval = max(1.0, (duration or 0) / want)
-        ipattern = os.path.join(frames_dir, "iv_%05d.jpg")
-        ivf = f"fps=1/{interval:.3f},scale={VISION_FRAME_WIDTH}:-2"
-        try:
-            subprocess.run(
-                ["ffmpeg", "-hide_banner", "-i", video_path, "-vf", ivf,
-                 "-vsync", "vfr", "-q:v", "3", ipattern],
-                capture_output=True, text=True, check=True)
-            ifiles = sorted(os.path.join(frames_dir, n) for n in os.listdir(frames_dir)
-                            if n.startswith("iv_"))
-        except Exception:
-            ifiles = []
-        # I fotogrammi dei cambi scena si buttano SOLO se il campionamento a
-        # intervalli ha davvero prodotto qualcosa. Cancellandoli prima, un ffmpeg
-        # che fallisce lasciava 'frames' a puntare file ormai inesistenti: ogni
-        # lettura falliva e l'analisi visiva finiva a zero note senza motivo.
-        if ifiles:
-            frames = [(float(i) * interval, f) for i, f in enumerate(ifiles)]
-            for f in files:
-                try:
-                    os.remove(f)
-                except OSError:
-                    pass
-
-    # 3) Cap: se sono troppi, campiona uniformemente lungo la timeline.
-    if len(frames) > VISION_MAX_FRAMES:
-        step = len(frames) / VISION_MAX_FRAMES
-        frames = [frames[int(i * step)] for i in range(VISION_MAX_FRAMES)]
-    return frames
-
-
-# Prompt per il modello vision: estrae SOLO il contenuto informativo visibile e
-# scarta i fotogrammi "vuoti" (volti, transizioni) rispondendo "NIENTE".
-_VISION_SYSTEM_PROMPT = (
-    "Analizzi UN fotogramma di un video didattico/divulgativo. Estrai SOLO il "
-    "contenuto informativo VISIBILE a schermo che il parlato non può rendere:\n"
-    "• CODICE sorgente: trascrivilo ALLA LETTERA (indentazione e simboli inclusi) "
-    "dentro un blocco markdown ``` con il nome del linguaggio.\n"
-    "• FORMULE matematiche e relativi PASSAGGI/DIMOSTRAZIONI: scrivile in LaTeX "
-    "(`$...$` in linea, `$$...$$` per i passaggi), riportando tutti i passaggi "
-    "visibili.\n"
-    "• GRAFICI, DIAGRAMMI, TABELLE, SCHEMI: descrivili indicando assi, valori, "
-    "relazioni e la conclusione che mostrano.\n"
-    "• TESTO significativo di slide (titoli, definizioni, elenchi): riportalo.\n"
-    "Regole: NON descrivere volti, persone che parlano, sfondi, arredi o elementi "
-    "decorativi. Se il fotogramma non contiene NULLA di tecnico/informativo (solo "
-    "una persona che parla, una slide di titolo, una transizione), rispondi "
-    "ESATTAMENTE con la sola parola: NIENTE. Rispondi in italiano, conciso e ben "
-    "strutturato, senza preamboli e SENZA includere il tuo ragionamento: fornisci "
-    "solo il risultato finale."
+# === L'ANALISI VISIVA: sta in server/enrichment/vision.py ====================
+#
+# Leggere quello che nel video si VEDE e non si sente: codice, formule,
+# grafici, diagrammi. In certe lezioni e' meta' del contenuto.
+from server.enrichment.vision import (
+    _VISION_SYSTEM_PROMPT, _VISION_USER_PROMPT, _append_frames_to_sections,
+    _audio_context_near, _check_ollama_vision, _collapse_close_frames,
+    _dedup_visual_notes, _encode_image_b64, _fix_mermaid_arrows,
+    _is_empty_visual, _make_vision_analyzer, _merge_visual_into_sections,
+    _parse_showinfo_times, _split_md_blocks, _strip_mermaid_blocks,
+    _strip_think, _vision_groq, _vision_ollama, _vision_user_prompt,
+    analyze_video_visuals, extract_keyframes, load_visual_notes,
+    save_visual_notes,
 )
-_VISION_USER_PROMPT = "Estrai il contenuto tecnico/informativo visibile in questo fotogramma."
-
-
-def _vision_user_prompt(context: str = "") -> str:
-    """Prompt utente per il modello vision. Se 'context' (il parlato attorno a
-    questo punto del video) è disponibile, lo antepone: dà al modello il CONTESTO
-    di ciò di cui si sta parlando, così interpreta meglio sigle, nomi di variabili,
-    simboli e formule ambigue a schermo. Vincolo esplicito: usare il contesto solo
-    per INTERPRETARE, mai per inventare — si trascrive solo ciò che è VISIBILE."""
-    if not context:
-        return _VISION_USER_PROMPT
-    return (
-        "CONTESTO AUDIO — ciò che l'oratore sta dicendo intorno a questo punto del "
-        f"video:\n«{context}»\n\n"
-        "Usa questo contesto SOLO per interpretare correttamente ciò che vedi "
-        "(sigle, nomi di variabili, simboli, formule, termini ambigui). NON "
-        "aggiungere nulla che non sia effettivamente a schermo: trascrivi "
-        "esclusivamente il contenuto VISIBILE nel fotogramma.\n\n"
-        + _VISION_USER_PROMPT)
-
-
-def _audio_context_near(segments: list[dict] | None, ts: float,
-                        window: float = 25.0, max_chars: int = 700) -> str:
-    """Testo trascritto attorno al timestamp 'ts' (± 'window' secondi), da passare
-    al modello vision come contesto del fotogramma. Restituisce stringa vuota se
-    non ci sono segmenti utili. Troncato a 'max_chars' per non gonfiare i token."""
-    if not segments:
-        return ""
-    lo, hi = ts - window, ts + window
-    parts = [(s.get("text") or "").strip() for s in segments
-             if s.get("start") is not None and lo <= s["start"] <= hi]
-    ctx = " ".join(p for p in parts if p).strip()
-    if len(ctx) > max_chars:
-        ctx = ctx[:max_chars].rstrip() + "…"
-    return ctx
-
-
-def _strip_think(text: str) -> str:
-    """Rimuove il ragionamento <think>…</think> dei modelli "reasoning".
-
-    Molti modelli (es. qwen3) antepongono alla risposta un lungo blocco di
-    ragionamento racchiuso in <think>…</think>: va tolto, altrimenti inquina le
-    note visive e il riassunto (e gonfia l'input di 5-7×)."""
-    import re
-    t = re.sub(r"(?is)<think\b.*?</think>", "", text or "")
-    # Tag di apertura rimasto senza chiusura (output troncato): tieni ciò che
-    # segue una eventuale chiusura, altrimenti scarta il ragionamento incompleto.
-    low = t.lower()
-    i = low.find("<think")
-    if i != -1:
-        j = low.find("</think>", i)
-        t = t[j + len("</think>"):] if j != -1 else t[:i]
-    return re.sub(r"(?is)</?think>", "", t).strip()
-
-
-def _dedup_visual_notes(notes: list[dict]) -> list[dict]:
-    """Scarta le note visive quasi-identiche (stessa slide ripresa più volte),
-    tenendo la PRIMA occorrenza. Confronto per similarità di Jaccard sui termini
-    significativi: una slide/definizione rimasta a lungo a schermo genera note
-    duplicate che, senza questo filtro, farebbero ripetere il riassunto."""
-    import re
-
-    def sig(t: str) -> set:
-        words = re.findall(r"[a-zà-ù0-9]+", t.lower())
-        return {w for w in words if len(w) > 2}
-
-    kept: list[dict] = []
-    sigs: list[set] = []
-    for n in notes:
-        s = sig(n.get("text", ""))
-        if not s:
-            continue
-        if any((len(s & ps) / (len(s | ps) or 1)) > 0.8 for ps in sigs):
-            continue
-        kept.append(n)
-        sigs.append(s)
-    return kept
-
-
-def _fix_mermaid_arrows(text: str) -> str:
-    """Corregge la sintassi errata delle frecce Mermaid: '-->|etichetta|>' non è
-    valido, va scritto '-->|etichetta|'. I modelli la sbagliano spesso."""
-    import re
-    return re.sub(r"(-->\s*\|[^|]*\|)>", r"\1", text or "")
-
-
-def _strip_mermaid_blocks(text: str) -> str:
-    """Rimuove i blocchi ```mermaid (rete di sicurezza quando la mappa concettuale
-    è disattivata e il modello ne genera comunque una)."""
-    import re
-    return re.sub(r"```mermaid\b.*?```\s*", "", text or "", flags=re.S).strip()
-
-
-def _encode_image_b64(path: str) -> str:
-    """Legge un'immagine e la codifica in base64 (per le API vision)."""
-    import base64
-    with open(path, "rb") as f:
-        return base64.b64encode(f.read()).decode("ascii")
-
-
-def _vision_groq(client, b64: str, context: str = "") -> str:
-    """Analizza un fotogramma con un modello multimodale di Groq.
-
-    'context' (opzionale): il parlato trascritto attorno a questo fotogramma, per
-    aiutare il modello a interpretare ciò che vede (vedi _vision_user_prompt).
-
-    I modelli "reasoning" (es. qwen3) antepongono un blocco <think>…</think>:
-    proviamo a disattivarlo a monte (reasoning_effort, per non sprecare token) e
-    in ogni caso lo rimuoviamo dall'output con _strip_think."""
-    data_url = f"data:image/jpeg;base64,{b64}"
-    messages = [
-        {"role": "system", "content": _VISION_SYSTEM_PROMPT},
-        {"role": "user", "content": [
-            {"type": "text", "text": _vision_user_prompt(context)},
-            {"type": "image_url", "image_url": {"url": data_url}},
-        ]},
-    ]
-    try:
-        resp = _groq_chat_capture(
-            client, settings.GROQ_VISION_MODEL, messages=messages, temperature=0.2,
-            reasoning_effort="none")
-    except Exception as e:
-        if _is_rate_limit(str(e)):
-            raise
-        # Il modello non accetta 'reasoning_effort': riprova senza il parametro.
-        resp = _groq_chat_capture(
-            client, settings.GROQ_VISION_MODEL, messages=messages, temperature=0.2)
-    return _strip_think(resp.choices[0].message.content or "")
-
-
-def _vision_ollama(b64: str, context: str = "") -> str:
-    """Analizza un fotogramma con un modello vision locale via Ollama (HTTP).
-
-    'context' (opzionale): il parlato attorno al fotogramma, per aiutare il
-    modello a interpretare ciò che vede (vedi _vision_user_prompt)."""
-    import urllib.request
-    payload = {
-        "model": settings.OLLAMA_VISION_MODEL,
-        "messages": [
-            {"role": "system", "content": _VISION_SYSTEM_PROMPT},
-            {"role": "user", "content": _vision_user_prompt(context), "images": [b64]},
-        ],
-        "stream": False,
-        "options": {"temperature": 0.2, "num_ctx": OLLAMA_NUM_CTX},
-    }
-    req = urllib.request.Request(
-        OLLAMA_HOST + "/api/chat",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=600) as r:
-        data = json.loads(r.read().decode("utf-8"))
-    return _strip_think(data.get("message", {}).get("content") or "")
-
-
-def _check_ollama_vision() -> None:
-    """Verifica Ollama + presenza di un modello vision; spiega come rimediare."""
-    installed = _ollama_installed_models(timeout=5)
-    if installed is None:
-        raise RuntimeError(
-            f"Ollama non raggiungibile su {OLLAMA_HOST}. Per l'analisi visiva in "
-            "locale installa Ollama (https://ollama.com), avvialo e scarica un "
-            f"modello vision, es:  ollama pull {settings.OLLAMA_VISION_MODEL}")
-    if not _ollama_has_model(settings.OLLAMA_VISION_MODEL, installed):
-        raise RuntimeError(
-            f"Modello vision '{settings.OLLAMA_VISION_MODEL}' non presente in Ollama. "
-            f"Scaricalo con:  ollama pull {settings.OLLAMA_VISION_MODEL}")
-
-
-def _make_vision_analyzer(client=None):
-    """Sceglie il motore dell'analisi visiva e restituisce (funzione(b64)->testo, etichetta).
-
-    Preferisce Groq se c'è un client (backend cloud), altrimenti Ollama in locale
-    (100% offline). RuntimeError se nessuno è utilizzabile (il chiamante può così
-    saltare l'analisi senza bloccare il resto)."""
-    if client is not None:
-        return (lambda b64, ctx="": _vision_groq(client, b64, ctx)), f"Groq · {settings.GROQ_VISION_MODEL}"
-    _check_ollama_vision()
-    return (lambda b64, ctx="": _vision_ollama(b64, ctx)), f"locale · Ollama {settings.OLLAMA_VISION_MODEL}"
-
-
-def _is_empty_visual(text: str) -> bool:
-    """True se la risposta del modello vision equivale a 'NIENTE' (frame vuoto)."""
-    norm = (text or "").upper()
-    for ch in "*_.!#>` \n\t-":
-        norm = norm.replace(ch, "")
-    return norm == "" or norm == "NIENTE"
-
-
-def analyze_video_visuals(video_path: str, duration: float, workdir: str,
-                          client=None, frames_out_dir: str | None = None,
-                          on_progress=None, quiet: bool = False,
-                          stats: dict | None = None,
-                          segments: list[dict] | None = None) -> list[dict]:
-    """Estrae i fotogrammi chiave del video e li "legge" con un modello vision.
-
-    'segments' (opzionale): la trascrizione audio già pronta. Se presente, per ogni
-    fotogramma passa al modello il parlato attorno a quel timestamp come CONTESTO,
-    così legge meglio ciò che vede (sigle, variabili, formule ambigue). Vedi
-    _vision_user_prompt / _audio_context_near.
-
-    Restituisce una lista di NOTE VISIVE {'start': sec, 'text': str, 'image': str},
-    una per fotogramma con informazione (i "vuoti" — volti, transizioni — vengono
-    scartati). Se 'frames_out_dir' è dato, COPIA lì il fotogramma di ogni nota
-    tenuta (il workdir temporaneo verrà cancellato) e ne salva il nome in 'image'.
-
-    Doppia modalità di output, così è riusabile sia dalla CLI sia dal motore/GUI:
-    con 'on_progress(phase,cur,total,detail)' riporta tramite callback (niente
-    console rich); senza, usa la console rich (CLI). 'quiet' silenzia comunque la
-    console. Lista vuota se non c'è nulla o se il motore vision non è disponibile.
-
-    'stats' (opzionale): dict che la funzione riempie con l'esito, così il
-    chiamante (engine/GUI) può spiegare PERCHÉ non ci sono note invece di
-    lasciare tutto in silenzio. Chiavi: 'frames', 'notes', 'errors',
-    'rate_limited' (bool), 'last_error', 'unavailable'."""
-    use_rich = on_progress is None and not quiet
-
-    def _stat(key, value):
-        if stats is not None:
-            stats[key] = value
-
-    _stat("frames", 0)
-    _stat("notes", 0)
-    _stat("errors", 0)
-    _stat("rate_limited", False)
-    _stat("last_error", None)
-
-    def _report(cur, total, detail):
-        if on_progress:
-            on_progress("visual", cur, total, detail)
-
-    try:
-        analyze_fn, label = _make_vision_analyzer(client)
-    except RuntimeError as e:
-        if use_rich:
-            console.print(f"[warning]Analisi visiva non disponibile: {e}[/warning]")
-        _report(None, None, msg("vis_unavail", e=e))
-        _stat("unavailable", str(e))
-        return []
-
-    _report(None, None, msg("vis_detect"))
-    if use_rich:
-        with console.status("[info]Individuo i fotogrammi chiave (cambi scena)...[/info]", spinner="dots"):
-            frames = extract_keyframes(video_path, duration, workdir)
-    else:
-        frames = extract_keyframes(video_path, duration, workdir)
-    _stat("frames", len(frames))
-    if not frames:
-        if use_rich:
-            console.print("[warning]Nessun fotogramma significativo individuato.[/warning]")
-        _report(None, None, msg("vis_noframes"))
-        return []
-    if use_rich:
-        console.print(f"  {SYM_OK} [info]{len(frames)}[/info] fotogrammi da analizzare ({label})")
-    _report(0, len(frames), msg("vis_toanalyze", n=len(frames), label=label))
-
-    notes: list[dict] = []
-
-    def _process(update) -> None:
-        errors = 0
-        for i, (ts, path) in enumerate(frames, 1):
-            if _interrupted:
-                break
-            try:
-                text = analyze_fn(_encode_image_b64(path),
-                                  _audio_context_near(segments, ts))
-            except Exception as e:
-                if _is_rate_limit(str(e)):
-                    if use_rich:
-                        console.print("[warning]Crediti Groq esauriti durante l'analisi visiva: "
-                                      "proseguo con i fotogrammi già letti.[/warning]")
-                    _report(i, len(frames), msg("vis_ratelimit"))
-                    _stat("rate_limited", True)
-                    _stat("last_error", str(e))
-                    break
-                # Errore NON di credito sul singolo fotogramma: lo saltiamo, ma lo
-                # registriamo così il chiamante non resta al buio se falliscono tutti.
-                errors += 1
-                _stat("errors", errors)
-                _stat("last_error", str(e))
-                text = ""
-            if text and not _is_empty_visual(text):
-                notes.append({"start": float(ts), "text": text.strip(), "_frame": path})
-            update(i)
-
-    if use_rich:
-        progress = Progress(
-            SpinnerColumn("dots", style="bright_yellow"),
-            TextColumn("[phase]{task.description}"),
-            BarColumn(bar_width=40, style="bar.back", complete_style="bright_yellow", finished_style="bold yellow"),
-            TaskProgressColumn(), console=console, expand=False,
-        )
-        with progress:
-            task_id = progress.add_task("Analizzo i fotogrammi", total=len(frames))
-            _process(lambda i: progress.update(task_id, completed=i))
-    else:
-        _process(lambda i: _report(i, len(frames), msg("vis_analyzing", i=i, n=len(frames))))
-
-    raw = len(notes)
-    notes = _dedup_visual_notes(notes)  # scarta slide ripetute (stesso contenuto a schermo)
-    _stat("notes", len(notes))
-    # Conserva i fotogrammi delle note TENUTE: il workdir temporaneo verrà
-    # cancellato, quindi li copiamo nella cartella definitiva e ne salviamo il nome.
-    # Solo se c'è davvero qualcosa da salvare: niente cartella 'frames' vuota.
-    if frames_out_dir and notes:
-        try:
-            os.makedirs(_lp(frames_out_dir), exist_ok=True)
-            for idx, note in enumerate(notes):
-                src = note.get("_frame")
-                if src and os.path.isfile(src):
-                    name = f"frame_{idx:03d}_{int(note['start'])}s.jpg"
-                    shutil.copyfile(src, _lp(os.path.join(frames_out_dir, name)))
-                    note["image"] = name
-        except OSError:
-            pass
-    for note in notes:
-        note.pop("_frame", None)
-    if use_rich:
-        dropped = f" ([dim]{raw - len(notes)} duplicati scartati[/dim])" if raw != len(notes) else ""
-        console.print(f"  {SYM_OK} Contenuti visivi estratti: [info]{len(notes)}[/info] su {len(frames)} fotogrammi{dropped}")
-    _report(len(frames), len(frames), msg("vis_extracted", k=len(notes), n=len(frames)))
-    return notes
-
-
-def save_visual_notes(out_root: str, meta: dict, notes: list[dict],
-                      engine_label: str, do_export: bool,
-                      quiet: bool = False) -> None:
-    """Salva le NOTE VISIVE in results/<title>/analisi_visiva/.
-
-    Produce: il .json, un .md leggibile e — se l'export è attivo — un PDF "ricco"
-    in cui OGNI nota mostra il suo FOTOGRAMMA accanto al contenuto estratto
-    (codice/formula/grafico), così il frame fa da prova/riferimento visivo.
-    'quiet' silenzia la console (per il motore/GUI, che riporta a modo suo)."""
-    if not notes:
-        return
-    safe = _safe_filename(meta["title"])
-    video_dir = os.path.join(out_root, safe)
-    vdir = os.path.join(video_dir, visual_subdir())
-    frames_dir = os.path.join(vdir, "frames")
-    os.makedirs(_lp(vdir), exist_ok=True)
-    base = os.path.join(vdir, f"{safe}_visivo")
-    payload = {
-        "title": meta["title"],
-        "engine": engine_label,
-        "count": len(notes),
-        "notes": [{"start": n["start"],
-                   "timestamp": _format_timestamp(n["start"]),
-                   "image": n.get("image"),
-                   "text": n["text"]} for n in notes],
-    }
-    with open(_lp(base + ".json"), "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-
-    # Markdown del documento: fotogramma (se presente) + testo, per ogni nota.
-    # 'img_prefix' permette link RELATIVI per il .md (portabile) e ASSOLUTI per il
-    # PDF (il browser headless deve trovare i file).
-    def _companion_md(img_prefix: str, saved_in: str | None = None) -> str:
-        saved_line = [f"- **Salvato in:** {saved_in}"] if saved_in else []
-        out = [f"# {meta['title']} — Analisi visiva", "",
-               f"- **Estratto con:** {engine_label}",
-               f"- **Fotogrammi con contenuto:** {len(notes)}",
-               *saved_line, "", "---", ""]
-        for n in notes:
-            out.append(f"## [{_format_timestamp(n['start'])}]")
-            out.append("")
-            if n.get("image"):
-                out.append(f"![fotogramma {_format_timestamp(n['start'])}]({img_prefix}{n['image']})")
-                out.append("")
-            out.append(n["text"])
-            out.append("")
-        return "\n".join(out)
-
-    with open(_lp(base + ".md"), "w", encoding="utf-8") as f:
-        f.write(_companion_md("frames/"))
-    if not quiet:
-        console.print(f"  {SYM_OK} Analisi visiva salvata in [info]{visual_subdir()}/[/info]")
-
-    # PDF "ricco": fotogramma + testo estratto, uno per nota (immagini con percorso
-    # ASSOLUTO). Solo se l'export è attivo e ci sono davvero dei fotogrammi salvati.
-    if do_export and RICH_PDF and any(n.get("image") for n in notes):
-        pdf_saved_in = os.path.abspath(vdir)
-        try:
-            if quiet:
-                build_pdf_rich(_companion_md(frames_dir + os.sep, saved_in=pdf_saved_in), base + ".pdf")
-            else:
-                with console.status("[info]Creo il PDF dell'analisi visiva (fotogrammi + testo)...[/info]", spinner="dots"):
-                    ok = build_pdf_rich(_companion_md(frames_dir + os.sep, saved_in=pdf_saved_in), base + ".pdf")
-                if ok:
-                    console.print(f"  {SYM_OK} PDF analisi visiva con i fotogrammi creato.")
-        except Exception:
-            pass
-
-
-def load_visual_notes(out_root: str, title: str) -> list[dict]:
-    """Rilegge le note visive salvate (per arricchire il riassunto). [] se assenti."""
-    safe = _safe_filename(title)
-    for sub in (VISUAL_SUBDIR, NOMI_VECCHI[VISUAL_SUBDIR]):
-        p = os.path.join(out_root, safe, sub, f"{safe}_visivo.json")
-        if os.path.isfile(_lp(p)):
-            try:
-                with open(_lp(p), "r", encoding="utf-8") as f:
-                    d = json.load(f)
-                # Pulizia difensiva anche in lettura: toglie eventuale ragionamento
-                # <think> e le note duplicate (così il riassunto resta pulito anche
-                # rigenerandolo da note salvate da versioni precedenti).
-                cleaned = []
-                for n in d.get("notes", []):
-                    txt = _strip_think(n.get("text", ""))
-                    if txt and not _is_empty_visual(txt):
-                        cleaned.append({"start": float(n.get("start") or 0), "text": txt,
-                                        "image": n.get("image")})
-                return _dedup_visual_notes(cleaned)
-            except Exception:
-                return []
-    return []
-
-
-def _split_md_blocks(text: str) -> list[str]:
-    """Spezza il testo in blocchi separati da riga vuota, MA tiene interi i
-    recinti di codice ``` ``` (che possono contenere righe vuote): così un
-    fotogramma non finisce mai in mezzo a un blocco di codice."""
-    blocks: list[str] = []
-    cur: list[str] = []
-    in_fence = False
-    for ln in text.split("\n"):
-        if ln.lstrip().startswith("```"):
-            in_fence = not in_fence
-            cur.append(ln)
-            continue
-        if not ln.strip() and not in_fence:
-            if cur:
-                blocks.append("\n".join(cur))
-                cur = []
-        else:
-            cur.append(ln)
-    if cur:
-        blocks.append("\n".join(cur))
-    return [b for b in blocks if b.strip()]
-
-
-def _append_frames_to_sections(sections: list[dict], notes: list[dict], img_path_fn) -> list[dict]:
-    """INTERLACCIA i FOTOGRAMMI nel testo di ogni sezione, inserendoli TRA i
-    paragrafi in base al loro timestamp (posizione relativa nella finestra
-    temporale della sezione), invece di accodarli tutti in fondo. Così le
-    immagini seguono il discorso e non formano un «muro» a fine sezione.
-    'img_path_fn(nome_immagine) -> percorso' consente link relativi (per il .md,
-    portabile) o assoluti (per il PDF). Non muta gli input."""
-    notes = sorted([n for n in notes if n.get("image")], key=lambda n: n["start"])
-    if not notes:
-        return sections
-    out = [dict(s) for s in sections]
-    bounds: list[tuple[float, float]] = []
-    if any(s.get("start") is not None for s in out):
-        for i, s in enumerate(out):
-            st = s.get("start") or 0
-            nxt = out[i + 1].get("start") if i + 1 < len(out) else None
-            bounds.append((st, nxt if nxt is not None else float("inf")))
-        buckets: list[list[dict]] = [[] for _ in out]
-        for note in notes:
-            placed = False
-            for i, (st, en) in enumerate(bounds):
-                if st <= note["start"] < en:
-                    buckets[i].append(note)
-                    placed = True
-                    break
-            if not placed:
-                buckets[-1].append(note)
-    else:
-        bounds = [(0.0, float("inf"))] + [(0.0, float("inf")) for _ in out[1:]]
-        buckets = [list(notes)] + [[] for _ in out[1:]]
-
-    def _img_md(n: dict) -> str:
-        return f"![Fotogramma {_format_timestamp(n['start'])}]({img_path_fn(n['image'])})"
-
-    for i, s in enumerate(out):
-        bucket = buckets[i]
-        if not bucket:
-            continue
-        text = (s.get("text") or "").rstrip()
-        paras = _split_md_blocks(text)
-        if not paras:  # sezione senza testo: accoda le immagini
-            s["text"] = "\n\n".join(_img_md(n) for n in bucket)
-            continue
-        st, en = bounds[i]
-        span = (en - st) if (en != float("inf") and en > st) else None
-        # Per ogni paragrafo, i fotogrammi da inserire SUBITO DOPO di esso.
-        after: list[list[dict]] = [[] for _ in paras]
-        n_para = len(paras)
-        for j, note in enumerate(bucket):
-            if span:
-                frac = (note["start"] - st) / span
-            else:  # senza timestamp affidabili: distribuzione uniforme
-                frac = (j + 0.5) / len(bucket)
-            frac = min(1.0, max(0.0, frac))
-            idx = min(n_para - 1, int(frac * n_para))
-            after[idx].append(note)
-        pieces: list[str] = []
-        for k, p in enumerate(paras):
-            pieces.append(p)
-            pieces.extend(_img_md(n) for n in after[k])
-        s["text"] = "\n\n".join(pieces)
-    return out
-
-
-def _merge_visual_into_sections(sections: list[dict], notes: list[dict]) -> list[dict]:
-    """Inserisce le note visive nel testo delle sezioni in base al timestamp.
-
-    Ogni nota finisce nella sezione il cui intervallo [start, start_successiva)
-    contiene il suo timestamp; se le sezioni non hanno start (testo continuo) le
-    note vanno in coda in ordine. Diventano annotazioni «[A SCHERMO — mm:ss] …»
-    così il modello del riassunto le vede insieme al parlato. Non muta gli input."""
-    if not notes:
-        return sections
-    notes = sorted(notes, key=lambda n: n["start"])
-    out = [dict(s) for s in sections]
-
-    def _annotate(items: list[dict]) -> str:
-        return "\n\n".join(
-            f"[A SCHERMO — {_format_timestamp(n['start'])}]\n{n['text']}" for n in items)
-
-    if any(s.get("start") is not None for s in out):
-        bounds = []
-        for i, s in enumerate(out):
-            st = s.get("start") or 0
-            nxt = out[i + 1].get("start") if i + 1 < len(out) else None
-            en = nxt if nxt is not None else float("inf")
-            bounds.append((st, en))
-        buckets: list[list[dict]] = [[] for _ in out]
-        for note in notes:
-            placed = False
-            for i, (st, en) in enumerate(bounds):
-                if st <= note["start"] < en:
-                    buckets[i].append(note)
-                    placed = True
-                    break
-            if not placed:
-                buckets[-1].append(note)
-        for i, s in enumerate(out):
-            if buckets[i]:
-                s["text"] = (s.get("text", "").strip() + "\n\n" + _annotate(buckets[i])).strip()
-    else:
-        out[0]["text"] = (out[0].get("text", "").strip() + "\n\n" + _annotate(notes)).strip()
-    return out
-
 
 def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
                   client, local_model: str | None,
@@ -2214,7 +1228,7 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
                     audio_path = _cli_download_audio(ref, workdir)
             else:
                 audio_path = _cli_download_audio(ref, workdir)
-            if not audio_path or _interrupted:
+            if not audio_path or fermarsi():
                 console.print("[warning]Download non completato.[/warning]")
                 return None
         else:
@@ -2307,7 +1321,7 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
         # Va fatta ORA, finché il file video esiste (per YouTube è nella cartella
         # temporanea, cancellata all'uscita dal blocco `with`).
         visual_notes: list[dict] = []
-        if do_visual and media_path and not _interrupted:
+        if do_visual and media_path and not fermarsi():
             console.print()
             console.rule(f"[phase]👁 Fase {step['visual']}/{n} — Analisi visiva (cosa si VEDE)[/phase]",
                          style="bright_yellow")
@@ -2516,439 +1530,23 @@ from server.enrichment import summary
 
 # === PDF "RICCO": HTML (MathJax + Mermaid) stampato da un browser headless =====
 
-PDF_ASSETS_DIR = paths.dati(".pdfassets")
-# Librerie JS scaricate UNA volta in cache locale (poi funziona anche offline).
+# === IL PDF RICCO: sta in server/export/pdf_rich.py ==========================
 #
-# Accanto all'eseguibile, non dentro `_internal`: è una cache che si riempie
-# mentre il programma gira, e `_internal` viene rifatta da zero a ogni
-# aggiornamento, quindi ogni nuova versione ripartirebbe a scaricarle. Da
-# sorgenti le due cartelle coincidono e non cambia niente.
+# Formule e mappe disegnate davvero, stampando una pagina web con un browser
+# che sul computer c'e' gia'. Se manca, si ripiega sul PDF semplice.
+from server.export.pdf_rich import (
+    PDF_ASSETS_DIR, _PDF_ASSET_URLS, _PDF_HTML_TEMPLATE, _ensure_pdf_assets,
+    _find_browser, _md_inline_to_html, _md_to_html, _save_pdf,
+    build_pdf_rich,
+)
+
+# === IL RIASSUNTO, IL LAVORO =================================================
 #
-# La domanda "dove sta la cartella dei dati" la sa già paths, e adesso gliela
-# si fa invece di ricalcolarla: prima c'era una funzione _data_root() qui
-# dentro che rispondeva la stessa cosa in un modo diverso, ed era solo un modo
-# in più di poter sbagliare.
-_PDF_ASSET_URLS = {
-    "tex-svg.js": "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js",
-    "mermaid.min.js": "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js",
-}
-
-_PDF_HTML_TEMPLATE = """<!doctype html>
-<html lang="it"><head><meta charset="utf-8">
-<style>
-  /* margine di pagina a ZERO: così il browser headless NON disegna il proprio
-     header/footer (data in alto, percorso file in basso a sinistra, numero di
-     pagina in basso a destra). I margini di stampa reali, UGUALI su ogni pagina,
-     li ottiene la tabella .pagewrap qui sotto: thead/tfoot vengono ripetuti e
-     RISERVANO spazio in alto e in basso su tutte le pagine. */
-  @page { margin: 0; }
-  body { font-family: 'Segoe UI', Calibri, Arial, sans-serif; color: #1b1b1b;
-         line-height: 1.55; font-size: 12pt; margin: 0; }
-  table.pagewrap { width: 100%; border-collapse: collapse; }
-  table.pagewrap > thead > tr > td,
-  table.pagewrap > tfoot > tr > td { height: 1.5cm; border: none; }
-  table.pagewrap > tbody > tr > td { padding: 0 1.7cm; border: none;
-         vertical-align: top; }
-  h1 { color: #0b6b3a; font-size: 20pt; margin: 0 0 4px; }
-  h2 { color: #0b6b3a; font-size: 15pt; margin: 22px 0 8px;
-       border-bottom: 2px solid #d8efe2; padding-bottom: 3px; }
-  h3 { color: #128a4b; font-size: 13pt; margin: 16px 0 6px; }
-  strong { color: #0b3b22; }
-  p { margin: 0 0 10px; text-align: justify; }
-  ul { margin: 0 0 10px; padding-left: 22px; }
-  hr { border: none; border-top: 1px solid #e2e2e2; margin: 14px 0; }
-  code { font-family: Consolas, 'Courier New', monospace; font-size: 10.5pt;
-         background: #f3f4f6; padding: 1px 4px; border-radius: 4px; }
-  pre { background: #f6f8fa; border: 1px solid #e6e8eb; border-radius: 8px;
-        padding: 12px 14px; overflow-x: auto; }
-  pre code { background: none; padding: 0; }
-  .mermaid { background: #fbfdfc; border: 1px solid #eef3f0; border-radius: 8px;
-             padding: 12px; text-align: center; margin: 0 0 12px; }
-  img { max-width: 100%; max-height: 15cm; display: block; margin: 8px 0 12px;
-        border: 1px solid #e3e7e4; border-radius: 8px; }
-</style>
-<script>window.MathJax = {tex: {inlineMath: [['$','$'], ['\\\\(','\\\\)']],
-    displayMath: [['$$','$$'], ['\\\\[','\\\\]']]},
-  svg: {fontCache: 'global'}};</script>
-<script src="__MATHJAX__"></script>
-<script src="__MERMAID__"></script>
-<script>window.addEventListener('load', function () {
-  if (window.mermaid) { try { mermaid.initialize({startOnLoad: true, theme: 'neutral'}); } catch (e) {} }
-});</script>
-</head><body>
-<table class="pagewrap"><thead><tr><td></td></tr></thead>
-<tfoot><tr><td></td></tr></tfoot>
-<tbody><tr><td>
-__BODY__
-</td></tr></tbody></table>
-</body></html>
-"""
-
-
-def _md_inline_to_html(text: str) -> str:
-    """Converte il markup inline di una riga: escape HTML + grassetto **…**."""
-    import re
-    import html as _html
-    text = _html.escape(text, quote=False)
-    return re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
-
-
-def _md_to_html(md: str) -> str:
-    """Converte il markdown del riassunto in HTML per il PDF "ricco".
-
-    Gestisce: titoli, grassetto, elenchi, righello, blocchi di codice e mermaid,
-    e lascia INTATTE le formule `$…$`/`$$…$$` (le renderizza MathJax). I blocchi
-    di codice/formule vengono "messi da parte" per non essere alterati dall'escape
-    o dalla formattazione."""
-    import re
-    import html as _html
-    store: dict[str, str] = {}
-    block_keys: set[str] = set()  # placeholder che sono elementi di blocco (pre/mermaid)
-
-    def _stash(content: str, block: bool = False) -> str:
-        key = f"\x00{len(store)}\x00"
-        store[key] = content
-        if block:
-            block_keys.add(key)
-        return key
-
-    # 1) Blocchi recintati ``` ``` (incl. ```mermaid). Il contenuto va escapato:
-    # il browser lo de-escapa nel textContent, quindi mermaid riceve i caratteri
-    # giusti (es. le frecce -->), ma l'HTML resta valido.
-    def _fence(m):
-        lang = (m.group(1) or "").strip().lower()
-        body = _html.escape(m.group(2))
-        if lang == "mermaid":
-            return _stash(f'<pre class="mermaid">{body}</pre>', block=True)
-        return _stash(f"<pre><code>{body}</code></pre>", block=True)
-
-    md = re.sub(r"```([^\n]*)\n(.*?)```", _fence, md, flags=re.S)
-
-    # 1b) Immagini ![alt](src): elemento di blocco. I percorsi locali diventano
-    # file:// così il browser headless li carica.
-    def _img(m):
-        import pathlib
-        alt = _html.escape(m.group(1))
-        src = m.group(2).strip()
-        if "://" not in src:
-            try:
-                src = pathlib.Path(src).as_uri()
-            except Exception:
-                pass
-        return _stash(f'<img alt="{alt}" src="{src}">', block=True)
-
-    md = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", _img, md)
-    # 2) Formule: lasciate grezze (MathJax le legge dal testo), ma messe da parte
-    # così l'escape non tocca eventuali < > al loro interno e un'eventuale riga
-    # vuota interna non spezzi il blocco display in due <p>. Si accettano ENTRAMBI
-    # gli stili di delimitatori: $$…$$ / $…$ e \[…\] / \(…\) (il modello usa l'uno
-    # o l'altro indistintamente). I display (\[…\], $$…$$) vanno stashati PRIMA
-    # degli inline per non spezzarli.
-    md = re.sub(r"\$\$(.+?)\$\$", lambda m: _stash(f"$${m.group(1)}$$"), md, flags=re.S)
-    md = re.sub(r"\\\[(.+?)\\\]", lambda m: _stash(f"\\[{m.group(1)}\\]"), md, flags=re.S)
-    md = re.sub(r"\\\((.+?)\\\)", lambda m: _stash(f"\\({m.group(1)}\\)"), md, flags=re.S)
-    md = re.sub(r"\$(.+?)\$", lambda m: _stash(f"${m.group(1)}$"), md)
-    # 3) Codice inline `…`
-    md = re.sub(r"`([^`]+)`", lambda m: _stash(f"<code>{_html.escape(m.group(1))}</code>"), md)
-
-    # 4) Struttura a blocchi, riga per riga. Gli heading (# / ## / ###) diventano
-    # h1/h2/h3: da questi il browser genera i SEGNALIBRI/outline del PDF (il
-    # «Sommario» cliccabile nel pannello laterale del lettore), grazie al flag
-    # --generate-pdf-document-outline usato in build_pdf_rich.
-    out: list[str] = []
-    para: list[str] = []
-    in_list = False
-
-    def _flush_para():
-        if para:
-            out.append("<p>" + _md_inline_to_html(" ".join(para)) + "</p>")
-            para.clear()
-
-    def _close_list():
-        nonlocal in_list
-        if in_list:
-            out.append("</ul>")
-            in_list = False
-
-    for line in md.split("\n"):
-        s = line.strip()
-        if not s:
-            _flush_para(); _close_list(); continue
-        if s in block_keys:  # blocco codice/mermaid: elemento a sé, niente <p>
-            _flush_para(); _close_list(); out.append(s); continue
-        if s.startswith("### "):
-            _flush_para(); _close_list(); out.append("<h3>" + _md_inline_to_html(s[4:]) + "</h3>")
-        elif s.startswith("## "):
-            _flush_para(); _close_list(); out.append("<h2>" + _md_inline_to_html(s[3:]) + "</h2>")
-        elif s.startswith("# "):
-            _flush_para(); _close_list(); out.append("<h1>" + _md_inline_to_html(s[2:]) + "</h1>")
-        elif s in ("---", "***", "___"):
-            _flush_para(); _close_list(); out.append("<hr>")
-        elif s.startswith("- ") or s.startswith("* "):
-            _flush_para()
-            if not in_list:
-                out.append("<ul>"); in_list = True
-            out.append("<li>" + _md_inline_to_html(s[2:]) + "</li>")
-        else:
-            _close_list(); para.append(s)
-    _flush_para(); _close_list()
-
-    body = "\n".join(out)
-    # 5) Ripristina i blocchi messi da parte (codice/mermaid/formule).
-    for key, content in store.items():
-        body = body.replace(key, content)
-    return body
-
-
-def _ensure_pdf_assets():
-    """Restituisce (path_mathjax, path_mermaid), scaricandoli in cache se mancano.
-
-    None se non è possibile procurarseli (niente rete e niente cache)."""
-    import urllib.request
-    try:
-        os.makedirs(PDF_ASSETS_DIR, exist_ok=True)
-    except OSError:
-        return None
-    paths = {}
-    for name, url in _PDF_ASSET_URLS.items():
-        p = os.path.join(PDF_ASSETS_DIR, name)
-        if not (os.path.isfile(p) and os.path.getsize(p) > 10000):
-            try:
-                with urllib.request.urlopen(url, timeout=30) as r:
-                    data = r.read()
-                with open(p, "wb") as f:
-                    f.write(data)
-            except Exception:
-                return None
-        paths[name] = p
-    return paths["tex-svg.js"], paths["mermaid.min.js"]
-
-
-def _find_browser() -> str | None:
-    """Trova un browser Chromium (Edge/Chrome) per la stampa PDF. None se assente."""
-    candidates: list[str] = []
-    if BROWSER_PATH:
-        candidates.append(BROWSER_PATH)
-    for name in ("msedge", "chrome", "chromium", "chromium-browser", "brave"):
-        found = shutil.which(name)
-        if found:
-            candidates.append(found)
-    bases = [os.environ.get("ProgramFiles", r"C:\Program Files"),
-             os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
-             os.environ.get("LocalAppData", "")]
-    for base in bases:
-        if not base:
-            continue
-        candidates.append(os.path.join(base, "Microsoft", "Edge", "Application", "msedge.exe"))
-        candidates.append(os.path.join(base, "Google", "Chrome", "Application", "chrome.exe"))
-    for c in candidates:
-        if c and os.path.isfile(c):
-            return c
-    return None
-
-
-def build_pdf_rich(md_text: str, out_path: str) -> bool:
-    """Genera un PDF con formule (MathJax) e mappe (Mermaid) DISEGNATE.
-
-    Converte il markdown in HTML e lo stampa con un browser Chromium headless già
-    presente sul sistema. Restituisce True se il PDF è stato creato, False se non
-    è possibile (nessun browser/asset): in tal caso il chiamante ripiega su fpdf2."""
-    import pathlib
-    browser = _find_browser()
-    if not browser:
-        return False
-    assets = _ensure_pdf_assets()
-    if not assets:
-        return False
-    mathjax, mermaid = assets
-    html_doc = (_PDF_HTML_TEMPLATE
-                .replace("__MATHJAX__", pathlib.Path(mathjax).as_uri())
-                .replace("__MERMAID__", pathlib.Path(mermaid).as_uri())
-                .replace("__BODY__", _md_to_html(md_text)))
-    with tempfile.TemporaryDirectory(prefix="echoscript_pdf_", ignore_cleanup_errors=True) as td:
-        html_path = os.path.join(td, "doc.html")
-        with open(html_path, "w", encoding="utf-8") as f:
-            f.write(html_doc)
-        # Chrome NON gestisce i percorsi lunghi (>260) né il prefisso \\?\: stampa
-        # su un file temporaneo dal nome corto e poi lo copiamo nella destinazione
-        # definitiva (che può essere lunga) tramite _lp().
-        tmp_pdf = os.path.join(td, "out.pdf")
-        cmd = [
-            browser, "--headless=new", "--disable-gpu", "--no-sandbox",
-            "--no-first-run", "--no-default-browser-check", "--disable-extensions",
-            # virtual-time-budget: lascia a MathJax/Mermaid il tempo di disegnare
-            # prima di stampare (altrimenti il PDF esce a metà rendering).
-            "--virtual-time-budget=20000", "--run-all-compositor-stages-before-draw",
-            # Genera i SEGNALIBRI/outline del PDF dai titoli (h1/h2/h3): è il
-            # «Sommario» cliccabile nel pannello laterale del lettore PDF, che
-            # rimanda a ogni capitolo. Flag ignorato dai browser troppo vecchi
-            # (nessun errore: in tal caso il PDF esce semplicemente senza outline).
-            "--generate-pdf-document-outline",
-            f"--print-to-pdf={tmp_pdf}", pathlib.Path(html_path).as_uri(),
-        ]
-        try:
-            subprocess.run(cmd, capture_output=True, timeout=120)
-        except Exception:
-            return False
-        if not (os.path.isfile(tmp_pdf) and os.path.getsize(tmp_pdf) > 1500):
-            return False
-        try:
-            shutil.copyfile(tmp_pdf, _lp(out_path))
-        except OSError:
-            return False
-    return os.path.isfile(_lp(out_path)) and os.path.getsize(_lp(out_path)) > 1500
-
-
-def _save_pdf(meta: dict, sections: list[dict], out_path: str, with_timestamps: bool,
-              engine_label: str = "", markdown: bool = False) -> bool:
-    """Esporta un PDF: prima quello "ricco" (formule/mappe disegnate via browser
-    headless), poi ripiega su fpdf2. NON usa Groq — lavora su testo già prodotto,
-    quindi NESSUN credito speso. Restituisce True se il PDF è stato creato."""
-    # «Salvato in:»: la cartella di output, ricavata dal percorso del PDF. Compare
-    # tra i metadati in testa al documento (non più in fondo a ogni pagina).
-    saved_in = os.path.dirname(os.path.abspath(out_path))
-    if RICH_PDF:
-        try:
-            md_text = build_md(meta["title"], meta, engine_label, sections,
-                               with_timestamps=with_timestamps, saved_in=saved_in)
-            if build_pdf_rich(md_text, out_path):
-                return True
-        except Exception:
-            pass
-    try:
-        build_pdf(meta["title"], meta, sections, out_path,
-                  with_timestamps=with_timestamps, markdown=markdown,
-                  engine_label=engine_label, saved_in=saved_in)
-        return True
-    except Exception as e:
-        console.print(f"[error]Export PDF fallito: {e}[/error]")
-        return False
-
-
-def _summary_user_prompt(text: str, section_title: str | None) -> str:
-    """Messaggio utente per il modello: titolo della sezione (se c'è) + testo."""
-    head = f"Titolo della sezione: «{section_title}».\n\n" if section_title else ""
-    return f"{head}Testo da riassumere:\n\n{text}"
-
-
-def _groq_chat_capture(client, model: str, **kwargs):
-    """client.chat.completions.create che, quando possibile, registra i crediti
-    residui del modello dagli header x-ratelimit-* (per il pulsante "crediti"),
-    SENZA costo aggiuntivo. Se la variante raw fallisce per motivi diversi da
-    credito/auth, ripiega sulla chiamata normale. Restituisce l'oggetto risposta
-    già parsato, come la create() classica."""
-    try:
-        raw = client.chat.completions.with_raw_response.create(model=model, **kwargs)
-    except Exception as e:
-        msg = str(e)
-        if _is_rate_limit(msg) or "401" in msg or "403" in msg:
-            raise
-        return client.chat.completions.create(model=model, **kwargs)
-    try:
-        record_rate_limits(model, raw.headers)
-    except Exception:
-        pass
-    return raw.parse()
-
-
-def _summarize_groq(client, text: str, section_title: str | None) -> str:
-    """Riassume un testo con un modello di CHAT di Groq (non Whisper)."""
-    resp = _groq_chat_capture(
-        client, settings.GROQ_SUMMARY_MODEL,
-        messages=[
-            {"role": "system", "content": summary.prompt_attivo()},
-            {"role": "user", "content": _summary_user_prompt(text, section_title)},
-        ],
-        temperature=0.3,
-    )
-    return (resp.choices[0].message.content or "").strip()
-
-
-def _summarize_ollama(text: str, section_title: str | None) -> str:
-    """Riassume un testo con un modello locale via Ollama (HTTP, niente pip)."""
-    import urllib.request
-    payload = {
-        "model": settings.OLLAMA_MODEL,
-        "messages": [
-            {"role": "system", "content": summary.prompt_attivo()},
-            {"role": "user", "content": _summary_user_prompt(text, section_title)},
-        ],
-        "stream": False,
-        # num_ctx alza la finestra di contesto (default Ollama: solo 2048 token,
-        # che troncherebbe i blocchi lunghi). Senza, i video lunghi perderebbero
-        # gran parte del testo nel riassunto.
-        "options": {"temperature": 0.3, "num_ctx": OLLAMA_NUM_CTX},
-    }
-    req = urllib.request.Request(
-        OLLAMA_HOST + "/api/chat",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=600) as r:
-        data = json.loads(r.read().decode("utf-8"))
-    return (data.get("message", {}).get("content") or "").strip()
-
-
-def _make_summarizer(client=None):
-    """Sceglie il motore del riassunto e restituisce (funzione, etichetta).
-
-    Preferisce Groq se è disponibile un client (backend cloud); altrimenti usa
-    Ollama in locale (100% offline). Solleva RuntimeError se nessuno è utilizzabile."""
-    if client is not None:
-        label = f"Riassunto automatico (Groq · {settings.GROQ_SUMMARY_MODEL})"
-        return (lambda text, title: _summarize_groq(client, text, title)), label
-    _check_ollama()
-    label = f"Riassunto automatico (locale · Ollama {settings.OLLAMA_MODEL})"
-    return (lambda text, title: _summarize_ollama(text, title)), label
-
-
-def _summarize_long(summarize_fn, text: str, section_title: str | None) -> str:
-    """Riassume un testo anche lungo: se supera SUMMARY_MAX_CHARS lo divide in
-    blocchi, li riassume singolarmente e poi unisce i parziali (map-reduce)."""
-    text = (text or "").strip()
-    if not text:
-        return ""
-    if len(text) <= SUMMARY_MAX_CHARS:
-        return summarize_fn(text, section_title)
-    # Map: riassumi a blocchi (riuso lo splitter della traduzione, con cap ampio).
-    saved = globals().get("_TRANSLATE_MAX_CHARS")
-    globals()["_TRANSLATE_MAX_CHARS"] = SUMMARY_MAX_CHARS
-    try:
-        blocks = _split_for_translation(text)
-    finally:
-        globals()["_TRANSLATE_MAX_CHARS"] = saved
-    partials = [summarize_fn(b, section_title) for b in blocks]
-    merged = "\n\n".join(p for p in partials if p)
-    # Reduce: ricompatta i parziali in un unico riassunto coerente.
-    return summarize_fn(merged, section_title)
-
-
-def summarize_sections(sections: list[dict], summarize_fn,
-                       on_progress=None, done_sections: list[dict] | None = None,
-                       on_section=None) -> list[dict]:
-    """Riassume ogni sezione (titolo invariato, testo -> riassunto).
-
-    'on_progress(i, n)' (opzionale) è chiamato dopo ogni sezione. Restituisce
-    nuove sezioni senza mutare quelle in ingresso.
-
-    Per il RESUME: 'done_sections' sono le sezioni già riassunte in precedenza
-    (saltate); 'on_section(list)' è chiamato dopo OGNI nuova sezione con l'elenco
-    completo finora, per salvare il parziale — così se i crediti Groq finiscono a
-    metà riassunto si riprende esattamente dalla sezione ferma, senza rispendere
-    crediti su quelle già fatte."""
-    out: list[dict] = list(done_sections or [])
-    start_index = len(out)
-    n = len(sections)
-    if on_progress and start_index:
-        on_progress(start_index, n)
-    for i in range(start_index, n):
-        sec = sections[i]
-        summary = _summarize_long(summarize_fn, sec.get("text", ""), sec.get("title"))
-        out.append({"start": sec.get("start"), "title": sec.get("title"), "text": summary})
-        if on_section:
-            on_section(out)
-        if on_progress:
-            on_progress(i + 1, n)
-    return out
+# temporaneo
+from server.enrichment.summary import (
+    _groq_chat_capture, _make_summarizer, _summarize_groq, _summarize_long,
+    _summarize_ollama, _summary_user_prompt, summarize_sections,
+)
 
 
 def summarize_existing(out_root: str, title: str, client=None,
@@ -3103,49 +1701,13 @@ def summarize_existing(out_root: str, title: str, client=None,
     return True
 
 
-# === PRE-RUN ESTIMATE (cost for Groq, time for local) ========================
-# Approximate Groq audio pricing ($ per hour of audio) and local processing-speed
-# factors (processing time / audio time), used ONLY for the pre-run estimate so
-# the user knows what to expect before committing. Figures are indicative.
-GROQ_PRICE_PER_HOUR = {
-    "whisper-large-v3-turbo": 0.04,
-    "whisper-large-v3": 0.111,
-    "distil-whisper-large-v3-en": 0.02,
-}
-_LOCAL_REALTIME_CPU = {
-    "base": 0.10, "small": 0.18, "medium": 0.45,
-    "large-v3": 0.90, "large-v3-turbo": 0.22,
-}
-
-
-def estimate_job(meta: dict, backend: str, model: str | None = None) -> dict:
-    """Rough pre-run estimate for ONE source, BEFORE downloading/transcribing.
-
-    Groq: estimated $ cost from the audio duration and the model's per-hour price.
-    Local: estimated processing TIME from a per-model realtime factor, divided by
-    ~8 on GPU. Returns a dict with a ready-to-show Italian 'detail' string."""
-    duration = meta.get("duration") or 0
-    hours = duration / 3600
-    if backend == "groq":
-        # 'model' (se passato) è il modello Groq scelto dall'utente; altrimenti il
-        # default corrente. Il prezzo/ora dipende dal modello selezionato.
-        gm = model or settings.GROQ_MODEL
-        price = GROQ_PRICE_PER_HOUR.get(gm, 0.04)
-        cost = hours * price
-        return {"backend": "groq", "duration": duration, "cost_usd": cost,
-                "model": gm,
-                "detail": (f"costo stimato ~${cost:.3f} (Groq {gm}, "
-                           f"{_format_duration(duration)} di audio)")}
-    device, _ = _resolve_device()
-    rt = _LOCAL_REALTIME_CPU.get(model or "small", 0.2)
-    if device == "cuda":
-        rt /= 8
-    secs = duration * rt
-    dev = "GPU" if device == "cuda" else "CPU"
-    return {"backend": "local", "duration": duration, "device": device, "seconds": secs,
-            "detail": (f"tempo stimato ~{_format_duration(secs)} su {dev} "
-                       f"(modello {model or 'small'}); nessun costo (offline)")}
-
+# === LA STIMA PRIMA DI PARTIRE: sta in server/services/estimate.py ===========
+#
+# Quanto costera' e quanto ci vorra', detto quando c'e' ancora tempo per
+# cambiare idea.
+from server.services.estimate import (
+    GROQ_PRICE_PER_HOUR, _LOCAL_REALTIME_CPU, estimate_job,
+)
 
 def run() -> None:
     """Orchestration: choose the engine and the SOURCE (YouTube URL or local
@@ -3326,7 +1888,7 @@ def run() -> None:
     # --- Process each job (one for YouTube, one per file in a batch) ---
     total = len(jobs)
     for idx, (meta, source) in enumerate(jobs, 1):
-        if _interrupted:
+        if fermarsi():
             break
         if total > 1:
             console.print()

@@ -62,6 +62,26 @@ def _noop_progress(phase, current, total, detail=""):  # pragma: no cover - triv
     controllare ogni volta se qualcuno sta ascoltando."""
 
 
+# Qualcuno ha chiesto di fermarsi (Ctrl+C dalla riga di comando).
+#
+# Sta qui e non dove viene premuto il tasto, perche' a doverlo LEGGERE sono le
+# funzioni di lavoro, che di tastiere non sanno niente. Chi intercetta il tasto
+# chiama chiedi_di_fermarsi(); chi lavora controlla fermarsi() fra un pezzo e
+# l'altro, e smette con garbo invece di essere ucciso a meta' di una scrittura.
+_fermare = False
+
+
+def chiedi_di_fermarsi() -> None:
+    """Segna che si vuole smettere. Lo chiama chi intercetta il Ctrl+C."""
+    global _fermare
+    _fermare = True
+
+
+def fermarsi() -> bool:
+    """True se qualcuno ha chiesto di smettere."""
+    return _fermare
+
+
 def _never_stop() -> bool:  # pragma: no cover - trivial
     """Callback di annullamento di default: non si ferma mai.
 

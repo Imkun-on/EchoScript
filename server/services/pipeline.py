@@ -38,6 +38,13 @@ import tempfile
 from server.config import messages, paths, settings
 from server.enrichment import summary
 from server.utils import text
+from server.config import groq_key, settings
+from server.enrichment import summary, translation, vision
+from server.export import document, pdf_rich
+from server.sources import download, metadata
+from server.state import checkpoints, credits, jobs
+from server.transcription import audio, groq_api, local_whisper
+from server.utils import contract, ffmpeg, media
 
 # La radice del progetto deve essere raggiungibile, altrimenti `import
 # transcriber` qui sotto non trova niente.
@@ -50,7 +57,6 @@ from server.utils import text
 if paths.cartella_risorse() not in sys.path:
     sys.path.insert(0, paths.cartella_risorse())
 
-import transcriber as tx            # gli aiutanti condivisi con la riga di comando
 
 # Dove finisce tutto quello che si produce.
 #
@@ -72,11 +78,11 @@ def _shared(fn, *args, **kwargs):
     """Chiama una funzione media condivisa di transcriber.py traducendone l'errore.
 
     Le funzioni core stanno in transcriber.py (che il motore importa già) e
-    segnalano i guasti con tx.MediaError. La GUI però cattura EngineError: qui
+    segnalano i guasti con contract.MediaError. La GUI però cattura EngineError: qui
     la riavvolgiamo, così il contratto verso l'alto non cambia."""
     try:
         return fn(*args, **kwargs)
-    except tx.MediaError as e:
+    except contract.MediaError as e:
         raise EngineError(str(e)) from e
 
 
@@ -188,18 +194,18 @@ def _L(key: str, **fmt) -> str:
 # === VIDEO METADATA ===
 # get_video_info / get_playlist_info vivono in transcriber.py (funzioni core,
 # senza interfaccia) e sono usate identiche da CLI e GUI: qui restano solo i
-# ponti che traducono tx.MediaError in EngineError.
+# ponti che traducono contract.MediaError in EngineError.
 
 def get_video_info(url: str) -> dict:
     """Metadati del video (senza scaricarlo). Raises EngineError on failure."""
-    return _shared(tx.get_video_info, url)
+    return _shared(metadata.get_video_info, url)
 
 
 def get_playlist_info(url: str) -> dict | None:
     """Nome/canale + elenco video se l'URL e' una playlist, altrimenti None.
 
     Raises EngineError su errore di rete/lettura."""
-    return _shared(tx.get_playlist_info, url)
+    return _shared(metadata.get_playlist_info, url)
 
 # === GROQ CLIENT ===
 
@@ -209,9 +215,9 @@ def make_groq_client(api_key: str | None = None):
     The key is taken from the argument, otherwise from GROQ_API_KEY (env or the
     .env file). The placeholder value is treated as "missing". A lightweight
     models.list() call validates the key before any real work begins."""
-    tx.load_dotenv()
+    groq_key.load_dotenv()
     key = (api_key or os.environ.get("GROQ_API_KEY", "")).strip()
-    if key == tx._GROQ_KEY_PLACEHOLDER:
+    if key == groq_key._GROQ_KEY_PLACEHOLDER:
         key = ""
     if not key:
         raise EngineError("API key Groq mancante. Inseriscila nel campo apposito "
@@ -256,7 +262,7 @@ def _parse_ratelimit_headers(headers) -> list[dict]:
     Only groups actually present in the response are returned.
 
     La lettura degli header (regex del formato '2m59.56s', unità, conversioni)
-    sta in tx.ratelimit_groups: qui resta solo la FORMA che serve alla GUI,
+    sta in credits.ratelimit_groups: qui resta solo la FORMA che serve alla GUI,
     durata + orario di azzeramento, diversa da quella salvata in cache."""
     return [
         {
@@ -266,7 +272,7 @@ def _parse_ratelimit_headers(headers) -> list[dict]:
             "reset_seconds": reset_s,
             "reset_clock": _reset_clock(reset_s),
         }
-        for kind, remaining, limit, reset_s in tx.ratelimit_groups(headers)
+        for kind, remaining, limit, reset_s in credits.ratelimit_groups(headers)
     ]
 
 
@@ -274,8 +280,8 @@ def _silent_probe_audio(workdir: str) -> str:
     """Generate a ~1s silent 16 kHz mono mp3 used only to read rate-limit headers."""
     out_path = os.path.join(workdir, "probe.mp3")
     cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i",
-           f"anullsrc=r={tx.AUDIO_SAMPLE_RATE}:cl=mono", "-t", "1",
-           "-b:a", tx.AUDIO_BITRATE, out_path]
+           f"anullsrc=r={settings.AUDIO_SAMPLE_RATE}:cl=mono", "-t", "1",
+           "-b:a", settings.AUDIO_BITRATE, out_path]
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
     return out_path
 
@@ -304,7 +310,7 @@ def fetch_groq_limits(api_key: str | None = None) -> dict:
             headers = raw.headers
         except Exception as e:
             msg = str(e)
-            if tx._is_rate_limit(msg):
+            if contract._is_rate_limit(msg):
                 # Già a zero: prova comunque a leggere gli header dell'errore 429.
                 headers = getattr(getattr(e, "response", None), "headers", {})
             elif "401" in msg or "invalid_api_key" in msg:
@@ -345,7 +351,7 @@ def get_cached_credits() -> list[dict]:
         (settings.GROQ_VISION_MODEL, "vision", 2),
     ]
     known_models = {m for m, _, _ in known}
-    cache_by_model = {snap.get("model", ""): snap for snap in tx.cached_rate_limits()}
+    cache_by_model = {snap.get("model", ""): snap for snap in credits.cached_rate_limits()}
 
     def _items_from(snap: dict) -> list[dict]:
         items: list[dict] = []
@@ -401,7 +407,7 @@ def get_cached_credits() -> list[dict]:
 
 def download_audio(url: str, workdir: str, on_progress=_noop) -> str:
     """Scarica la sola traccia audio in 'workdir'. Raises EngineError on failure."""
-    return _shared(tx.download_audio, url, workdir, on_progress)
+    return _shared(download.download_audio, url, workdir, on_progress)
 
 
 def download_video(url: str, workdir: str, on_progress=_noop) -> str:
@@ -409,7 +415,7 @@ def download_video(url: str, workdir: str, on_progress=_noop) -> str:
 
     Da questo unico file si estraggono SIA i fotogrammi SIA l'audio per la
     trascrizione. Raises EngineError on failure."""
-    return _shared(tx.download_video, url, workdir, on_progress)
+    return _shared(download.download_video, url, workdir, on_progress)
 
 
 # === AUDIO SPLITTING (Groq only) ===
@@ -418,7 +424,7 @@ def split_audio(audio_path: str, duration: float, workdir: str, on_progress=_noo
     """Divide l'audio in blocchi da ~CHUNK_SECONDS (16 kHz mono).
 
     Returns a list of (offset_seconds, chunk_path) pairs."""
-    return _shared(tx.split_audio, audio_path, duration, workdir, on_progress)
+    return _shared(audio.split_audio, audio_path, duration, workdir, on_progress)
 
 # === TRANSCRIPTION ===
 
@@ -432,7 +438,7 @@ def transcribe_groq(client, chunks: list[tuple[float, str]], on_progress=_noop,
     dict, viene riempito con i limiti Groq letti dagli header dell'ULTIMO blocco
     (usage_out['items'] = lista di gruppi limite) per mostrare i crediti residui.
     Returns (segments, detected_language). Se Groq rifiuta per limite, solleva
-    tx.TranscriptionInterrupted col parziale (per il checkpoint)."""
+    contract.TranscriptionInterrupted col parziale (per il checkpoint)."""
     all_segments: list[dict] = list(prior_segments or [])
     context = " ".join(s["text"] for s in all_segments[-6:]) if all_segments else ""
     detected = prior_lang
@@ -445,16 +451,16 @@ def transcribe_groq(client, chunks: list[tuple[float, str]], on_progress=_noop,
         on_progress("transcribe", i, n, _L("chunk_send", i=i + 1, n=n))
         try:
             if i == start_index:
-                segments, lang = tx._transcribe_chunk(
+                segments, lang = groq_api._transcribe_chunk(
                     client, path, prompt=context, return_language=True,
                     language=language, on_headers=sink)
                 detected = detected or lang
             else:
-                segments = tx._transcribe_chunk(
+                segments = groq_api._transcribe_chunk(
                     client, path, prompt=context, language=language, on_headers=sink)
-        except tx.GroqRateLimit:
+        except contract.GroqRateLimit:
             # I blocchi 0..i-1 sono completati: passali a chi orchestra.
-            raise tx.TranscriptionInterrupted(all_segments, i, n, detected)
+            raise contract.TranscriptionInterrupted(all_segments, i, n, detected)
         for seg in segments:
             seg["start"] += offset
             seg["end"] += offset
@@ -476,11 +482,11 @@ def transcribe_local(model_name: str, audio_path: str, duration: float, on_progr
                      resume_cp: dict | None = None, workdir: str | None = None):
     """Trascrive tutto il file in locale con faster-whisper, riportando l'avanzamento.
 
-    Ponte verso tx.transcribe_local: sceglie da se' GPU (CUDA) o CPU, chiede i
+    Ponte verso local_whisper.transcribe_local: sceglie da se' GPU (CUDA) o CPU, chiede i
     timestamp per parola quando WORD_TIMESTAMPS e' attivo e gestisce il
     checkpoint di ripresa. 'language' forza la lingua audio (None = autorileva).
     Returns (segments, detected_language). Raises EngineError on failure."""
-    return _shared(tx.transcribe_local, model_name, audio_path, duration, on_progress,
+    return _shared(local_whisper.transcribe_local, model_name, audio_path, duration, on_progress,
                    language=language, meta=meta, resume_cp=resume_cp,
                    workdir=workdir)
 
@@ -519,7 +525,7 @@ def video_meta(source: str, options: dict, on_progress=_noop) -> dict:
     if options.get("source_kind", "youtube") == "local":
         if not os.path.isfile(source):
             raise EngineError(f"File non trovato: {source}")
-        return tx.local_file_meta(source)
+        return metadata.local_file_meta(source)
     return get_video_info(source)
 
 
@@ -556,7 +562,7 @@ def transcribe_only(source: str, options: dict, on_progress=_noop, resume: bool 
         if not os.path.isfile(source):
             raise EngineError(f"File non trovato: {source}")
         on_progress("info", None, None, _L("read_audio"))
-        meta = tx.local_file_meta(source)
+        meta = metadata.local_file_meta(source)
     else:
         on_progress("info", None, None, _L("read_info"))
         meta = get_video_info(source)
@@ -569,9 +575,9 @@ def transcribe_only(source: str, options: dict, on_progress=_noop, resume: bool 
     local_cp = None
     if resume:
         if backend == "groq":
-            cp = tx.load_checkpoint(meta)
+            cp = checkpoints.load_checkpoint(meta)
         else:
-            local_cp = tx.load_local_checkpoint(meta)
+            local_cp = checkpoints.load_local_checkpoint(meta)
 
     # Analisi visiva: serve il VIDEO (non solo l'audio) e va CONSERVATO oltre il
     # workdir temporaneo, perché i fotogrammi si estraggono nella fase 2
@@ -579,7 +585,7 @@ def transcribe_only(source: str, options: dict, on_progress=_noop, resume: bool 
     # per un file locale usiamo il file stesso. Chiavi con underscore: i builder
     # dei file non le serializzano.
     do_visual = bool(options.get("visual")) and (
-        source_kind == "youtube" or tx._has_video_stream(source))
+        source_kind == "youtube" or download._has_video_stream(source))
     meta["_video_path"] = None
     meta["_video_tmpdir"] = None
 
@@ -626,7 +632,7 @@ def _transcribe_body(source, options, on_progress, meta, client, backend, model,
                 audio_path = download_audio(source, workdir, on_progress)
         else:
             audio_path = download_audio(source, workdir, on_progress)
-        duration = meta["duration"] or tx._probe_duration(audio_path)
+        duration = meta["duration"] or ffmpeg._probe_duration(audio_path)
         meta["duration"] = duration  # keep it consistent for the output builders
         if backend == "groq":
             chunks = split_audio(audio_path, duration, workdir, on_progress)
@@ -641,14 +647,14 @@ def _transcribe_body(source, options, on_progress, meta, client, backend, model,
                 segments, detected_lang = transcribe_groq(
                     client, chunks, on_progress, start_index, prior, prior_lang,
                     language=audio_lang, usage_out=groq_usage)
-            except tx.TranscriptionInterrupted as ti:
+            except contract.TranscriptionInterrupted as ti:
                 # Limite raggiunto: salva/aggiorna il checkpoint e segnala.
-                tx.save_checkpoint(meta, {
+                checkpoints.save_checkpoint(meta, {
                     "title": meta["title"], "id": meta.get("id"),
                     "source": meta.get("source", source_kind),
                     "source_path": meta.get("source_path"),
                     "webpage_url": meta.get("webpage_url"),
-                    "model": settings.GROQ_MODEL, "chunk_seconds": tx.CHUNK_SECONDS,
+                    "model": settings.GROQ_MODEL, "chunk_seconds": settings.CHUNK_SECONDS,
                     "total_chunks": ti.total, "done_chunks": ti.done,
                     "detected_language": ti.lang, "segments": ti.segments,
                     "duration": duration,
@@ -656,12 +662,12 @@ def _transcribe_body(source, options, on_progress, meta, client, backend, model,
                 # Minutaggio raggiunto: i blocchi sono uniformi (CHUNK_SECONDS),
                 # quindi il tempo fatto = blocchi completati × durata blocco,
                 # limitato alla durata totale del video.
-                done_s = ti.done * tx.CHUNK_SECONDS
+                done_s = ti.done * settings.CHUNK_SECONDS
                 if duration:
                     done_s = min(done_s, duration)
                 raise RateLimitReached(ti.done, ti.total, done_s, duration or 0.0)
             # Trascrizione completa: niente più parziale da conservare.
-            tx.delete_checkpoint(meta)
+            checkpoints.delete_checkpoint(meta)
             # Crediti Groq residui letti durante la trascrizione (per il riepilogo).
             # Chiave con underscore: i builder dei file non la serializzano.
             if groq_usage.get("items"):
@@ -700,18 +706,18 @@ def continue_local_from_groq(source: str, options: dict, on_progress=_noop):
         if not os.path.isfile(source):
             raise EngineError(f"File non trovato: {source}")
         on_progress("info", None, None, _L("read_audio"))
-        meta = tx.local_file_meta(source)
+        meta = metadata.local_file_meta(source)
     else:
         on_progress("info", None, None, _L("read_info"))
         meta = get_video_info(source)
 
-    cp = tx.load_checkpoint(meta)
+    cp = checkpoints.load_checkpoint(meta)
     if not cp:
         raise EngineError("Nessun parziale Groq da completare per questo video.")
 
     duration = cp.get("duration") or meta.get("duration") or 0.0
     meta["duration"] = duration
-    chunk_seconds = cp.get("chunk_seconds") or tx.CHUNK_SECONDS
+    chunk_seconds = cp.get("chunk_seconds") or settings.CHUNK_SECONDS
     done_seconds = int(cp.get("done_chunks", 0)) * chunk_seconds
     if duration:
         done_seconds = min(done_seconds, duration)
@@ -734,7 +740,7 @@ def continue_local_from_groq(source: str, options: dict, on_progress=_noop):
         else:
             audio_path = download_audio(source, workdir, on_progress)
         if not duration:
-            duration = tx._probe_duration(audio_path)
+            duration = ffmpeg._probe_duration(audio_path)
             meta["duration"] = duration
             local_cp["duration"] = duration
         segments, detected = transcribe_local(
@@ -744,8 +750,8 @@ def continue_local_from_groq(source: str, options: dict, on_progress=_noop):
     if not segments:
         raise EngineError("Nessun testo trascritto.")
     # Completato: via ogni parziale (sia Groq sia l'eventuale locale intermedio).
-    tx.delete_checkpoint(meta)
-    tx.delete_local_checkpoint(meta)
+    checkpoints.delete_checkpoint(meta)
+    checkpoints.delete_local_checkpoint(meta)
     meta["detected_language"] = detected or cp.get("detected_language") or meta.get("language")
     return meta, segments, engine_label, None
 
@@ -771,20 +777,20 @@ def _translate_outputs(meta: dict, sections: list[dict], options: dict,
     # UI inglese -> inglese (un utente straniero vuole gli output nella sua lingua).
     target = LINGUA_USCITA
     safe_title = text._safe_filename(meta["title"])
-    trad_dir = os.path.join(video_dir, tx.transl_subdir())
+    trad_dir = os.path.join(video_dir, jobs.transl_subdir())
     base = os.path.join(trad_dir, f"{safe_title}_{target}")
-    lang_label = tx._lang_name(target) or target
+    lang_label = media._lang_name(target) or target
 
     n = len(sections)
     # Resume: ricarica dallo stato le sezioni già tradotte (se una precedente
     # esecuzione si era interrotta) e riparti da lì; 'on_section' salva il
     # parziale dopo ogni sezione, così è sempre riprendibile.
-    done_secs, _persist_translation = tx.resume_sections(
+    done_secs, _persist_translation = jobs.resume_sections(
         meta, "translation", n, "target", target)
 
     on_progress("translate", len(done_secs), n, _L("translating_to", lang=lang_label))
     try:
-        translated = tx.translate_sections(
+        translated = translation.translate_sections(
             sections, target, local=local,
             on_progress=lambda i, tot: on_progress("translate", i, tot,
                                                    _L("section_tr", i=i, n=tot)),
@@ -797,10 +803,10 @@ def _translate_outputs(meta: dict, sections: list[dict], options: dict,
         warnings.append(_L("tr_interrupted", e=e))
         return None
 
-    engine_label = tx._translate_engine_label(target, local)
+    engine_label = translation._translate_engine_label(target, local)
     # La versione tradotta è testo continuo, senza timestamp (più leggibile).
-    _write(f"{base}.md", tx.build_md(meta["title"], meta, engine_label, translated, with_timestamps=False), created, video_dir)
-    _write(f"{base}.txt", tx.build_txt(meta["title"], meta, translated), created, video_dir)
+    _write(f"{base}.md", document.build_md(meta["title"], meta, engine_label, translated, with_timestamps=False), created, video_dir)
+    _write(f"{base}.txt", document.build_txt(meta["title"], meta, translated), created, video_dir)
     # JSON delle sezioni tradotte: utile per ririassumere la traduzione dopo.
     _write(f"{base}.json",
            json.dumps({"target": target, "sections": translated}, ensure_ascii=False, indent=2),
@@ -808,13 +814,13 @@ def _translate_outputs(meta: dict, sections: list[dict], options: dict,
     if options.get("export"):
         try:
             _ensure_dir(f"{base}.pdf")
-            if tx._save_pdf(meta, translated, f"{base}.pdf", with_timestamps=False,
+            if pdf_rich._save_pdf(meta, translated, f"{base}.pdf", with_timestamps=False,
                             engine_label=engine_label):
                 created.append(os.path.relpath(f"{base}.pdf", video_dir).replace("\\", "/"))
         except Exception as e:
             warnings.append(_L("tr_pdf_fail", e=e))
     # Traduzione completata e salvata: fase 'done' nello stato.
-    tx.update_stage(meta, "translation", status=tx.STAGE_DONE,
+    jobs.update_stage(meta, "translation", status=jobs.STAGE_DONE,
                     done=len(translated), total=n, sections=translated,
                     extra={"target": target})
     return translated
@@ -858,26 +864,26 @@ def _summarize_outputs(meta: dict, sections: list[dict], options: dict,
     vengono inseriti nel riassunto. Il PDF è quello "ricco" (formule/mappe/frame)."""
     sum_client = _resolve_summary_client(options, client)
     try:
-        summarize_fn, engine_label = tx._make_summarizer(sum_client)
+        summarize_fn, engine_label = summary._make_summarizer(sum_client)
     except RuntimeError as e:        # né Groq né Ollama disponibili
         warnings.append(_L("sum_unavail", e=e))
         return "skipped"
 
     safe_title = text._safe_filename(meta["title"])
-    sum_dir = os.path.join(video_dir, tx.summary_subdir())
-    suffix = tx.SUMMARY_SUFFIX
+    sum_dir = os.path.join(video_dir, jobs.summary_subdir())
+    suffix = jobs.SUMMARY_SUFFIX
     base = os.path.join(sum_dir, f"{safe_title}_{suffix}")
 
     # Arricchimento visivo: fonde le note nelle sezioni e attiva il prompt giusto.
     visual_notes = visual_notes or []
     if visual_notes:
-        sections = tx._merge_visual_into_sections(sections, visual_notes)
+        sections = vision._merge_visual_into_sections(sections, visual_notes)
 
     n = len(sections)
     # Resume: riparti dalle sezioni già riassunte (es. crediti Groq esauriti a
     # metà); 'on_section' salva il parziale dopo ogni sezione. Se la lingua UI è
     # cambiata dall'ultima volta, il parziale (in un'altra lingua) non si riusa.
-    done_secs, _persist_summary = tx.resume_sections(
+    done_secs, _persist_summary = jobs.resume_sections(
         meta, "summary", n, "lang", LINGUA_USCITA)
 
     on_progress("summarize", len(done_secs), n, _L("summarizing"))
@@ -887,9 +893,9 @@ def _summarize_outputs(meta: dict, sections: list[dict], options: dict,
     # si danno istruzioni diverse: deve intrecciarle al parlato invece di
     # riassumere solo quello.
     summary.PROMPT_ATTIVO = (
-        summary.prompt_visivo(tx.CONCEPT_MAP) if visual_notes else None)
+        summary.prompt_visivo(settings.CONCEPT_MAP) if visual_notes else None)
     try:
-        summarized = tx.summarize_sections(
+        summarized = summary.summarize_sections(
             sections, summarize_fn,
             on_progress=lambda i, tot: on_progress("summarize", i, tot,
                                                    _L("section_sum", i=i, n=tot)),
@@ -897,7 +903,7 @@ def _summarize_outputs(meta: dict, sections: list[dict], options: dict,
     except Exception as e:
         # Parziale già salvato: lo stato resta 'partial' e il riassunto potrà
         # riprendere da lì (anche in locale con Ollama).
-        if tx._is_rate_limit(str(e)):
+        if contract._is_rate_limit(str(e)):
             warnings.append(_L("sum_ratelimit"))
             return "partial"
         warnings.append(_L("sum_fail", e=e))
@@ -911,34 +917,34 @@ def _summarize_outputs(meta: dict, sections: list[dict], options: dict,
     # Pulizia diagrammi: corregge le frecce Mermaid e, se la mappa concettuale è
     # disattivata, rimuove eventuali blocchi mermaid sfuggiti al modello.
     for sec in summarized:
-        txt = tx._fix_mermaid_arrows(sec.get("text", ""))
-        if not tx.CONCEPT_MAP:
-            txt = tx._strip_mermaid_blocks(txt)
+        txt = vision._fix_mermaid_arrows(sec.get("text", ""))
+        if not settings.CONCEPT_MAP:
+            txt = vision._strip_mermaid_blocks(txt)
         sec["text"] = txt
 
     # Fotogrammi nel riassunto (link RELATIVI nel .md, ASSOLUTI nel PDF).
-    frame_notes = [n for n in visual_notes if n.get("image")] if tx.SUMMARY_FRAMES else []
+    frame_notes = [n for n in visual_notes if n.get("image")] if settings.SUMMARY_FRAMES else []
     sections_md, sections_pdf = summarized, summarized
     if frame_notes:
-        frames_dir = os.path.join(video_dir, tx.visual_subdir(), "frames")
-        rel_prefix = f"../{tx.visual_subdir()}/frames/"
-        sections_md = tx._append_frames_to_sections(summarized, frame_notes, lambda img: rel_prefix + img)
-        sections_pdf = tx._append_frames_to_sections(summarized, frame_notes,
+        frames_dir = os.path.join(video_dir, jobs.visual_subdir(), "frames")
+        rel_prefix = f"../{jobs.visual_subdir()}/frames/"
+        sections_md = vision._append_frames_to_sections(summarized, frame_notes, lambda img: rel_prefix + img)
+        sections_pdf = vision._append_frames_to_sections(summarized, frame_notes,
                                                     lambda img: os.path.join(frames_dir, img))
 
     # Il riassunto è testo pulito: niente timestamp. Il .txt resta senza immagini.
-    _write(f"{base}.md", tx.build_md(meta["title"], meta, engine_label, sections_md, with_timestamps=False), created, video_dir)
-    _write(f"{base}.txt", tx.build_txt(meta["title"], meta, summarized, markdown=True), created, video_dir)
+    _write(f"{base}.md", document.build_md(meta["title"], meta, engine_label, sections_md, with_timestamps=False), created, video_dir)
+    _write(f"{base}.txt", document.build_txt(meta["title"], meta, summarized, markdown=True), created, video_dir)
     if options.get("export"):
         try:
             _ensure_dir(f"{base}.pdf")
-            if tx._save_pdf(meta, sections_pdf, f"{base}.pdf", with_timestamps=False,
+            if pdf_rich._save_pdf(meta, sections_pdf, f"{base}.pdf", with_timestamps=False,
                             engine_label=engine_label, markdown=True):
                 created.append(os.path.relpath(f"{base}.pdf", video_dir).replace("\\", "/"))
         except Exception as e:
             warnings.append(_L("sum_pdf_fail", e=e))
     # Riassunto completato e salvato: fase 'done' nello stato.
-    tx.update_stage(meta, "summary", status=tx.STAGE_DONE,
+    jobs.update_stage(meta, "summary", status=jobs.STAGE_DONE,
                     done=len(summarized), total=len(summarized), sections=summarized,
                     extra={"lang": LINGUA_USCITA})
     return "done"
@@ -985,27 +991,27 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
 
     safe_title = text._safe_filename(meta["title"])
     video_dir = os.path.join(out_root, safe_title)
-    trans_dir = os.path.join(video_dir, tx.trans_subdir())
+    trans_dir = os.path.join(video_dir, jobs.trans_subdir())
     base_orig = os.path.join(trans_dir, safe_title)
 
-    sections = tx._build_sections(meta, segments)
+    sections = document._build_sections(meta, segments)
     created: list[str] = []
     warnings: list[str] = []
     on_progress("export", None, None, _L("saving_files"))
-    _write(f"{base_orig}.md", tx.build_md(meta["title"], meta, engine_label, sections, with_timestamps=True), created, video_dir)
-    _write(f"{base_orig}.txt", tx.build_txt(meta["title"], meta, sections), created, video_dir)
-    _write(f"{base_orig}.json", tx.build_transcript_json(meta, segments, engine_label), created, video_dir)
+    _write(f"{base_orig}.md", document.build_md(meta["title"], meta, engine_label, sections, with_timestamps=True), created, video_dir)
+    _write(f"{base_orig}.txt", document.build_txt(meta["title"], meta, sections), created, video_dir)
+    _write(f"{base_orig}.json", document.build_transcript_json(meta, segments, engine_label), created, video_dir)
 
     # Stato pipeline: la trascrizione è ora su disco. Registra il PIANO (quali
     # fasi erano richieste) così un futuro «Riprendi» sa cosa completare e da dove.
-    _want_tr = bool(options.get("translate")) and not tx._is_same_language(
+    _want_tr = bool(options.get("translate")) and not media._is_same_language(
         meta.get("detected_language"), LINGUA_USCITA)
     _want_sum = bool(options.get("summarize"))
-    _st = tx._empty_state(meta, options.get("backend", "groq"))
-    _st["stages"]["transcription"]["status"] = tx.STAGE_DONE
-    _st["stages"]["translation"]["status"] = tx.STAGE_PENDING if _want_tr else tx.STAGE_SKIP
-    _st["stages"]["summary"]["status"] = tx.STAGE_PENDING if _want_sum else tx.STAGE_SKIP
-    tx.save_state(meta, _st)
+    _st = jobs._empty_state(meta, options.get("backend", "groq"))
+    _st["stages"]["transcription"]["status"] = jobs.STAGE_DONE
+    _st["stages"]["translation"]["status"] = jobs.STAGE_PENDING if _want_tr else jobs.STAGE_SKIP
+    _st["stages"]["summary"]["status"] = jobs.STAGE_PENDING if _want_sum else jobs.STAGE_SKIP
+    jobs.save_state(meta, _st)
 
     # Optional PDF export of the transcription (PDF "ricco": formule/mappe/frame
     # renderizzati via browser headless, con ripiego automatico su fpdf2).
@@ -1013,7 +1019,7 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
         on_progress("export", None, None, _L("creating_pdf"))
         try:
             _ensure_dir(f"{base_orig}.pdf")
-            if tx._save_pdf(meta, sections, f"{base_orig}.pdf", with_timestamps=True,
+            if pdf_rich._save_pdf(meta, sections, f"{base_orig}.pdf", with_timestamps=True,
                             engine_label=engine_label):
                 created.append(os.path.relpath(f"{base_orig}.pdf", video_dir).replace("\\", "/"))
         except Exception as e:
@@ -1044,20 +1050,20 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
         try:
             vis_label = (f"Groq · {settings.GROQ_VISION_MODEL}" if chat_client is not None
                          else f"Ollama · {settings.OLLAMA_VISION_MODEL}")
-            frames_out = os.path.join(video_dir, tx.visual_subdir(), "frames")
+            frames_out = os.path.join(video_dir, jobs.visual_subdir(), "frames")
             with tempfile.TemporaryDirectory(prefix="echoscript_vis_", ignore_cleanup_errors=True) as vwork:
-                visual_notes = tx.analyze_video_visuals(
+                visual_notes = vision.analyze_video_visuals(
                     meta["_video_path"], meta.get("duration") or 0.0, vwork,
                     client=chat_client, frames_out_dir=frames_out,
                     on_progress=on_progress, stats=vstats,
                     segments=segments)
             if visual_notes:
-                tx.save_visual_notes(out_root, meta, visual_notes, vis_label,
+                vision.save_visual_notes(out_root, meta, visual_notes, vis_label,
                                      do_export, LINGUA_USCITA, quiet=True)
                 visual_info = {
                     "count": len(visual_notes),
                     "with_image": sum(1 for n in visual_notes if n.get("image")),
-                    "dir": os.path.join(video_dir, tx.visual_subdir()),
+                    "dir": os.path.join(video_dir, jobs.visual_subdir()),
                 }
             else:
                 # Nessuna nota: spiega il MOTIVO (prima era silenzioso — cartella
@@ -1074,9 +1080,9 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
     translated_sections = None
     audio_lang = meta.get("detected_language")
     if options.get("translate"):
-        if tx._is_same_language(audio_lang, LINGUA_USCITA):
+        if media._is_same_language(audio_lang, LINGUA_USCITA):
             # L'audio è già nella lingua dell'interfaccia: tradurre sarebbe inutile.
-            _ln = tx._lang_name(LINGUA_USCITA) or LINGUA_USCITA
+            _ln = media._lang_name(LINGUA_USCITA) or LINGUA_USCITA
             warnings.append(_L("audio_already", lang=_ln))
         else:
             translated_sections = _translate_outputs(
@@ -1127,7 +1133,7 @@ def _load_saved_transcript(meta: dict, out_root: str):
     Usa i metadati RICOSTRUITI dal .json per contenuti/PDF, ma tiene la lingua
     rilevata dai metadati originali se disponibile. La chiave di stato è basata
     sul titolo, quindi coincide con quella scritta durante la trascrizione."""
-    existing = tx.load_existing_transcript(out_root, meta["title"])
+    existing = jobs.load_existing_transcript(out_root, meta["title"])
     if not existing:
         raise EngineError("Nessuna trascrizione salvata trovata per questo video.")
     disk_meta, segments, engine_label = existing
@@ -1163,7 +1169,7 @@ def translate_only(meta: dict, options: dict, out_root: str, on_progress=_noop) 
     _set_engine_lang(options)
     disk_meta, segments, engine_label = _load_saved_transcript(meta, out_root)
     video_dir = os.path.join(out_root, text._safe_filename(disk_meta["title"]))
-    sections = tx._build_sections(disk_meta, segments)
+    sections = document._build_sections(disk_meta, segments)
     created, warnings = [], []
     chat_client = _resolve_summary_client(options, None)
     _translate_outputs(disk_meta, sections, options, video_dir, created, warnings,
@@ -1184,9 +1190,9 @@ def summary_only(meta: dict, options: dict, out_root: str, on_progress=_noop) ->
     # La traduzione è salvata col suffisso della lingua di destinazione, che è
     # quella dell'interfaccia: cercarla sempre come "_it" significava, con la UI
     # in inglese, non trovarla mai e riassumere l'originale di nascosto.
-    sections = (tx.load_existing_translation(out_root, disk_meta["title"], LINGUA_USCITA)
-                or tx._build_sections(disk_meta, segments))
-    visual_notes = tx.load_visual_notes(out_root, disk_meta["title"]) or []
+    sections = (jobs.load_existing_translation(out_root, disk_meta["title"], LINGUA_USCITA)
+                or document._build_sections(disk_meta, segments))
+    visual_notes = vision.load_visual_notes(out_root, disk_meta["title"]) or []
     created, warnings = [], []
     chat_client = _resolve_summary_client(options, None)
     status = _summarize_outputs(disk_meta, sections, options, video_dir, created,
@@ -1208,22 +1214,22 @@ def resume(meta: dict, options: dict, out_root: str, on_progress=_noop) -> dict:
     video_dir = os.path.join(out_root, text._safe_filename(disk_meta["title"]))
     created, warnings = [], []
     chat_client = _resolve_summary_client(options, None)
-    sections = tx._build_sections(disk_meta, segments)
+    sections = document._build_sections(disk_meta, segments)
 
-    state = tx.load_state(disk_meta)
+    state = jobs.load_state(disk_meta)
     translated = None
-    if tx.stage_status(state, "translation") in (tx.STAGE_PENDING, tx.STAGE_PARTIAL):
+    if jobs.stage_status(state, "translation") in (jobs.STAGE_PENDING, jobs.STAGE_PARTIAL):
         translated = _translate_outputs(disk_meta, sections, options, video_dir,
                                         created, warnings, on_progress,
                                         local=chat_client is None)
     summary_status = None
-    if tx.stage_status(tx.load_state(disk_meta), "summary") in (tx.STAGE_PENDING, tx.STAGE_PARTIAL):
+    if jobs.stage_status(jobs.load_state(disk_meta), "summary") in (jobs.STAGE_PENDING, jobs.STAGE_PARTIAL):
         # Stessa lingua con cui la traduzione è stata scritta (vedi summary_only).
         src = (translated
-               or tx.load_existing_translation(out_root, disk_meta["title"],
+               or jobs.load_existing_translation(out_root, disk_meta["title"],
                                                LINGUA_USCITA)
                or sections)
-        visual_notes = tx.load_visual_notes(out_root, disk_meta["title"]) or []
+        visual_notes = vision.load_visual_notes(out_root, disk_meta["title"]) or []
         summary_status = _summarize_outputs(disk_meta, src, options, video_dir,
                                             created, warnings, chat_client,
                                             on_progress, visual_notes=visual_notes)
@@ -1234,12 +1240,12 @@ def resume(meta: dict, options: dict, out_root: str, on_progress=_noop) -> dict:
 def can_resume(meta: dict, out_root: str) -> bool:
     """True se il video ha uno stato con una fase da riprendere (per il menu GUI)."""
     disk_meta = dict(meta)
-    return tx.has_resumable_state(disk_meta)
+    return jobs.has_resumable_state(disk_meta)
 
 
 def resume_hint(meta: dict, out_root: str, lang: str = "it") -> str:
     """Testo breve «riprende da…» per il video (o "" se niente da riprendere)."""
-    return tx.resume_info_text(dict(meta), lang)
+    return jobs.resume_info_text(dict(meta), lang)
 
 
 def process(url: str, options: dict, on_progress=_noop, out_root: str = RESULTS_DIR) -> dict:

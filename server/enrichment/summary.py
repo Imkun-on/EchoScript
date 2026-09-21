@@ -1,7 +1,10 @@
 """Il riassunto: le istruzioni che si danno al modello.
 
 Cosa c'e' qui dentro
-    Quasi soltanto testo. Sono le regole che il modello deve seguire mentre
+    Due cose: le istruzioni che si danno al modello, e il lavoro di mandargli
+    il testo a pezzi e rimettere insieme le risposte.
+
+    Le istruzioni sono quasi soltanto testo: le regole che il modello deve seguire mentre
     trasforma una trascrizione in un riassunto: cosa togliere (le esitazioni,
     le ripetizioni, le frasi lasciate a meta'), cosa non toccare mai (i nomi,
     i numeri, i termini tecnici), come comportarsi con gli errori che la
@@ -34,6 +37,20 @@ PROMPT_ATTIVO: l'unica cosa qui dentro che cambia
     E' la stessa regola delle impostazioni, per lo stesso motivo.
 """
 from __future__ import annotations
+
+import json
+import re
+import time
+
+from server.config import settings
+from server.config.settings import (
+    OLLAMA_HOST, OLLAMA_NUM_CTX, SUMMARY_MAX_CHARS,
+)
+from server.utils.console import console
+from server.utils.contract import GroqRateLimit, _is_rate_limit
+from server.enrichment.translation import _split_for_translation
+from server.state.credits import record_rate_limits
+from server.utils.ollama import _check_ollama
 
 
 # Dal testo italiano (la traduzione, oppure la trascrizione se l'audio era già
@@ -147,3 +164,129 @@ def prompt_visivo(mappa_concetti: bool) -> str:
 def prompt_attivo() -> str:
     """Quello da usare in questo momento: il visivo se c'e', il base altrimenti."""
     return PROMPT_ATTIVO or prompt_base()
+
+
+# =============================================================================
+#  Il lavoro: mandare il testo al modello e rimettere insieme le risposte
+# =============================================================================
+#
+# Perche' a pezzi e non tutto insieme
+#     Perche' i modelli hanno un tetto a quanto testo riescono a tenere in
+#     mente in una volta. Una trascrizione di due ore lo supera largamente.
+#
+#     Si spezza per sezioni, che e' il taglio giusto: una sezione e' gia'
+#     un'unita' di senso, quindi il modello non perde il filo come farebbe se
+#     lo si tagliasse a un numero fisso di caratteri.
+
+def _summary_user_prompt(text: str, section_title: str | None) -> str:
+    """Messaggio utente per il modello: titolo della sezione (se c'è) + testo."""
+    head = f"Titolo della sezione: «{section_title}».\n\n" if section_title else ""
+    return f"{head}Testo da riassumere:\n\n{text}"
+def _groq_chat_capture(client, model: str, **kwargs):
+    """client.chat.completions.create che, quando possibile, registra i crediti
+    residui del modello dagli header x-ratelimit-* (per il pulsante "crediti"),
+    SENZA costo aggiuntivo. Se la variante raw fallisce per motivi diversi da
+    credito/auth, ripiega sulla chiamata normale. Restituisce l'oggetto risposta
+    già parsato, come la create() classica."""
+    try:
+        raw = client.chat.completions.with_raw_response.create(model=model, **kwargs)
+    except Exception as e:
+        msg = str(e)
+        if _is_rate_limit(msg) or "401" in msg or "403" in msg:
+            raise
+        return client.chat.completions.create(model=model, **kwargs)
+    try:
+        record_rate_limits(model, raw.headers)
+    except Exception:
+        pass
+    return raw.parse()
+def _summarize_groq(client, text: str, section_title: str | None) -> str:
+    """Riassume un testo con un modello di CHAT di Groq (non Whisper)."""
+    resp = _groq_chat_capture(
+        client, settings.GROQ_SUMMARY_MODEL,
+        messages=[
+            {"role": "system", "content": prompt_attivo()},
+            {"role": "user", "content": _summary_user_prompt(text, section_title)},
+        ],
+        temperature=0.3,
+    )
+    return (resp.choices[0].message.content or "").strip()
+def _summarize_ollama(text: str, section_title: str | None) -> str:
+    """Riassume un testo con un modello locale via Ollama (HTTP, niente pip)."""
+    import urllib.request
+    payload = {
+        "model": settings.OLLAMA_MODEL,
+        "messages": [
+            {"role": "system", "content": prompt_attivo()},
+            {"role": "user", "content": _summary_user_prompt(text, section_title)},
+        ],
+        "stream": False,
+        # num_ctx alza la finestra di contesto (default Ollama: solo 2048 token,
+        # che troncherebbe i blocchi lunghi). Senza, i video lunghi perderebbero
+        # gran parte del testo nel riassunto.
+        "options": {"temperature": 0.3, "num_ctx": OLLAMA_NUM_CTX},
+    }
+    req = urllib.request.Request(
+        OLLAMA_HOST + "/api/chat",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=600) as r:
+        data = json.loads(r.read().decode("utf-8"))
+    return (data.get("message", {}).get("content") or "").strip()
+def _make_summarizer(client=None):
+    """Sceglie il motore del riassunto e restituisce (funzione, etichetta).
+
+    Preferisce Groq se è disponibile un client (backend cloud); altrimenti usa
+    Ollama in locale (100% offline). Solleva RuntimeError se nessuno è utilizzabile."""
+    if client is not None:
+        label = f"Riassunto automatico (Groq · {settings.GROQ_SUMMARY_MODEL})"
+        return (lambda text, title: _summarize_groq(client, text, title)), label
+    _check_ollama()
+    label = f"Riassunto automatico (locale · Ollama {settings.OLLAMA_MODEL})"
+    return (lambda text, title: _summarize_ollama(text, title)), label
+def _summarize_long(summarize_fn, text: str, section_title: str | None) -> str:
+    """Riassume un testo anche lungo: se supera SUMMARY_MAX_CHARS lo divide in
+    blocchi, li riassume singolarmente e poi unisce i parziali (map-reduce)."""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    if len(text) <= SUMMARY_MAX_CHARS:
+        return summarize_fn(text, section_title)
+    # Map: riassumi a blocchi (riuso lo splitter della traduzione, con cap ampio).
+    saved = globals().get("_TRANSLATE_MAX_CHARS")
+    globals()["_TRANSLATE_MAX_CHARS"] = SUMMARY_MAX_CHARS
+    try:
+        blocks = _split_for_translation(text)
+    finally:
+        globals()["_TRANSLATE_MAX_CHARS"] = saved
+    partials = [summarize_fn(b, section_title) for b in blocks]
+    merged = "\n\n".join(p for p in partials if p)
+    # Reduce: ricompatta i parziali in un unico riassunto coerente.
+    return summarize_fn(merged, section_title)
+def summarize_sections(sections: list[dict], summarize_fn,
+                       on_progress=None, done_sections: list[dict] | None = None,
+                       on_section=None) -> list[dict]:
+    """Riassume ogni sezione (titolo invariato, testo -> riassunto).
+
+    'on_progress(i, n)' (opzionale) è chiamato dopo ogni sezione. Restituisce
+    nuove sezioni senza mutare quelle in ingresso.
+
+    Per il RESUME: 'done_sections' sono le sezioni già riassunte in precedenza
+    (saltate); 'on_section(list)' è chiamato dopo OGNI nuova sezione con l'elenco
+    completo finora, per salvare il parziale — così se i crediti Groq finiscono a
+    metà riassunto si riprende esattamente dalla sezione ferma, senza rispendere
+    crediti su quelle già fatte."""
+    out: list[dict] = list(done_sections or [])
+    start_index = len(out)
+    n = len(sections)
+    if on_progress and start_index:
+        on_progress(start_index, n)
+    for i in range(start_index, n):
+        sec = sections[i]
+        summary = _summarize_long(summarize_fn, sec.get("text", ""), sec.get("title"))
+        out.append({"start": sec.get("start"), "title": sec.get("title"), "text": summary})
+        if on_section:
+            on_section(out)
+        if on_progress:
+            on_progress(i + 1, n)
+    return out
