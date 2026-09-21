@@ -1,4 +1,4 @@
-/* Sezione «Trascrivi»: la sorgente, gli output aggiuntivi, il lavoro.
+/* Il lavoro di una postazione: la sorgente, gli output aggiuntivi, la corsa.
  *
  * Il filo del discorso, in ordine:
  *
@@ -6,62 +6,68 @@
  *   2. Python legge i metadati e la pagina chiede conferma, con la copertina,
  *      i dati e la stima davanti: e' l'unico momento in cui ci si accorge di
  *      aver incollato il link sbagliato PRIMA di spendere crediti;
- *   3. confermato, la scheda resta nella colonna di sinistra;
+ *   3. confermato, la scheda resta nel riquadro in fondo;
  *   4. «Trascrivi» chiede a Python se ci sono ostacoli (manca la chiave, il
  *      video c'e' gia', esiste un parziale) e a seconda della risposta parte o
  *      apre una finestra di scelte;
  *   5. mentre lavora parlano l'avanzamento e il diario;
  *   6. alla fine una finestra dice cosa e' stato scritto e dove.
  *
+ * Tutto questo succede DUE volte, una per stanza, e le due volte non si
+ * toccano. Ogni funzione qui dentro riceve come primo argomento la postazione
+ * di cui si sta occupando, e non esiste piu' nessun modo di scrivere una riga
+ * che vada a prendere il pezzo sbagliato: non c'e' un «il link», c'e' «il link
+ * di questa postazione».
+ *
  * Nessuno di questi passaggi decide qualcosa: le domande le pone Python, che e'
  * l'unico a sapere cosa c'e' gia' sul disco.
  */
 
-/* L'ultima scheda ricevuta. Serve a ridisegnarla quando cambia la lingua: le
- * etichette («Canale», «Durata») sono chiavi di traduzione, i valori no. */
-let SCHEDA = null;
-
-function initTrascrivi(dati) {
+function initTrascrivi(p) {
   // Gli interruttori partono da come erano l'ultima volta: sono scelte che si
-  // fanno una volta e si tengono, non decisioni da ripetere a ogni video.
-  const s = scelte();
-  $('#opt-translate').checked = !!s.translate;
-  $('#opt-summarize').checked = !!s.summarize;
-  $('#opt-visual').checked = !!s.visual;
-  [['#opt-translate', 'translate'], ['#opt-summarize', 'summarize'],
-   ['#opt-visual', 'visual']].forEach(([sel, chiave]) => {
-    $(sel).addEventListener('change', (e) => salvaScelte({ [chiave]: e.target.checked }));
+  // fanno una volta e si tengono, non decisioni da ripetere a ogni video. Le
+  // due stanze partono uguali e da qui in poi divergono.
+  p.q('opt-translate').checked = !!p.opz.translate;
+  p.q('opt-summarize').checked = !!p.opz.summarize;
+  p.q('opt-visual').checked = !!p.opz.visual;
+  [['opt-translate', 'translate'], ['opt-summarize', 'summarize'],
+   ['opt-visual', 'visual']].forEach(([nome, chiave]) => {
+    p.q(nome).addEventListener('change', (e) => {
+      salvaScelte({ [chiave]: e.target.checked }, p);
+      aggiornaCarte(p);
+    });
   });
 
-  $('#sorgente').value = s.sorgente || 'youtube';
-  $('#sorgente').addEventListener('change', (e) => {
-    salvaScelte({ sorgente: e.target.value });
-    sincronizzaSorgente();
-    dimentica();
+  p.q('sorgente').value = p.opz.sorgente || 'youtube';
+  p.q('sorgente').addEventListener('change', (e) => {
+    salvaScelte({ sorgente: e.target.value }, p);
+    sincronizzaSorgente(p);
+    dimentica(p);
   });
-  sincronizzaSorgente();
+  sincronizzaSorgente(p);
 
   // Cambiare l'URL invalida la conferma precedente: e' il modo piu' facile di
   // trascrivere il video sbagliato, e con Groq costa anche crediti.
-  $('#url').addEventListener('input', dimentica);
-  $('#url').addEventListener('keydown', (e) => { if (e.key === 'Enter') leggiSorgente(); });
+  p.q('url').addEventListener('input', () => dimentica(p));
+  p.q('url').addEventListener('keydown',
+    (e) => { if (e.key === 'Enter') leggiSorgente(p); });
 
-  $('#leggi').addEventListener('click', leggiSorgente);
-  $('#sfoglia').addEventListener('click', scegliFile);
-  $('#avvia').addEventListener('click', premiAvvia);
+  p.q('leggi').addEventListener('click', () => leggiSorgente(p));
+  p.q('sfoglia').addEventListener('click', () => scegliFile(p));
+  p.q('avvia').addEventListener('click', () => premiAvvia(p));
 
-  svuotaScheda();
-  aggiornaAvvio();
+  svuotaScheda(p);
+  aggiornaAvvio(p);
 }
 
 /* I due ingressi occupano lo stesso posto: si vede solo quello della sorgente
  * scelta, e il bottone «Guarda cos'e'» ha senso solo per un link: un file lo
  * si e' gia' visto scegliendolo. */
-function sincronizzaSorgente() {
-  const youtube = scelte().sorgente === 'youtube';
-  $('#ingresso-youtube').hidden = !youtube;
-  $('#ingresso-file').hidden = youtube;
-  $('#leggi').style.display = youtube ? '' : 'none';
+function sincronizzaSorgente(p) {
+  const youtube = p.opz.sorgente !== 'local';
+  p.q('ingresso-youtube').hidden = !youtube;
+  p.q('ingresso-file').hidden = youtube;
+  p.q('leggi').style.display = youtube ? '' : 'none';
   // Il menu della sorgente lo disegna la pagina: se qualcuno ha cambiato il
   // <select> da codice (un link trascinato dentro), il bottone mostrerebbe
   // ancora la voce di prima mentre la scelta vera e' gia' un'altra.
@@ -70,16 +76,18 @@ function sincronizzaSorgente() {
 
 /* ── La scheda della sorgente ─────────────────────────────────────────────── */
 
-function mostraScheda(scheda) {
-  SCHEDA = scheda;
-  const box = $('#sorgente-scheda');
+function mostraScheda(p, scheda) {
+  p.scheda = scheda;
+  const box = p.q('sorgente-scheda');
   box.innerHTML = '';
   box.appendChild(disegnaScheda(scheda, false));
-  mostraStima(scheda.stima);
-  aggiornaAvvio();
+  mostraStima(p, scheda.stima);
+  aggiornaAvvio(p);
+  aggiornaCarte(p);
+  aggiornaVoci();
 }
 
-/* La stessa scheda serve nella colonna e dentro la finestra di conferma:
+/* La stessa scheda serve nel riquadro e dentro la finestra di conferma:
  * costruirla una volta sola e' cio' che garantisce che quello che si conferma
  * sia esattamente quello che poi si vede. */
 function disegnaScheda(scheda, dentroFinestra) {
@@ -104,7 +112,7 @@ function disegnaScheda(scheda, dentroFinestra) {
     (r) => ({ nome: t(r.chiave), valore: r.valore }))));
 
   // La stima dentro la finestra sta nel corpo, perche' li' e' il numero su cui
-  // si decide; nella colonna sta invece nella riga del titolo, dove si vede
+  // si decide; nel riquadro sta invece nella riga del titolo, dove si vede
   // anche mentre si guarda altro.
   if (dentroFinestra && scheda.stima) {
     const targhetta = el('span', 'targhetta', scheda.stima);
@@ -127,61 +135,67 @@ function disegnaScheda(scheda, dentroFinestra) {
   return box;
 }
 
-function svuotaScheda() {
-  SCHEDA = null;
-  const box = $('#sorgente-scheda');
+function svuotaScheda(p) {
+  p.scheda = null;
+  const box = p.q('sorgente-scheda');
   box.innerHTML = '';
   box.appendChild(statoVuoto(t('src.empty')));
-  mostraStima('');
+  mostraStima(p, '');
+  aggiornaVoci();
 }
 
-function mostraStima(testo) {
-  const targhetta = $('#stima');
+function mostraStima(p, testo) {
+  const targhetta = p.q('stima');
   targhetta.textContent = testo || '';
   targhetta.style.display = testo ? '' : 'none';
 }
 
-async function dimentica() {
-  if (!SCHEDA) return;
-  await window.pywebview.api.dimentica();
-  svuotaScheda();
-  aggiornaAvvio();
+async function dimentica(p) {
+  if (!p.scheda) return;
+  await window.pywebview.api.dimentica(p.dove);
+  svuotaScheda(p);
+  aggiornaAvvio(p);
+  aggiornaCarte(p);
 }
 
 /* ── Leggere la sorgente ──────────────────────────────────────────────────── */
 
-async function leggiSorgente() {
-  const bottone = $('#leggi');
-  const etichetta = bottone.querySelector('span');
-  etichetta.textContent = t('src.load.loading');
+async function leggiSorgente(p) {
+  const bottone = p.q('leggi');
+  bottone.querySelector('span').textContent = t('src.load.loading');
   bottone.disabled = true;
-  const esito = await window.pywebview.api.carica_info($('#url').value);
-  if (!esito.ok) { finiscoLettura(); errore(esito.errore); }
+  const esito = await window.pywebview.api.carica_info(p.q('url').value, p.dove);
+  if (!esito.ok) { finiscoLettura(p); erroreDi(p, esito.errore); }
 }
 
 /* Su una playlist si sta parecchio: ogni video va letto uno per uno. Dirlo e'
  * la differenza fra un'attesa e un sospetto di blocco. */
-window.caricamentoPlaylist = () => {
-  $('#leggi').querySelector('span').textContent = t('src.load.playlist');
-};
+ascolta('caricamentoPlaylist', (p) => {
+  p.q('leggi').querySelector('span').textContent = t('src.load.playlist');
+});
 
-function finiscoLettura() {
-  const bottone = $('#leggi');
+function finiscoLettura(p) {
+  const bottone = p.q('leggi');
   bottone.querySelector('span').textContent = t('src.load');
   bottone.disabled = false;
 }
 
-window.erroreSorgente = (messaggio) => {
-  finiscoLettura();
-  errore(messaggio);
-};
+ascolta('erroreSorgente', (p, messaggio) => {
+  finiscoLettura(p);
+  erroreDi(p, messaggio);
+});
 
 /* La conferma: copertina, dati, stima, e la domanda. Chiederla e' cio' che
- * evita di trascrivere il video sbagliato, che con Groq non e' solo tempo. */
-window.chiediConferma = (scheda) => {
-  finiscoLettura();
+ * evita di trascrivere il video sbagliato, che con Groq non e' solo tempo.
+ *
+ * Passa da finestraDi e non da finestra: leggere una playlist lunga richiede
+ * parecchi secondi, e in quei secondi si puo' benissimo essere andati
+ * nell'altra stanza a far partire un secondo lavoro. In quel caso la domanda
+ * aspetta, invece di piombare addosso a chi sta facendo altro. */
+ascolta('chiediConferma', (p, scheda) => {
+  finiscoLettura(p);
   const playlist = scheda.tipo === 'playlist';
-  finestra({
+  finestraDi(p, {
     icona: playlist ? 'riassumi' : 'video',
     titolo: t(playlist ? 'playlist.title' : 'confirm.title'),
     corpo: [
@@ -190,10 +204,10 @@ window.chiediConferma = (scheda) => {
                : t('confirm.question'),
     ],
     azioni: [
-      { testo: t('comune.annulla'), tono: 'contorno', azione: () => dimentica() },
+      { testo: t('comune.annulla'), tono: 'contorno', azione: () => dimentica(p) },
       { testo: t('comune.conferma'), tono: 'pieno', icona: 'spunta',
         azione: () => {
-          mostraScheda(scheda);
+          mostraScheda(p, scheda);
           avvisa(playlist
             ? t('playlist.ok', { titolo: scheda.titolo, n: (scheda.voci || []).length })
             : t('confirm.ok', { titolo: scheda.titolo }), 'ok');
@@ -201,28 +215,29 @@ window.chiediConferma = (scheda) => {
     ],
     // Chiudere con Esc e' come annullare: la sorgente non e' confermata, e
     // lasciarla valida sarebbe l'errore peggiore che questa finestra possa fare.
-    suChiusura: () => { if (!SCHEDA) dimentica(); },
+    suChiusura: () => { if (!p.scheda) dimentica(p); },
   });
-};
+});
 
-async function scegliFile() {
-  const esito = await window.pywebview.api.scegli_file();
-  if (!esito.ok) { errore(esito.errore); return; }
+async function scegliFile(p) {
+  const esito = await window.pywebview.api.scegli_file(p.dove);
+  if (!esito.ok) { erroreDi(p, esito.errore); return; }
   if (esito.annullato) return;
-  $('#file').value = esito.scheda.titolo;
-  mostraScheda(esito.scheda);
+  p.q('file').value = esito.scheda.titolo;
+  mostraScheda(p, esito.scheda);
 }
 
-/* Un link trascinato dentro la finestra vale come un link incollato. Un file
- * trascinato no: il percorso che il browser espone non e' quello vero del
- * disco, e aprirlo fallirebbe in silenzio: meglio dire di usare «Sfoglia». */
-window.accettaTrascinato = (testo) => {
+/* Un link trascinato dentro la finestra vale come un link incollato, e vale
+ * per la stanza in cui e' stato lasciato cadere. Un file trascinato no: il
+ * percorso che il browser espone non e' quello vero del disco, e aprirlo
+ * fallirebbe in silenzio: meglio dire di usare «Sfoglia». */
+window.accettaTrascinato = (p, testo) => {
   if (!/^https?:/i.test(testo)) { avvisa(t('err.no_url'), 'fail'); return; }
-  $('#sorgente').value = 'youtube';
-  salvaScelte({ sorgente: 'youtube' });
-  sincronizzaSorgente();
-  $('#url').value = testo;
-  leggiSorgente();
+  p.q('sorgente').value = 'youtube';
+  salvaScelte({ sorgente: 'youtube' }, p);
+  sincronizzaSorgente(p);
+  p.q('url').value = testo;
+  leggiSorgente(p);
 };
 
 /* ── Avviare ──────────────────────────────────────────────────────────────── */
@@ -230,14 +245,14 @@ window.accettaTrascinato = (testo) => {
 /* Il bottone si accende solo quando si puo' davvero partire. Resta comunque
  * cliccabile quando non si puo': premendolo si scopre cosa manca, che e' piu'
  * utile di un bottone spento che non spiega perche'. */
-function aggiornaAvvio() {
-  const pronto = !!SCHEDA && (scelte().motore !== 'groq' || window.chiaveCaricata());
-  $('#avvia').style.opacity = pronto ? '1' : '.55';
+function aggiornaAvvio(p) {
+  const pronto = !!p.scheda && (p.motore !== 'groq' || window.chiaveCaricata());
+  p.q('avvia').style.opacity = pronto ? '1' : '.55';
 }
 
-async function premiAvvia() {
-  const esito = await window.pywebview.api.prepara();
-  if (!esito.ok) { errore(esito.errore); return; }
+async function premiAvvia(p) {
+  const esito = await window.pywebview.api.prepara(p.dove);
+  if (!esito.ok) { erroreDi(p, esito.errore); return; }
 
   if (esito.stato === 'manca') {
     const elenco = el('div', 'passi');
@@ -260,23 +275,24 @@ async function premiAvvia() {
       icona: esito.stato === 'gia' ? 'riassumi' : 'clessidra',
       titolo: esito.titolo,
       corpo: [esito.desc, ...esito.voci.map(
-        (v) => voceScelta(v, (scelta) => window.pywebview.api.esegui(scelta.azione)))],
+        (v) => voceScelta(v, (scelta) =>
+          window.pywebview.api.esegui(scelta.azione, p.dove)))],
       azioni: [{ testo: t('comune.annulla'), tono: 'contorno' }],
     });
     return;
   }
 
-  window.pywebview.api.esegui('nuova');
+  window.pywebview.api.esegui('nuova', p.dove);
 }
 
-function riabilitaTrascrivi() {
-  sincronizzaSorgente();
-  aggiornaAvvio();
+function riabilitaTrascrivi(p) {
+  sincronizzaSorgente(p);
+  aggiornaAvvio(p);
 }
 
 /* ── Il risultato ─────────────────────────────────────────────────────────── */
 
-window.mostraRisultato = (res) => {
+ascolta('mostraRisultato', (p, res) => {
   const corpo = [];
 
   if (res.miniatura) {
@@ -322,42 +338,42 @@ window.mostraRisultato = (res) => {
     blocco.appendChild(testo);
     const bottone = el('button', 'bottone contorno');
     bottone.appendChild(el('span', '', t('res.visual.open')));
-    bottone.addEventListener('click', () => window.pywebview.api.apri('visiva'));
+    bottone.addEventListener('click', () => window.pywebview.api.apri('visiva', p.dove));
     blocco.appendChild(bottone);
     corpo.push(blocco);
   }
 
-  finestra({
+  finestraDi(p, {
     icona: 'spunta', tono: 'riuscito', titolo: res.titolo, corpo,
     azioni: [
       // Non chiude: si apre la cartella e si torna a guardare il riepilogo.
       { testo: t('res.open'), tono: 'contorno', icona: 'cartella', chiudi: false,
-        azione: () => window.pywebview.api.apri('cartella') },
+        azione: () => window.pywebview.api.apri('cartella', p.dove) },
       { testo: t('comune.chiudi'), tono: 'contorno', icona: 'spunta' },
       // La via piu' corta per il video successivo. Azzera SOLO la sorgente e
       // riapre la finestra del video: modelli e chiave restano come sono,
       // perche' fra un video e l'altro quasi mai cambiano, e rifarli scegliere
       // ogni volta sarebbe far ripetere una risposta gia' data.
       { testo: t('res.ancora'), tono: 'pieno', icona: 'rifai',
-        azione: () => { azzeraSorgente(); if (window.apriVideoDaFuori) window.apriVideoDaFuori(); } },
+        azione: () => { azzeraSorgente(p); apriVideoDaFuori(p); } },
     ],
   });
-};
+});
 
-/* Svuota la sorgente per ricominciare con un altro video.
+/* Svuota la sorgente per ricominciare con un altro video, in questa stanza.
  *
  * Gli interruttori degli output NON si toccano: chi ha appena chiesto
  * trascrizione piu' riassunto quasi sempre vuole lo stesso anche per il
  * prossimo, e spegnerli sarebbe una sorpresa scoperta solo alla fine. */
-function azzeraSorgente() {
-  $('#url').value = '';
-  $('#file').value = '';
-  statoVuoto('#sorgente-scheda', 'src.empty', 'vuoto');
-  if (window.aggiornaAvvio) window.aggiornaAvvio();
-  if (window.aggiornaCarte) window.aggiornaCarte();
+function azzeraSorgente(p) {
+  p.q('url').value = '';
+  p.q('file').value = '';
+  svuotaScheda(p);
+  aggiornaAvvio(p);
+  aggiornaCarte(p);
 }
 
-window.mostraRisultatoPlaylist = (res) => {
+ascolta('mostraRisultatoPlaylist', (p, res) => {
   const corpo = [];
   if (res.avviso) corpo.push(el('div', 'avviso-riquadro', '⚠ ' + res.avviso));
 
@@ -381,57 +397,62 @@ window.mostraRisultatoPlaylist = (res) => {
     corpo.push(elenco);
   }
 
-  finestra({
+  finestraDi(p, {
     icona: 'spunta', tono: 'riuscito', titolo: res.titolo, corpo,
     azioni: [
       { testo: t('res.open'), tono: 'contorno', icona: 'cartella', chiudi: false,
-        azione: () => window.pywebview.api.apri('cartella') },
+        azione: () => window.pywebview.api.apri('cartella', p.dove) },
       { testo: t('comune.chiudi'), tono: 'pieno', icona: 'spunta' },
     ],
   });
-};
+});
 
 /* ── Quando Groq finisce i crediti ────────────────────────────────────────── */
 
 /* Non e' un errore, ed e' per questo che non e' rosso: non si e' rotto niente,
- * il parziale e' salvato, e ci sono due modi veri di proseguire. */
-window.creditiFiniti = (dati) => {
+ * il parziale e' salvato, e ci sono due modi veri di proseguire.
+ *
+ * Il lavoro resta nella stanza in cui e' cominciato anche scegliendo di
+ * finirlo sul computer: cambia il modello che lo porta a termine, non la
+ * scrivania su cui sta. Spostarlo vorrebbe dire lasciare a meta' strada il suo
+ * diario e il suo avanzamento, nella stanza di prima. */
+ascolta('creditiFiniti', (p, dati) => {
   const azioni = [{ testo: t('rate.later'), tono: 'contorno', icona: 'clessidra' }];
   if (dati.puo_locale) {
     azioni.push({ testo: t('rate.local'), tono: 'ambra', icona: 'casa',
-                  azione: () => window.pywebview.api.continua_in_locale() });
+                  azione: () => window.pywebview.api.continua_in_locale(p.dove) });
   }
-  finestra({
+  finestraDi(p, {
     icona: 'clessidra', tono: 'attenzione', titolo: dati.titolo,
     corpo: [dati.testo], azioni,
   });
-};
+});
 
 /* Il riassunto si e' fermato a meta' per gli stessi crediti. La trascrizione
  * pero' e' salva, quindi la scelta e' solo su come finire il riassunto: adesso
  * in locale, o piu' tardi. In ogni caso il risultato si vede. */
-window.riassuntoInterrotto = (res) => {
-  finestra({
+ascolta('riassuntoInterrotto', (p, res) => {
+  finestraDi(p, {
     icona: 'clessidra', tono: 'attenzione', titolo: t('sumlocal.title'),
     corpo: [t('sumlocal.msg')],
     azioni: [
       { testo: t('sumlocal.no'), tono: 'contorno',
-        azione: () => window.mostraRisultato(res) },
+        azione: () => window.__instrada(p.dove, 'mostraRisultato', [res]) },
       { testo: t('sumlocal.yes'), tono: 'ambra', icona: 'casa',
-        azione: () => window.pywebview.api.concludi_in_locale() },
+        azione: () => window.pywebview.api.concludi_in_locale(p.dove) },
     ],
   });
-};
+});
 
-/* ── Cambio lingua ────────────────────────────────────────────────────────── */
+/* ── Riscrivere quello che non ha un data-t ───────────────────────────────── */
 
-function riempiTrascrivi() {
-  if (SCHEDA) mostraScheda(SCHEDA);
-  else svuotaScheda();
-  // La stima e' una frase composta da Python: gliela si richiede nella lingua
-  // nuova invece di provare a tradurla qui, dove il numero non c'e'.
-  salvaScelte({});
-  sincronizzaSorgente();
+function riempiTrascrivi(p) {
+  if (p.scheda) mostraScheda(p, p.scheda);
+  else svuotaScheda(p);
+  // La stima e' una frase composta da Python: gliela si richiede invece di
+  // provare a comporla qui, dove il numero non c'e'.
+  salvaScelte({}, p);
+  sincronizzaSorgente(p);
 }
 
 window.initTrascrivi = initTrascrivi;

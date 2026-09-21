@@ -71,7 +71,6 @@ TESTI: dict[str, str] = {
     'comune.conferma':  'Conferma',
     'comune.e':         ' e ',
     'err.busy':         "C'è già qualcosa in corso.",
-    'scorciatoie':      'Invio per leggere il video  ·  Ctrl+Invio per trascrivere',
     'trascina':         'Lascia qui il link o il file',
 
     # ── Sezione «Trascrivi»: sorgente ────────────────────────────────────────
@@ -135,8 +134,22 @@ TESTI: dict[str, str] = {
                          'trascritti sono salvati; riprendi domani.',
 
     # ── Sezioni «Locale» e «Cloud» ───────────────────────────────────────────
-    'eng.tag.cloud':    'CLOUD',
-    'eng.tag.offline':  'OFFLINE',
+    # Le targhette accanto alle due voci nella barra laterale.
+    #
+    # Prima dicevano quale motore fosse scelto, e con un motore solo alla volta
+    # aveva senso. Adesso i motori lavorano tutti e due, quindi la domanda
+    # utile e' diventata un'altra: cosa sta succedendo di la'. E' proprio
+    # l'informazione che si vuole mentre si lavora in parallelo, e la si vuole
+    # senza dover cambiare stanza per averla.
+    'posti.lavoro':     'IN CORSO',
+    'posti.pronto':     'PRONTO',
+    'posti.errore':     'ERRORE',
+    'posti.attesa':     'DA VEDERE',
+    # L'avviso che compare quando una stanza ha finito mentre si stava
+    # guardando l'altra. Dice che c'e' qualcosa e dove, e non lo mostra:
+    # interrompere chi sta preparando un altro lavoro sarebbe il contrario di
+    # lavorare in parallelo.
+    'posti.altrove':    'C\'è qualcosa da vedere in «{stanza}»',
 
     'eng.local.hint':   'Tutto quello che serve gira qui, senza rete e senza chiave: '
                         'trascrizione (Whisper), riassunto e traduzione (Ollama), '

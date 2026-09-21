@@ -206,6 +206,21 @@ html, body {
 .targhetta-menu.locale { color: var(--verde); border-color: #34d3994d; }
 /* La sezione che non sta lavorando non porta targhetta: una vuota sarebbe un
  * riquadratino grigio accanto al nome, cioe' rumore con la forma di un segno. */
+/* Una stanza che ha una sorgente pronta ma non sta ancora lavorando. Grigia
+ * di proposito: dice «qui e' tutto apparecchiato» e non «qui sta succedendo
+ * qualcosa», che e' il lavoro dei due colori qui sopra. */
+.targhetta-menu.pronta { color: var(--t2); border-color: var(--bordo); }
+
+/* Qualcosa e' finito mentre si stava guardando l'altra stanza, e il suo
+ * riepilogo aspetta li' dentro. Pulsa perche' e' l'unica di queste targhette
+ * che chiede di essere cliccata: le altre raccontano, questa invita. */
+.targhetta-menu.attesa {
+  color: var(--lume); border-color: #8b7cff66; background: #8b7cff1f;
+  animation: pulsa 1.6s ease-in-out infinite;
+}
+
+.targhetta-menu.guasto { color: var(--rosso); border-color: #ff6b6b4d; }
+
 .targhetta-menu.spenta { display: none; }
 
 .piede { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
@@ -412,10 +427,6 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 }
 .bottone.ambra:hover:not(:disabled) { filter: brightness(1.06); }
 
-.scorciatoie {
-  font-size: 10.5px; color: var(--t2); letter-spacing: .2px;
-  padding-left: 2px; margin-top: -6px;
-}
 
 /* I riquadri con cui si sceglieva il motore non esistono piu': il motore lo
  * sceglie la sezione in cui si sta lavorando, e una scelta che si prende
@@ -608,7 +619,7 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 /* Lo scomparto in cui la postazione atterra, e la postazione stessa: due
  * colonne di riquadri con lo stesso passo del resto della sezione, cosi'
  * spostandola non si vede che ha cambiato stanza. */
-.slot-lavoro, #postazione {
+.slot-lavoro, .postazione {
   display: flex; flex-direction: column; gap: var(--s4); min-height: 0;
 }
 /* Sorgente e diario si prendono tutto lo spazio che avanza.
@@ -625,9 +636,43 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
  * il fondo dei due riquadri finiva fuori schermo, e senza scorrimento non
  * c'era modo di arrivarci. Adesso si stringe finche' serve, e a scorrere sono
  * gli elenchi che ci stanno dentro, che hanno la loro barra visibile. */
-#postazione .due-colonne { flex: 1; min-height: 0; }
-#postazione { flex: 1; min-height: 0; }
-.slot-lavoro { flex: 1; min-height: 0; }
+/* Lo scorrimento sta QUI, sullo scomparto del lavoro, e non sulla sezione.
+ *
+ * La differenza si vede scorrendo: l'intestazione con il titolo della sezione
+ * e la linea restano ferme in cima, e sotto si muove solo il lavoro. Mettendo
+ * lo scorrimento sulla sezione intera, il titolo sarebbe la prima cosa a
+ * sparire, e si scorrerebbe senza piu' sapere in quale delle due stanze si e'.
+ *
+ * Perche' e' tornato a scorrere
+ *     Il pannello dell'avanzamento compare solo quando un lavoro parte, e
+ *     quando compare si infila fra il bottone e i due riquadri in fondo,
+ *     spingendoli in basso. Senza scorrimento quei due venivano tagliati dal
+ *     bordo e non c'era nessun modo di arrivarci: la parte che dice com'e'
+ *     andata era proprio quella irraggiungibile. */
+.slot-lavoro {
+  flex: 1; min-height: 0;
+  overflow-y: auto; overflow-x: hidden;
+  padding-right: 6px;
+}
+
+/* «Almeno alta quanto lo spazio, piu' alta se il contenuto lo chiede».
+ *
+ * E' il senso di `flex: 1 0 auto`, ed e' la riga che fa convivere le due
+ * situazioni. Quando lo spazio basta, la postazione lo riempie tutto e il
+ * diario si prende quello che avanza invece di ridursi a una fessura. Quando
+ * non basta piu', smette di comprimersi e si lascia scorrere.
+ *
+ * La parte che conta e' lo zero in mezzo, cioe' il non restringersi: senza,
+ * la postazione continuerebbe a schiacciarsi per stare nello spazio, non
+ * supererebbe mai l'altezza dello scomparto, e non ci sarebbe niente da
+ * scorrere proprio nel momento in cui serve. */
+.postazione { flex: 1 0 auto; }
+
+/* Un minimo, perche' i due riquadri in fondo sono gli ultimi della colonna ed
+ * e' su di loro che si scarica ogni mancanza di spazio. Sotto i 320 pixel il
+ * diario mostrerebbe due righe e mezzo, che tanto vale non mostrarlo. Da qui
+ * in giu' la postazione supera lo scomparto, e si scorre. */
+.postazione .due-colonne { flex: 1 0 auto; min-height: 320px; }
 
 .titolo-pannello {
   display: flex; align-items: center; gap: var(--s2);

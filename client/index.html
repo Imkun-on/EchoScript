@@ -167,14 +167,34 @@
 
     <main class="corpo">
 
-      <!-- ══ LA POSTAZIONE DI LAVORO ════════════════════════════════════ -->
-      <!-- Una sola, e si sposta nella sezione aperta, come il diario e per lo
-           stesso motivo. Averne due copie vere vorrebbe dire due link incollati,
-           due schede della sorgente, due avanzamenti: passando da «Locale» a
-           «Cloud» il link appena incollato sparirebbe, che e' esattamente cio'
-           che nessuno si aspetta. Cosi' invece la postazione e' la stessa e
-           cambia solo la stanza in cui si trova. -->
-      <div id="postazione">
+      <!-- ══ LA POSTAZIONE DI LAVORO, COME MODELLO ══════════════════════ -->
+      <!-- Questo blocco non compare a schermo: e' lo stampo. All'avvio ne
+           vengono fatte DUE copie vere, una dentro «Locale» e una dentro
+           «Cloud», e da quel momento vivono separate.
+      
+           Prima era una sola e traslocava nella stanza aperta. Sembrava una
+           semplificazione ed era un difetto: avviando una trascrizione in
+           nuvola e passando poi in locale, in locale ci si ritrovava davanti
+           l'avanzamento, il diario e la sorgente di quello che stava girando
+           di la'. Le due stanze erano due porte sulla stessa scrivania.
+      
+           Adesso le scrivanie sono due. Si puo' avere un link incollato qui e
+           un altro li', e soprattutto si puo' avere un lavoro in corso in
+           tutte e due nello stesso momento: mentre Groq trascrive sui suoi
+           server, questo computer puo' trascriverne un altro per conto suo.
+           Sono due mestieri che non si contendono niente.
+      
+           Le copie non sono identiche: ognuna tiene solo i modelli del proprio
+           motore, e la chiave sta soltanto in «Cloud», perche' e' l'unica
+           stanza in cui si paga qualcosa. Chi le pota e' creaPosti() in
+           posti.js.
+      
+           Gli identificatori qui dentro sono scritti nudi ma non restano tali:
+           copiando, ognuno prende davanti il nome della stanza. Cosi' «url»
+           diventa «locale-url» e «cloud-url», che sono due caselle diverse e
+           non possono essere scambiate per sbaglio. -->
+      <template id="modello-postazione">
+      <div class="postazione">
 
         <!-- I tre riquadri: cosa serve sapere prima di poter cominciare.
              Modelli, chiave e video. Sono affiancati e della stessa misura
@@ -359,8 +379,6 @@
           </div>
         </div>
 
-        <div class="scorciatoie" data-t="scorciatoie"></div>
-
         <!-- L'avanzamento compare solo mentre si lavora. Dentro c'e' tutto
              quello che serve a capire a che punto siamo: chi sta lavorando, in
              che fase, quanto manca, e l'elenco dei passaggi con quelli fatti
@@ -418,6 +436,7 @@
           </section>
         </div>
       </div>
+      </template>
 
       <!-- ══ LOCALE ═════════════════════════════════════════════════════ -->
       <!-- Qui dentro non compare niente che abbia bisogno della rete: e' la
@@ -501,6 +520,7 @@
 
   <script src="components/dropdown.js"></script>
   <script src="components/modal.js"></script>
+  <script src="features/posti.js"></script>
   <script src="app.js"></script>
   <script src="features/engine.js"></script>
   <script src="features/transcribe.js"></script>

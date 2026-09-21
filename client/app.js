@@ -18,10 +18,6 @@ let SEZIONE = '';
  * ritrova al prossimo avvio. */
 let SCELTE = {};
 
-/* Il piano del lavoro in corso: l'elenco delle fasi. Serve a disegnare i
- * passaggi e a sapere quali sono gia' andati. Vuoto quando non si lavora. */
-let PIANO = [];
-
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
@@ -46,38 +42,45 @@ function t(chiave, valori) {
  * iniziale, e il nome e' rimasto quello perche' il lavoro che fa e' lo stesso. */
 function riempiTesti() {
   $$('[data-t]').forEach((e) => { e.textContent = t(e.dataset.t); });
-  $('#stato').textContent = t('status.' + (statoCorrente || 'idle'));
-  if (!$('#diario').dataset.pieno) svuotaDiario();
-  if (window.riempiMotore) window.riempiMotore();
-  if (window.riempiTrascrivi) window.riempiTrascrivi();
-  if (window.aggiornaCarte) window.aggiornaCarte();
+  // Due postazioni, quindi due volte tutto quello che riguarda il lavoro: due
+  // spie, due diari, due riepiloghi. Il ciclo e' la forma piu' onesta di
+  // dirlo, e aggiungere una terza stanza un giorno non richiederebbe di
+  // tornare qui a scrivere una terza riga.
+  Object.values(POSTI).forEach((p) => {
+    p.q('stato').textContent = t('status.' + (p.stato || 'idle'));
+    if (!p.q('diario').dataset.pieno) svuotaDiario(p);
+    if (window.riempiMotore) window.riempiMotore(p);
+    if (window.riempiTrascrivi) window.riempiTrascrivi(p);
+    if (window.aggiornaCarte) window.aggiornaCarte(p);
+  });
+  aggiornaVoci();
 }
 
 /* ── Cambio sezione ───────────────────────────────────────────────────────── */
 
-/* Le due sezioni di lavoro e il motore che ci gira dentro. Aprire «Cloud» E'
- * scegliere Groq: non c'e' un secondo gesto da fare ne' un interruttore da
- * ricordare, e il bottone «Trascrivi» che si preme e' quello dentro la stanza
- * in cui si sta. Era la cosa che l'interfaccia di prima non diceva. */
-const MOTORE_DI = { locale: 'local', cloud: 'groq' };
-const SEZIONE_DI = { local: 'locale', groq: 'cloud' };
-
-function sezioneDiLavoro() { return SEZIONE_DI[SCELTE.motore] || 'locale'; }
-
+/* Cambiare sezione adesso e' solo cambiare stanza.
+ *
+ * Prima era anche un altro gesto travestito: entrando in «Cloud» si cambiava
+ * la scelta del motore, e con essa la postazione unica si portava dietro tutto
+ * quello che stava facendo. Adesso le postazioni sono due e stanno ferme
+ * ciascuna nella sua: cambiare stanza non tocca piu' niente di quello che ci
+ * sta dentro, e soprattutto non tocca l'altra.
+ *
+ * Il motore non si sceglie piu' da nessuna parte, perche' la stanza E' il
+ * motore: in «Locale» si trascrive su questo computer, in «Cloud» sui server
+ * Groq, e non c'e' piu' una seconda cosa che possa dire il contrario. */
 function cambiaSezione(nome, immediato) {
   if (nome === SEZIONE && !immediato) return;
   const uscente = document.querySelector('.sezione.attiva');
   SEZIONE = nome;
   $$('.voce').forEach((v) => v.classList.toggle('attiva', v.dataset.va === nome));
 
-  // Entrando in una sezione di lavoro il motore diventa il suo. Non si fa
-  // mentre un lavoro gira: quello in corso ha gia' preso le sue opzioni, e
-  // cambiare la scelta sotto gli occhi mostrerebbe un motore diverso da quello
-  // che sta davvero lavorando.
-  if (MOTORE_DI[nome] && MOTORE_DI[nome] !== SCELTE.motore && !window.lavoroInCorso) {
-    salvaScelte({ motore: MOTORE_DI[nome] });
-    if (window.sincronizzaMotore) window.sincronizzaMotore();
-    if (window.aggiornaAvvio) window.aggiornaAvvio();
+  // Si ricorda in quale stanza si stava, per riaprirci il programma la volta
+  // dopo. E' l'unica cosa che il cambio di stanza salva, ed e' una comodita':
+  // non cambia niente di quello che le due postazioni stanno facendo.
+  if (POSTI[nome] && SCELTE.motore !== MOTORE_DI[nome]) {
+    SCELTE.motore = MOTORE_DI[nome];
+    if (window.pywebview) window.pywebview.api.imposta({ motore: MOTORE_DI[nome] }, nome);
   }
 
   // Prima la sezione che se ne va sfuma e arretra, poi entra la nuova
@@ -88,15 +91,9 @@ function cambiaSezione(nome, immediato) {
       s.classList.remove('uscita');
       s.classList.toggle('attiva', s.dataset.sez === nome);
     });
-    spostaLavoro(nome);
-    // I riquadri si riscrivono QUI, e non prima.
-    //
-    // Prima era nel punto in cui si cambia il motore, che avviene subito. Ma
-    // la sezione che se ne va resta a schermo altri due decimi di secondo
-    // mentre sfuma, e in quei due decimi si vedevano i nomi dei modelli
-    // dell'altro motore comparire dentro la sezione che stava ancora
-    // uscendo: il cambiamento si vedeva prima di essere avvenuto.
-    if (window.aggiornaCarte) window.aggiornaCarte();
+    // Se mentre si era di la' questa stanza aveva finito qualcosa, il suo
+    // riepilogo ha aspettato fin qui: adesso si puo' aprire.
+    apriSospeso(nome);
   };
 
   if (uscente && uscente.dataset.sez !== nome && !immediato) {
@@ -108,22 +105,14 @@ function cambiaSezione(nome, immediato) {
   }
 }
 
-/* La postazione, cioe' link o file, output, avvio, sorgente e diario, e' una
- * sola e si sposta nella sezione aperta. Duplicarla vorrebbe dire due link
- * incollati e due cronologie, e non sapere piu' quale delle due si sta
- * guardando. Se un giorno esistesse una sezione senza posto dove metterla, la
- * postazione semplicemente sparisce invece di finire fuori posto. */
-function spostaLavoro(nome) {
-  const slot = document.querySelector(`.sezione[data-sez="${nome}"] .slot-lavoro`);
-  const posto = $('#postazione');
-  if (slot) { slot.appendChild(posto); posto.style.display = ''; }
-  else { posto.style.display = 'none'; }
-}
-
 /* ── Il diario ────────────────────────────────────────────────────────────── */
 
-window.aggiungiRiga = (testo) => {
-  const diario = $('#diario');
+/* Ogni postazione ha il suo diario, e le righe che arrivano portano scritto di
+ * quale lavoro parlano: ci pensa __instrada a consegnarle qui con la postazione
+ * giusta davanti. Mescolarli in uno solo, con due lavori insieme, avrebbe
+ * prodotto una cronologia in cui nessuna riga si sa piu' a chi appartiene. */
+ascolta('aggiungiRiga', (p, testo) => {
+  const diario = p.q('diario');
   if (!diario.dataset.pieno) { diario.innerHTML = ''; diario.dataset.pieno = '1'; }
   const riga = el('div', 'riga-log ' + classeRiga(testo), testo);
   diario.appendChild(riga);
@@ -131,7 +120,7 @@ window.aggiungiRiga = (testo) => {
   // righe, e tenerle tutte nel documento rallenta lo scorrimento.
   while (diario.childElementCount > 400) diario.removeChild(diario.firstChild);
   diario.scrollTop = diario.scrollHeight;
-};
+});
 
 function classeRiga(testo) {
   // Le intestazioni di fase si riconoscono dal segno e non passano di qui: dicono
@@ -146,8 +135,8 @@ function classeRiga(testo) {
   return '';
 }
 
-function svuotaDiario() {
-  const d = $('#diario');
+function svuotaDiario(p) {
+  const d = p.q('diario');
   d.dataset.pieno = ''; d.innerHTML = '';
   d.appendChild(statoVuoto(t('log.empty')));
 }
@@ -173,79 +162,87 @@ function avvisa(testo, tipo) {
 }
 
 function errore(messaggio) {
-  window.aggiungiRiga(messaggio);
+  avvisa(messaggio, 'fail');
+}
+
+/* Un errore che appartiene a un lavoro: oltre all'avviso a comparsa, che passa,
+ * finisce nel diario di quella postazione, che resta. */
+function erroreDi(p, messaggio) {
+  window.__instrada(p.dove, 'aggiungiRiga', [messaggio]);
   avvisa(messaggio, 'fail');
 }
 
 /* ── Stato del lavoro ─────────────────────────────────────────────────────── */
 
-let statoCorrente = 'idle';
+/* Cosa si blocca mentre un lavoro gira, e perche' il blocco si ferma sulla
+ * porta della stanza.
+ *
+ * Dentro la postazione che sta lavorando non si cambia piu' niente: ne' i
+ * modelli, ne' la sorgente, ne' gli interruttori. Non e' una precauzione
+ * formale: cambiare modello a meta' trascrizione darebbe un risultato che non
+ * corrisponde a niente di quello che si vede scritto.
+ *
+ * Ma si ferma li'. L'altra stanza resta viva e si puo' preparare, avviare e
+ * guardare: e' esattamente la ragione per cui le postazioni sono due. Prima il
+ * blocco prendeva la pagina intera, e un lavoro in corso rendeva inerte anche
+ * la meta' del programma che non c'entrava niente. */
+ascolta('cambiaStato', (p, stato) => {
+  p.stato = stato;
+  p.q('spia').className = 'spia ' + (stato === 'idle' ? '' : stato);
+  p.q('stato').textContent = t('status.' + stato);
 
-window.cambiaStato = (stato) => {
-  statoCorrente = stato;
-  $('#spia').className = 'spia ' + (stato === 'idle' ? '' : stato);
-  $('#stato').textContent = t('status.' + stato);
-
-  // Mentre si lavora nulla si puo' cambiare: ne' il motore, ne' la sorgente,
-  // ne' gli interruttori. Non e' una precauzione formale: cambiare modello a
-  // meta' trascrizione darebbe un risultato che non corrisponde a niente di
-  // quello che si vede scritto.
   const inCorso = stato === 'working';
-  // Serve anche fuori di qui: cambiare sezione cambierebbe il motore, e mentre
-  // un lavoro gira il motore e' quello con cui e' partito, non quello della
-  // stanza in cui si e' appena entrati a guardare.
-  window.lavoroInCorso = inCorso;
 
   // Il bottone principale dice cosa sta succedendo invece di limitarsi a
-  // spegnersi. Si cambia il data-t e non solo il testo, cosi' cambiare lingua a
-  // meta' lavoro continua a scrivere la frase giusta.
-  const testo = $('#testo-avvia');
+  // spegnersi.
+  const testo = p.q('testo-avvia');
   testo.dataset.t = inCorso ? 'src.busy' : 'src.start';
   testo.textContent = t(testo.dataset.t);
-  $('#icona-avvia').setAttribute('href', inCorso ? '#i-clessidra' : '#i-avvia');
+  p.q('icona-avvia').setAttribute('href', inCorso ? '#i-clessidra' : '#i-avvia');
 
-  $$('.bottone.pieno, .bottone.contorno').forEach((b) => { b.disabled = inCorso; });
-  $$('.campo, .interruttore input').forEach((c) => { c.disabled = inCorso; });
-  $$('.coda').forEach((c) => { c.disabled = inCorso; });
+  p.tutti('.bottone.pieno, .bottone.contorno').forEach((b) => { b.disabled = inCorso; });
+  p.tutti('.campo, .interruttore input').forEach((c) => { c.disabled = inCorso; });
 
   if (!inCorso) {
-    PIANO = [];
-    $('#avanzamento').classList.remove('visibile');
-    $('#badge-batch').hidden = true;
-    if (window.riabilitaTrascrivi) window.riabilitaTrascrivi();
+    p.piano = [];
+    p.q('avanzamento').classList.remove('visibile');
+    p.q('badge-batch').hidden = true;
+    if (window.riabilitaTrascrivi) window.riabilitaTrascrivi(p);
   }
-};
+  aggiornaVoci();
+});
 
 /* Un lavoro comincia: si sa gia' quali fasi ci saranno, chi le fara' e cosa
  * produrranno. Dirlo tutto in anticipo e' cio' che trasforma un'attesa muta in
  * un'attesa che si capisce. */
-window.iniziaLavoro = (dati) => {
-  PIANO = dati.piano || [];
-  $('#avanzamento').classList.add('visibile');
-  $('#barra').style.width = '0%';
-  $('#avanz-pct').textContent = '0%';
-  $('#avanz-fase').textContent = t('phase.default');
-  $('#avanz-dettaglio').textContent = '';
-  $('#racconto-testo').textContent = t('narr.info');
-  $('#racconto-piano').textContent = t('prog.plan') + ' ' + dati.frase;
+ascolta('iniziaLavoro', (p, dati) => {
+  p.piano = dati.piano || [];
+  p.q('avanzamento').classList.add('visibile');
+  p.q('barra').style.width = '0%';
+  p.q('avanz-pct').textContent = '0%';
+  p.q('avanz-fase').textContent = t('phase.default');
+  p.q('avanz-dettaglio').textContent = '';
+  p.q('racconto-testo').textContent = t('narr.info');
+  p.q('racconto-piano').textContent = t('prog.plan') + ' ' + dati.frase;
 
-  const motore = $('#badge-motore');
+  const motore = p.q('badge-motore');
   motore.className = 'targhetta-motore ' + (dati.tono || '');
   motore.textContent = dati.motore || '';
 
-  const nota = $('#badge-nota');
+  const nota = p.q('badge-nota');
   nota.textContent = dati.nota || '';
   nota.hidden = !dati.nota;
 
-  disegnaPassi(-1);
-};
+  disegnaPassi(p, -1);
+  aggiornaVoci();
+});
 
 /* I passaggi: quelli fatti spuntati, quello in corso acceso, gli altri spenti.
  * E' la sola cosa che dice quanto manca alla FINE e non solo alla fase. */
-function disegnaPassi(corrente) {
-  const box = $('#passi');
+function disegnaPassi(p, corrente) {
+  const box = p.q('passi');
   box.innerHTML = '';
-  PIANO.forEach((fase, i) => {
+  p.piano.forEach((fase, i) => {
     const stato = i < corrente ? ' fatto' : (i === corrente ? ' corrente' : '');
     const passo = el('span', 'passo' + stato);
     passo.appendChild(el('span', 'pallino'));
@@ -264,54 +261,67 @@ function disegnaPassi(corrente) {
  *              che una fase vale un quinto e non un mezzo;
  *   dettaglio  cosa sta lavorando in questo momento (un blocco, una sezione).
  */
-window.avanzaLavoro = (fase, indice, fasi, globale, dettaglio) => {
+ascolta('avanzaLavoro', (p, fase, indice, fasi, globale, dettaglio) => {
   if (globale !== null && globale !== undefined) {
-    $('#barra').style.width = (Math.max(0, Math.min(1, globale)) * 100).toFixed(1) + '%';
-    $('#avanz-pct').textContent = Math.round(globale * 100) + '%';
+    p.q('barra').style.width = (Math.max(0, Math.min(1, globale)) * 100).toFixed(1) + '%';
+    p.q('avanz-pct').textContent = Math.round(globale * 100) + '%';
   }
   const nome = TESTI['phase.' + fase] ? t('phase.' + fase) : t('phase.default');
-  $('#avanz-fase').textContent = nome;
-  $('#avanz-dettaglio').textContent = dettaglio || '';
+  p.q('avanz-fase').textContent = nome;
+  p.q('avanz-dettaglio').textContent = dettaglio || '';
 
-  if (TESTI['narr.' + fase]) $('#racconto-testo').textContent = t('narr.' + fase);
+  if (TESTI['narr.' + fase]) p.q('racconto-testo').textContent = t('narr.' + fase);
 
-  const badge = $('#badge-fase');
+  const badge = p.q('badge-fase');
   if (indice >= 0) {
     badge.hidden = false;
     badge.textContent = t('prog.phase', { i: indice + 1, n: fasi });
-    disegnaPassi(indice);
+    disegnaPassi(p, indice);
   } else {
     badge.hidden = true;
   }
-};
+});
 
-/* La playlist: quale video, di quanti. Il resto della finestra racconta gia'
- * cosa sta succedendo a QUESTO video, quindi qui basta dire quale sia. */
-window.lavoroBatch = (conteggio, titolo) => {
-  const badge = $('#badge-batch');
+/* La playlist: quale video, di quanti. Il resto del pannello racconta gia' cosa
+ * sta succedendo a QUESTO video, quindi qui basta dire quale sia. */
+ascolta('lavoroBatch', (p, conteggio, titolo) => {
+  const badge = p.q('badge-batch');
   badge.hidden = false;
   badge.textContent = conteggio + '  ·  ' + titolo;
-};
+});
 
-window.erroreLavoro = (messaggio) => {
-  window.cambiaStato('error');
-  window.aggiungiRiga(messaggio);
-  finestra({
+ascolta('erroreLavoro', (p, messaggio) => {
+  window.__instrada(p.dove, 'cambiaStato', ['error']);
+  window.__instrada(p.dove, 'aggiungiRiga', [messaggio]);
+  finestraDi(p, {
     icona: 'errore', tono: 'errore', titolo: t('err.title'),
     corpo: [messaggio || t('err.unknown')],
     azioni: [{ testo: t('comune.chiudi'), tono: 'pieno', icona: 'spunta' }],
   });
-};
+});
 
 /* ── Le scelte, ricordate ─────────────────────────────────────────────────── */
 
 /* Ogni modifica va anche a Python, che la salva e rispedisce la stima
  * aggiornata: il costo cambia col modello, e vederlo cambiare nell'istante in
- * cui si sceglie e' meta' del motivo per cui la stima esiste. */
-async function salvaScelte(valori) {
+ * cui si sceglie e' meta' del motivo per cui la stima esiste.
+ *
+ * La postazione da cui arriva la scelta viaggia insieme alla scelta, perche'
+ * non tutte valgono per tutto il programma. I modelli si', sono le stesse sei
+ * tendine da qualunque stanza le si guardi. La sorgente e i tre interruttori
+ * no: appartengono alla stanza in cui sono stati toccati, e spuntare
+ * «riassunto» in «Cloud» non deve spuntarlo anche di la'.
+ *
+ * Anche la stima torna indietro con l'indirizzo, ed e' il motivo per cui la si
+ * rimette a schermo nella postazione giusta invece che «nella pagina»: la
+ * stessa sorgente vista da «Locale» costa un tempo e vista da «Cloud» costa
+ * dei soldi, e sono due numeri veri che convivono. */
+async function salvaScelte(valori, p) {
+  p = p || posto();
   Object.assign(SCELTE, valori);
-  const esito = await window.pywebview.api.imposta(valori);
-  if (esito && esito.ok && window.mostraStima) window.mostraStima(esito.stima);
+  Object.assign(p.opz, valori);
+  const esito = await window.pywebview.api.imposta(valori, p.dove);
+  if (esito && esito.ok && window.mostraStima) window.mostraStima(p, esito.stima);
 }
 
 /* ── Avvio ────────────────────────────────────────────────────────────────── */
@@ -427,34 +437,52 @@ function avvia() {
     TESTI = dati.testi;
     SCELTE = dati.scelte;
 
-    if (window.initMotore) window.initMotore(dati);
-    if (window.initTrascrivi) window.initTrascrivi(dati);
-    // I tre riquadri per ultimi: riassumono quello che i due qui sopra hanno
-    // appena messo a posto, quindi devono leggere una situazione gia' pronta.
-    if (window.initCarte) window.initCarte();
+    // Le due postazioni si costruiscono QUI, prima di ogni altra cosa che le
+    // riguardi. Tutto quello che viene dopo va a cercare i pezzi del lavoro
+    // dentro una postazione: se non esistessero ancora, ogni ricerca tornerebbe
+    // a mani vuote e l'interfaccia si monterebbe sopra il niente.
+    creaPosti();
+    Object.values(POSTI).forEach((p) => {
+      // Le due stanze partono dalle stesse abitudini dell'ultima volta e da qui
+      // divergono: e' Python a tenerle, ed e' Python che le ha appena mandate.
+      p.opz = {
+        sorgente: SCELTE.sorgente, translate: SCELTE.translate,
+        summarize: SCELTE.summarize, visual: SCELTE.visual,
+      };
+      if (window.initMotore) window.initMotore(p, dati);
+      if (window.initTrascrivi) window.initTrascrivi(p);
+      // I riquadri per ultimi: riassumono quello che i due qui sopra hanno
+      // appena messo a posto, quindi devono leggere una situazione gia' pronta.
+      if (window.initCarte) window.initCarte(p);
+    });
     passoAvvio();                     // 4. le due sezioni sono pronte
 
     riempiTesti();
     if (window.potenziaTendine) window.potenziaTendine();
     passoAvvio();                     // 5. ogni etichetta ha il suo testo
 
-    // Si riapre nella stanza in cui si lavorava l'ultima volta: la scelta del
-    // motore e' salvata, e riportarla a schermo e' il modo di non far ricominciare
-    // da capo chi aveva gia' deciso.
-    cambiaSezione(sezioneDiLavoro(), true);
-    window.cambiaStato('idle');
+    // Si riapre nella stanza in cui si lavorava l'ultima volta. E' l'unica
+    // cosa che il motore salvato decide ancora: non piu' con che cosa si
+    // trascrive, che adesso lo dice la stanza, ma solo quale delle due aprire
+    // per prima.
+    cambiaSezione(SCELTE.motore === 'groq' ? 'cloud' : 'locale', true);
+    Object.values(POSTI).forEach((p) => {
+      window.__instrada(p.dove, 'cambiaStato', ['idle']);
+      p.q('svuota').addEventListener('click', () => svuotaDiario(p));
+    });
 
     $$('.voce[data-va]').forEach((v) =>
       v.addEventListener('click', () => cambiaSezione(v.dataset.va)));
-    $('#svuota').addEventListener('click', svuotaDiario);
 
-    // Ctrl+Invio avvia la trascrizione da qualunque sezione: chi ha appena
-    // riempito il modulo ha le mani sulla tastiera, non sul mouse.
+    // Ctrl+Invio avvia la trascrizione della stanza che si sta guardando: chi
+    // ha appena riempito il modulo ha le mani sulla tastiera, non sul mouse.
+    // Della stanza che si guarda e non di tutte e due, perche' una scorciatoia
+    // che fa partire un lavoro che non si sta vedendo e' una trappola.
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey) || finestraAperta()) return;
       e.preventDefault();
-      const avvia = $('#avvia');
-      if (!avvia.disabled) avvia.click();
+      const avvia = posto().q('avvia');
+      if (avvia && !avvia.disabled) avvia.click();
     });
 
     // Trascinare un link o un file dentro la finestra: e' il gesto naturale, e
@@ -473,10 +501,12 @@ function avvia() {
       const testo = (e.dataTransfer.getData('text/uri-list')
                   || e.dataTransfer.getData('text/plain') || '').trim();
       if (!testo || !window.accettaTrascinato) return;
-      // Chi trascina un link da un'altra sezione vuole trascriverlo: lo si
-      // porta nella postazione, che e' quella del motore scelto.
-      cambiaSezione(sezioneDiLavoro());
-      window.accettaTrascinato(testo);
+      // Il link trascinato va nella stanza che si sta guardando, che e' quella
+      // in cui e' stato lasciato cadere. Prima veniva portato «dove sta il
+      // motore scelto», che con una postazione sola era l'unico posto
+      // possibile; adesso i posti sono due e quello giusto e' dove ha mirato
+      // la mano.
+      window.accettaTrascinato(posto(), testo);
     });
 
     // Ultima riga: da qui l'interfaccia e' disegnata, tradotta e reattiva.
@@ -493,6 +523,7 @@ window.$ = $;
 window.$$ = $$;
 window.avvisa = avvisa;
 window.errore = errore;
+window.erroreDi = erroreDi;
 window.statoVuoto = statoVuoto;
 window.cambiaSezione = cambiaSezione;
 window.salvaScelte = salvaScelte;

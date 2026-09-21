@@ -41,7 +41,6 @@ import webview
 from server.config import i18n, settings
 from server.utils import text
 from server.controllers import bridge
-from server.controllers.bridge import verso_pagina as _verso_pagina
 from server.config import settings
 from server.services import estimate
 from server.sources import metadata
@@ -57,6 +56,138 @@ RISULTATI = ''              # dove finiscono le trascrizioni: lo sa engine
 # qui ad aspettare: e' il punto in cui i due tempi si incontrano senza che
 # nessuno dei due debba sapere quanto ha impiegato l'altro.
 MOTORE_PRONTO = threading.Event()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  DUE POSTAZIONI, E COME SI FA A NON CONFONDERLE
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# «Locale» e «Cloud» sono due posti di lavoro veri e indipendenti. In ciascuno
+# si puo' avere una sorgente diversa, e in entrambi puo' girare un lavoro nello
+# stesso momento: mentre Groq trascrive sui suoi server, questo computer puo'
+# trascriverne un altro per conto suo. Sono due mestieri che non si contendono
+# niente, e farli aspettare a turno sarebbe stato buttare via meta' del tempo.
+#
+# Da qui nasce un problema che prima non esisteva: quando qualcosa ha da dire
+# alla pagina, la pagina deve sapere A QUALE delle due postazioni si riferisce.
+# Una percentuale di avanzamento senza quel dato non vuol dire niente: e' come
+# gridare «sono all'ottanta per cento» in una stanza con due lavagne.
+#
+# Passarlo a mano avrebbe voluto dire aggiungere un argomento a una trentina di
+# chiamate sparse, e bastava dimenticarne una perche' una riga finisse sulla
+# lavagna sbagliata senza che nessun controllo se ne accorgesse.
+#
+# Invece lo si legge dal thread. Ogni lavoro gira nel suo, e un thread appartiene
+# a una postazione sola dal primo istante alla fine: quindi il thread stesso E'
+# la risposta alla domanda, e nessuno ha bisogno di ricordarsi di portarsela
+# dietro. Chi avvia un lavoro scrive qui dentro dove sta lavorando, e da quel
+# momento tutto quello che quel thread dice parte gia' con l'indirizzo giusto.
+_DOVE = threading.local()
+
+
+def _qui() -> str:
+    """In quale delle due postazioni sta lavorando il thread che chiama.
+
+    Il ripiego e' «locale» e non un errore perche' questa domanda la fanno
+    anche thread che non appartengono a nessun lavoro, per esempio quello della
+    finestra quando la pagina chiede qualcosa: li' non c'e' una risposta
+    sbagliata, c'e' una risposta che non serve a nessuno.
+    """
+    return getattr(_DOVE, 'dove', 'locale')
+
+
+def _verso_pagina(funzione: str, *argomenti) -> None:
+    """Dice qualcosa alla pagina, a nome della postazione che sta parlando.
+
+    E' la stessa cosa di prima con l'indirizzo davanti. La pagina riceve tutto
+    da un'unica porta, ``__instrada``, che guarda l'indirizzo e consegna alla
+    postazione giusta: cosi' un avanzamento che arriva da «Cloud» non tocca
+    niente di quello che si sta guardando in «Locale».
+    """
+    bridge.verso_pagina('__instrada', _qui(), funzione, list(argomenti))
+
+
+def _verso_tutti(funzione: str, *argomenti) -> None:
+    """Dice qualcosa che non riguarda nessuna postazione in particolare.
+
+    Sono due sole cose: a che punto e' l'avvio del programma, e i cataloghi dei
+    modelli quando Ollama finisce di farsi interrogare. Non appartengono a un
+    lavoro, quindi non hanno un indirizzo, quindi passano dalla porta di
+    servizio invece che dallo smistamento.
+    """
+    bridge.verso_pagina(funzione, *argomenti)
+
+
+class Smistatore(io.TextIOBase):
+    """Manda quello che viene stampato al diario del lavoro che l'ha stampato.
+
+    Perche' non basta piu' dirottare l'uscita standard
+        Prima il lavoro era uno solo: gli si puntava contro ``sys.stdout`` per
+        tutta la sua durata e si rimetteva a posto alla fine. Con due lavori
+        insieme quel gesto non funziona piu', perche' ``sys.stdout`` e' uno per
+        tutto il programma: il secondo a partire sovrascriverebbe il primo, e
+        le righe dei due finirebbero mescolate in un diario solo.
+
+    Cosa si fa invece
+        Questo oggetto prende il posto dell'uscita standard una volta sola,
+        all'avvio, e non se ne va piu'. Ogni lavoro si registra qui dicendo
+        «il thread che sto per usare scrive sul mio diario». Quando arriva
+        qualcosa, si guarda da quale thread arriva e lo si consegna li'.
+
+        Quello che non viene da nessun lavoro, per esempio i messaggi di
+        pywebview, passa dritto all'uscita vera come se questo oggetto non ci
+        fosse. E' il motivo per cui puo' restare installato per sempre senza
+        rubare niente a nessuno.
+    """
+
+    def __init__(self, vera):
+        """Tiene da parte l'uscita vera e apre il registro dei diari.
+
+        Il lucchetto protegge il registro e non la scrittura: a scrivere sono
+        thread diversi su diari diversi, che non si pestano i piedi, ma
+        iscriversi e cancellarsi capita mentre un altro sta cercando, e una
+        ricerca dentro un dizionario che cambia e' il genere di guaio che si
+        manifesta una volta su mille avvii.
+        """
+        self._vera = vera
+        self._diari: dict[int, Diario] = {}
+        self._lucchetto = threading.Lock()
+
+    def registra(self, diario) -> None:
+        """Da adesso quello che stampa QUESTO thread va in questo diario."""
+        with self._lucchetto:
+            self._diari[threading.get_ident()] = diario
+
+    def dimentica(self) -> None:
+        """Il lavoro e' finito: questo thread torna a scrivere sull'uscita vera.
+
+        Si chiama sempre, anche quando e' andata male, perche' un thread che
+        resta iscritto dopo essere morto lascia nel registro un diario che
+        nessuno svuotera' mai.
+        """
+        with self._lucchetto:
+            self._diari.pop(threading.get_ident(), None)
+
+    def write(self, s: str) -> int:        # type: ignore[override]
+        with self._lucchetto:
+            diario = self._diari.get(threading.get_ident())
+        if diario is not None:
+            return diario.write(s)
+        return self._vera.write(s) if self._vera is not None else len(s)
+
+    def flush(self) -> None:
+        if self._vera is not None:
+            try:
+                self._vera.flush()
+            except Exception:
+                pass
+
+
+# Prende il posto dell'uscita standard una volta sola, quando questo modulo
+# viene importato, e non lo lascia piu'. Finche' nessun lavoro si registra non
+# fa assolutamente niente: passa tutto all'uscita vera.
+_SMISTATORE = Smistatore(sys.stdout)
+sys.stdout = sys.stderr = _SMISTATORE
 
 # Le tappe del caricamento, con quanto pesa ciascuna sulla barra.
 #
@@ -126,7 +257,7 @@ def _avanzamento(quota: float) -> None:
     prima che la finestra esista: e' voluto, ed e' il motivo per cui l'avvio
     dura la meta' di prima.
     """
-    _verso_pagina('avanzamentoAvvio', quota)
+    _verso_tutti('avanzamentoAvvio', quota)
 
 
 # pywebview 6 ha rinominato le costanti dei selettori di file. Si prendono le
@@ -401,6 +532,68 @@ def piano_fasi(motore: str, sorgente: str, opzioni: dict) -> list[str]:
     return piano
 
 
+class Posto:
+    """Una delle due postazioni di lavoro: «Locale» o «Cloud».
+
+    Cosa ci sta dentro
+        Tutto quello che appartiene a UN lavoro e non all'altro: la sorgente
+        confermata, se c'e' qualcosa in corso, e a che punto e'. Niente di
+        tutto questo ha senso fuori dalla stanza in cui e' stato scelto.
+
+    Cosa NON ci sta dentro
+        La chiave di Groq, i cataloghi dei modelli, le cartelle aperte per
+        ultime. Sono cose del programma, non del lavoro: la chiave e' la stessa
+        chiave da qualunque parte la si guardi, e averne due copie vorrebbe
+        dire solo poterle far divergere.
+
+    Perche' sono due oggetti e non due prefissi
+        Perche' cosi' aggiungere un dato al lavoro e' aggiungere un campo qui,
+        e vale automaticamente per tutte e due le postazioni. Con due gruppi di
+        variabili prefissate, ogni dato nuovo andrebbe scritto due volte, e la
+        volta in cui se ne scrive una sola e' quella in cui «Cloud» comincia a
+        ricordarsi qualcosa che «Locale» dimentica.
+    """
+
+    def __init__(self, dove: str, motore: str):
+        """Una postazione vuota, che sa solo come si chiama e con cosa lavora.
+
+        Il motore e' deciso qui e non cambia mai: «Locale» trascrive su questo
+        computer e «Cloud» sui server Groq, e sono le due cose che danno il nome
+        alle stanze. Prima era una scelta che viaggiava a parte e poteva non
+        corrispondere alla stanza in cui si era; adesso la stanza E' la scelta,
+        e non c'e' piu' niente da tenere allineato.
+        """
+        self.dove = dove
+        self.motore = motore
+
+        # Un lavoro in corso qui dentro. L'altra postazione non lo guarda: e'
+        # esattamente il motivo per cui si puo' lavorare in due.
+        self.occupato = False
+        self.avanz: Avanzamento | None = None
+
+        # La sorgente confermata: metadati letti, percorso o URL, ed eventuale
+        # playlist. Vive qui e non nella pagina perche' e' il motore a produrla
+        # e il motore a riceverla indietro: farla passare per JavaScript
+        # significherebbe copiarla due volte e rischiare che divergano.
+        self.meta: dict | None = None
+        self.src: str = ''
+        self.playlist: dict | None = None
+
+        # Dove sono finiti i file dell'ultimo lavoro FINITO QUI. Servono al
+        # bottone «Apri la cartella» del riepilogo, che e' il riepilogo di
+        # questa postazione: con un valore solo per tutto il programma,
+        # finendo due lavori a poca distanza, il bottone del primo avrebbe
+        # aperto la cartella del secondo.
+        self.ultima_cartella = ''
+        self.ultima_visiva = ''
+
+        # Gli interruttori degli output. Stanno qui e non fra le scelte
+        # generali perche' si sceglie video per video: si puo' volere il
+        # riassunto di quello che sta girando in nuvola e non di quello che sta
+        # girando su questo computer.
+        self.opz: dict = {}
+
+
 class Api:
     """I metodi che la pagina puo' chiamare, e nient'altro.
 
@@ -426,21 +619,14 @@ class Api:
         e' un errore che non si vede compilando: si vede solo aprendo il
         programma e trovandolo piantato sulla schermata di caricamento.
         """
-        self._occupato = False
-        self._avanz: Avanzamento | None = None
-
-        # La sorgente confermata: metadati letti, percorso o URL, ed eventuale
-        # playlist. Vive qui e non nella pagina perche' e' il motore a produrla
-        # e il motore a riceverla indietro: farla passare per JavaScript
-        # significherebbe copiarla due volte e rischiare che divergano.
-        self._meta: dict | None = None
-        self._src: str = ''
-        self._playlist: dict | None = None
+        # Le due postazioni. Da qui in avanti nessun lavoro ha uno stato
+        # suo sparso dentro questo oggetto: ce l'ha dentro la sua postazione,
+        # e questo oggetto sa solo quali postazioni esistono.
+        self._posti = {'locale': Posto('locale', 'local'),
+                       'cloud':  Posto('cloud', 'groq')}
 
         self._chiave = ''
         self._chiave_nome = ''
-        self._ultima_cartella = ''
-        self._ultima_visiva = ''
 
         # Modelli gia' scaricati in Ollama, per i ✓ nei menu. None = ancora
         # ignoto (la lettura avviene in sottofondo e resta muta se Ollama e'
@@ -453,6 +639,34 @@ class Api:
         # transcriber.py, che a quel punto non e' ancora stato importato.
         self.scelte: dict = {}
 
+
+    def _p(self) -> Posto:
+        """La postazione a cui appartiene il thread che sta chiamando.
+
+        E' il perno di tutto il file: da qui in giu' nessuno nomina mai «Locale»
+        o «Cloud», si dice soltanto «la mia postazione» e la risposta arriva da
+        se'. Chi lavora in nuvola trova la sua, chi lavora in locale trova la
+        sua, e lo stesso identico codice serve tutti e due.
+
+        Chi ci ha messo dentro la risposta sono due soli posti: i metodi che la
+        pagina chiama, che ricevono dalla pagina in quale stanza e' stato
+        premuto il bottone, e l'involucro che fa partire i lavori, che la
+        scrive nel thread appena nato. Tutto il resto la legge e basta.
+        """
+        return self._posti[_qui()]
+
+    @staticmethod
+    def _entra(dove: str) -> str:
+        """Segna in quale postazione si sta lavorando, e risponde come si chiama.
+
+        La chiamano come prima riga tutti i metodi che la pagina puo' invocare.
+        Il ripiego su «locale» e' voluto: se dalla pagina arrivasse un nome che
+        non esiste, la cosa giusta e' lavorare nella prima stanza invece di
+        far saltare la chiamata, perche' sarebbe comunque un lavoro vero che
+        qualcuno ha chiesto.
+        """
+        _DOVE.dove = dove if dove in ('locale', 'cloud') else 'locale'
+        return _DOVE.dove
 
     def _leggi_scelte(self) -> None:
         """Le scelte con cui l'interfaccia si presenta: le ultime usate.
@@ -481,6 +695,13 @@ class Api:
             'summarize': bool(prefs.get('summarize', False)),
             'visual':    bool(prefs.get('visual', False)),
         }
+        # Le due postazioni nascono uguali, con le abitudini dell'ultima
+        # volta. Da qui in poi divergono appena qualcuno tocca un interruttore
+        # in una delle due: quello che si salva su disco e' un punto di
+        # partenza, non un vincolo che le tiene legate.
+        for posto in self._posti.values():
+            posto.opz = {c: self.scelte[c] for c in self.SCELTE_DEL_POSTO}
+
         # Allinea subito i modelli Groq a quelli scelti, invece di lasciare
         # quelli di .env finche' non parte il primo lavoro.
         self._applica_groq()
@@ -526,7 +747,7 @@ class Api:
         if not presenti:
             return
         self._ollama_presenti = presenti
-        _verso_pagina('aggiornaModelli', self._modelli())
+        _verso_tutti('aggiornaModelli', self._modelli())
 
     def _applica_groq(self) -> None:
         """Porta in transcriber i modelli Groq scelti nella sezione «Motore».
@@ -599,15 +820,40 @@ class Api:
             'groq_vista': groq_vista,
         }
 
-    def imposta(self, valori: dict) -> dict:
+    # Le scelte che appartengono al singolo lavoro e non al programma. Sono
+    # quelle che le due postazioni tengono separate: la sorgente e i tre
+    # interruttori degli output.
+    SCELTE_DEL_POSTO = ('sorgente', 'translate', 'summarize', 'visual')
+
+    def imposta(self, valori: dict, dove: str = 'locale') -> dict:
         """Registra una scelta dell'interfaccia e la ricorda per la volta dopo.
 
-        Motore, modelli e interruttori non sono impostazioni del progetto: sono
+        Modelli e interruttori non sono impostazioni del progetto: sono
         abitudini di chi usa il programma, e rifarle a ogni avvio sarebbe
         scortese. La stima di costo/tempo dipende da alcune di queste, quindi si
         ricalcola qui e torna gia' pronta.
+
+        Le scelte finiscono in due posti diversi
+            La sorgente e i tre interruttori vanno nella postazione da cui
+            arrivano, perche' li' devono restare: spuntare «riassunto» in
+            «Cloud» non deve spuntarlo anche di la'.
+
+            I modelli vanno nelle scelte generali, perche' le sei tendine sono
+            sei e non dodici.
+
+            Su disco si salva comunque tutto, e vale come punto di partenza al
+            prossimo avvio: e' un valore ricordato, non un valore condiviso.
+            Le due postazioni nascono uguali e divergono appena qualcuno tocca
+            un interruttore.
         """
-        self.scelte.update({k: v for k, v in (valori or {}).items() if k in self.scelte})
+        posto = self._posti[self._entra(dove)]
+        valori = valori or {}
+
+        for chiave in self.SCELTE_DEL_POSTO:
+            if chiave in valori:
+                posto.opz[chiave] = valori[chiave]
+
+        self.scelte.update({k: v for k, v in valori.items() if k in self.scelte})
         i18n.save_prefs(**self.scelte)
         self._applica_groq()
         return {'ok': True, 'stima': self._stima()}
@@ -687,7 +933,7 @@ class Api:
 
     # ── Leggere la sorgente ──────────────────────────────────────────────────
 
-    def carica_info(self, testo: str) -> dict:
+    def carica_info(self, testo: str, dove: str = 'locale') -> dict:
         """Guarda cosa c'e' dietro un link, senza scaricare nulla.
 
         Torna subito: il lavoro vero avviene in un thread, e la pagina viene
@@ -695,15 +941,24 @@ class Api:
         cui yt-dlp interroga YouTube, che su una playlist lunga sono parecchi,
         perche' ogni video va letto uno per uno.
         """
-        if self._occupato:
+        # Prima riga di tutte: da quale delle due stanze arriva questo
+        # clic. Da qui in poi lo sa il thread, e ogni cosa che questo
+        # metodo dira' alla pagina partira' gia' con l'indirizzo giusto.
+        self._entra(dove)
+        if self._p().occupato:
             return {'ok': False, 'errore': i18n.t('err.busy')}
         testo = (testo or '').strip()
         if not testo:
             return {'ok': False, 'errore': i18n.t('err.no_url')}
-        threading.Thread(target=self._carica_davvero, args=(testo,), daemon=True).start()
+        # Anche questo thread nasce senza sapere dov'e', quindi l'indirizzo
+        # glielo si passa come primo argomento. Vale per la lettura di un link
+        # esattamente come per un lavoro: la conferma che ne esce deve aprirsi
+        # nella stanza in cui qualcuno ha incollato quel link, non nell'altra.
+        threading.Thread(target=self._carica_davvero, args=(testo, _qui()),
+                         daemon=True).start()
         return {'ok': True, 'avviato': True}
 
-    def _carica_davvero(self, url: str) -> None:
+    def _carica_davvero(self, url: str, dove: str = 'locale') -> None:
         """Legge cosa c'e' dietro un link, in un thread a parte.
 
         Sta in un thread perche' su una playlist lunga yt-dlp interroga YouTube
@@ -715,13 +970,14 @@ class Api:
         contiene anche un video e trattandolo come singolo si prenderebbe solo
         quello, senza dire niente degli altri quarantanove.
         """
+        _DOVE.dove = dove
         try:
             playlist = engine.get_playlist_info(url) if 'list=' in url else None
             if playlist and playlist['count'] >= 1:
                 self._carica_playlist(url, playlist)
                 return
             meta = engine.get_video_info(url)
-            self._meta, self._src, self._playlist = meta, url, None
+            self._p().meta, self._p().src, self._p().playlist = meta, url, None
             _verso_pagina('chiediConferma', self._scheda_video(meta))
         except Exception as exc:                       # noqa: BLE001
             _verso_pagina('erroreSorgente', str(exc))
@@ -745,19 +1001,23 @@ class Api:
             return
         sottocartella = text._safe_filename(
             playlist.get('title') or playlist.get('channel') or 'playlist')
-        self._playlist = {'title': playlist.get('title'),
+        self._p().playlist = {'title': playlist.get('title'),
                           'channel': playlist.get('channel'),
                           'subdir': sottocartella, 'items': voci}
-        self._meta, self._src = voci[0], url
-        _verso_pagina('chiediConferma', self._scheda_playlist(self._playlist))
+        self._p().meta, self._p().src = voci[0], url
+        _verso_pagina('chiediConferma', self._scheda_playlist(self._p().playlist))
 
-    def scegli_file(self) -> dict:
+    def scegli_file(self, dove: str = 'locale') -> dict:
         """Apre il selettore di file del sistema per un audio o un video.
 
         I formati accettati sono esattamente quelli che accetta la riga di
         comando: il filtro si costruisce da ``settings.AUDIO_EXTENSIONS``, cosi'
         aggiungerne uno vale per tutt'e due senza toccare questo file.
         """
+        # Prima riga di tutte: da quale delle due stanze arriva questo
+        # clic. Da qui in poi lo sa il thread, e ogni cosa che questo
+        # metodo dira' alla pagina partira' gia' con l'indirizzo giusto.
+        self._entra(dove)
         estensioni = ' '.join(f'*{e}' for e in sorted(settings.AUDIO_EXTENSIONS))
         try:
             scelti = bridge.attuale().create_file_dialog(
@@ -770,18 +1030,22 @@ class Api:
 
         percorso = scelti[0]
         meta = metadata.local_file_meta(percorso)
-        self._meta, self._src, self._playlist = meta, percorso, None
+        self._p().meta, self._p().src, self._p().playlist = meta, percorso, None
         return {'ok': True, 'scheda': self._scheda_file(meta, percorso)}
 
-    def dimentica(self) -> dict:
+    def dimentica(self, dove: str = 'locale') -> dict:
         """La sorgente non vale piu': l'URL e' cambiato, o si e' annullata.
 
         Serve perche' una conferma vecchia non deve restare valida per un link
         nuovo: sarebbe il modo piu' facile di trascrivere il video sbagliato,
         che con Groq costa anche crediti.
         """
-        self._meta = self._playlist = None
-        self._src = ''
+        # Prima riga di tutte: da quale delle due stanze arriva questo
+        # clic. Da qui in poi lo sa il thread, e ogni cosa che questo
+        # metodo dira' alla pagina partira' gia' con l'indirizzo giusto.
+        self._entra(dove)
+        self._p().meta = self._p().playlist = None
+        self._p().src = ''
         return {'ok': True}
 
     # ── Le schede della sorgente ─────────────────────────────────────────────
@@ -872,13 +1136,16 @@ class Api:
         modifica invece di essere fissata quando la sorgente viene letta: e' il
         numero su cui si decide se usare il cloud o aspettare.
         """
-        meta = meta if meta is not None else self._meta
+        meta = meta if meta is not None else self._p().meta
         if not meta:
             return ''
-        if self._playlist and meta is self._meta:
+        if self._p().playlist and meta is self._p().meta:
             meta = {'duration': sum((m.get('duration') or 0)
-                                    for m in self._playlist['items'])}
-        motore = self.scelte['motore']
+                                    for m in self._p().playlist['items'])}
+        # Il motore e' quello della stanza, non una scelta a parte: la stessa
+        # sorgente vista da «Locale» costa un tempo e vista da «Cloud» costa
+        # dei soldi, e sono due numeri diversi che convivono benissimo.
+        motore = self._p().motore
         modello = self.scelte['groq'] if motore == 'groq' else self.scelte['whisper']
         stima = estimate.estimate_job(meta, motore, modello)
         if stima['backend'] == 'groq':
@@ -895,8 +1162,22 @@ class Api:
         ``backend`` a decidere, e con «local» la chiave non parte nemmeno, cosi'
         una trascrizione sul computer resta sul computer anche se una chiave e'
         caricata per altri lavori.
+
+        Da dove vengono i valori, che non e' piu' un posto solo
+            I modelli vengono dalle scelte generali, perche' sono gli stessi da
+            qualunque stanza li si guardi: le sei tendine esistono in un
+            esemplare ciascuna, tre per il computer e tre per Groq.
+
+            Il motore e gli interruttori vengono invece dalla postazione. Il
+            motore perche' ADESSO e' la stanza: lavorare in «Cloud» vuol dire
+            Groq, e non c'e' piu' una scelta separata che potrebbe dire il
+            contrario. Gli interruttori perche' si decidono video per video, e
+            si puo' benissimo volere il riassunto di quello che gira in nuvola
+            e non di quello che gira qui.
         """
-        motore = motore or self.scelte['motore']
+        posto = self._p()
+        motore = motore or posto.motore
+        opz = posto.opz
         return {
             'backend': motore,
             'model': self.scelte['whisper'],
@@ -907,14 +1188,14 @@ class Api:
             'groq_vision_model': self.scelte['groq_vista'],
             'api_key': self._chiave if motore == 'groq' else '',
             'export': True,
-            'source_kind': self.scelte['sorgente'],
+            'source_kind': opz.get('sorgente', 'youtube'),
             # I nomi delle cartelle seguono la lingua dell'interfaccia.
-            'translate': self.scelte['translate'],
-            'summarize': self.scelte['summarize'],
-            'visual': self.scelte['visual'],
+            'translate': bool(opz.get('translate')),
+            'summarize': bool(opz.get('summarize')),
+            'visual': bool(opz.get('visual')),
         }
 
-    def prepara(self) -> dict:
+    def prepara(self, dove: str = 'locale') -> dict:
         """Cosa succede se si preme «Trascrivi», prima di spendere qualcosa.
 
         Tre risposte possibili, e nessuna avvia niente da sola:
@@ -929,13 +1210,17 @@ class Api:
         Chiedere prima invece di trascrivere e basta e' cio' che evita di
         rispendere crediti Groq su un lavoro gia' fatto.
         """
-        if self._occupato:
+        # Prima riga di tutte: da quale delle due stanze arriva questo
+        # clic. Da qui in poi lo sa il thread, e ogni cosa che questo
+        # metodo dira' alla pagina partira' gia' con l'indirizzo giusto.
+        self._entra(dove)
+        if self._p().occupato:
             return {'ok': False, 'errore': i18n.t('err.busy')}
 
         mancano = []
-        if self.scelte['motore'] == 'groq' and not self._chiave:
+        if self._p().motore == 'groq' and not self._chiave:
             mancano.append(i18n.t('warn.key'))
-        if not self._meta:
+        if not self._p().meta:
             mancano.append(i18n.t('warn.src.yt') if self.scelte['sorgente'] == 'youtube'
                            else i18n.t('warn.src.local'))
         if mancano:
@@ -943,10 +1228,10 @@ class Api:
 
         # Una playlist si avvia sempre: il controllo "gia' fatto" lo fa il batch
         # video per video, saltando quelli presenti senza spendere un credito.
-        if self._playlist:
+        if self._p().playlist:
             return {'ok': True, 'stato': 'pronto'}
 
-        meta = self._meta
+        meta = self._p().meta
         if jobs.transcription_exists(RISULTATI, meta['title']):
             voci = [{'azione': 'nuova', 'icona': 'rifai', 'tono': 'attenzione',
                      'titolo': i18n.t('already.again'),
@@ -966,7 +1251,7 @@ class Api:
             return {'ok': True, 'stato': 'gia', 'titolo': i18n.t('already.title'),
                     'desc': i18n.t('already.desc'), 'voci': voci}
 
-        parziale = (checkpoints.load_checkpoint(meta) if self.scelte['motore'] == 'groq'
+        parziale = (checkpoints.load_checkpoint(meta) if self._p().motore == 'groq'
                     else checkpoints.load_local_checkpoint(meta))
         if parziale:
             return {'ok': True, 'stato': 'ripresa', 'titolo': i18n.t('resume.title'),
@@ -1002,7 +1287,7 @@ class Api:
         return {'fatto': text._format_timestamp(fatti),
                 'totale': text._format_timestamp(durata)}
 
-    def esegui(self, azione: str = 'nuova') -> dict:
+    def esegui(self, azione: str = 'nuova', dove: str = 'locale') -> dict:
         """Avvia davvero il lavoro, con l'azione scelta.
 
         ``nuova`` trascrive da capo; ``riprendi`` continua dal parziale;
@@ -1010,18 +1295,22 @@ class Api:
         ``riprendi_post`` riusano la trascrizione gia' salvata e non spendono un
         credito di trascrizione.
         """
-        if self._occupato:
+        # Prima riga di tutte: da quale delle due stanze arriva questo
+        # clic. Da qui in poi lo sa il thread, e ogni cosa che questo
+        # metodo dira' alla pagina partira' gia' con l'indirizzo giusto.
+        self._entra(dove)
+        if self._p().occupato:
             return {'ok': False, 'errore': i18n.t('err.busy')}
-        if not self._meta:
+        if not self._p().meta:
             return {'ok': False, 'errore': i18n.t('err.no_file')}
 
-        if self._playlist:
+        if self._p().playlist:
             self._in_thread(self._playlist_davvero)
             return {'ok': True, 'avviato': True}
 
         if azione == 'ricomincia':
-            meta = self._meta
-            (checkpoints.delete_local_checkpoint if self.scelte['motore'] == 'local'
+            meta = self._p().meta
+            (checkpoints.delete_local_checkpoint if self._p().motore == 'local'
              else checkpoints.delete_checkpoint)(meta)
             azione = 'nuova'
 
@@ -1041,7 +1330,7 @@ class Api:
         procede, apposta: chi guarda vede subito quanti passaggi saranno, e
         quindi capisce se sta aspettando due minuti o venti.
         """
-        self._avanz = Avanzamento(piano)
+        self._p().avanz = Avanzamento(piano)
         parti = [i18n.t('ov.base')]
         if opzioni.get('visual'):
             parti.append(i18n.t('ov.visual'))
@@ -1074,8 +1363,8 @@ class Api:
         perche' tutto quello che fa e' passare la notizia al ponte, che se la
         cava da qualunque thread.
         """
-        if self._avanz:
-            self._avanz.riferisci(fase, corrente, totale, dettaglio)
+        if self._p().avanz:
+            self._p().avanz.riferisci(fase, corrente, totale, dettaglio)
 
     def _trascrivi_davvero(self, riprendi: bool) -> None:
         """Il lavoro completo su un video: dall'audio al documento finito.
@@ -1091,17 +1380,17 @@ class Api:
         opzioni = self._opzioni()
         piano = piano_fasi(opzioni['backend'], self.scelte['sorgente'], opzioni)
         self._apri_lavoro(opzioni, piano)
-        meta_iniziale = self._meta
+        meta_iniziale = self._p().meta
         # Il crediti-esauriti non si intercetta qui: lo raccoglie _in_thread, che
         # lo tratta per quello che e', cioe' un'attesa e non un guasto, ed e'
         # l'unico
         # posto in cui la distinzione va fatta, invece che in ogni lavoro.
         meta, segmenti, etichetta, cliente = engine.transcribe_only(
-            self._src, opzioni, on_progress=self._riferisci, resume=riprendi)
+            self._p().src, opzioni, on_progress=self._riferisci, resume=riprendi)
         risultato = engine.save_results(
             meta, segmenti, etichetta, opzioni, RISULTATI, cliente,
             on_progress=self._riferisci)
-        self._avanz.concludi()
+        self._p().avanz.concludi()
         # Il riassunto fermato per crediti esauriti non e' un errore: la
         # trascrizione e' salvata, e si puo' concludere in locale senza rifare
         # nulla. Chiederlo qui e' l'unico momento in cui la domanda ha senso.
@@ -1130,25 +1419,29 @@ class Api:
         funzione = {'traduci': engine.translate_only,
                     'riassumi': engine.summary_only,
                     'riprendi_post': engine.resume}[azione]
-        risultato = funzione(self._meta, opzioni, RISULTATI, on_progress=self._riferisci)
-        self._avanz.concludi()
+        risultato = funzione(self._p().meta, opzioni, RISULTATI, on_progress=self._riferisci)
+        self._p().avanz.concludi()
         if risultato.get('summary_status') == 'partial' and opzioni['backend'] == 'groq':
-            _verso_pagina('riassuntoInterrotto', self._risultato(risultato, self._meta))
+            _verso_pagina('riassuntoInterrotto', self._risultato(risultato, self._p().meta))
         else:
-            _verso_pagina('mostraRisultato', self._risultato(risultato, self._meta))
+            _verso_pagina('mostraRisultato', self._risultato(risultato, self._p().meta))
 
-    def concludi_in_locale(self) -> dict:
+    def concludi_in_locale(self, dove: str = 'cloud') -> dict:
         """Finisce sul computer un riassunto che Groq ha lasciato a meta'.
 
         Riparte dalla sezione in cui si e' fermato: le sezioni gia' riassunte
         non si rifanno, e non serve alcuna chiave.
         """
-        if self._occupato:
+        # Prima riga di tutte: da quale delle due stanze arriva questo
+        # clic. Da qui in poi lo sa il thread, e ogni cosa che questo
+        # metodo dira' alla pagina partira' gia' con l'indirizzo giusto.
+        self._entra(dove)
+        if self._p().occupato:
             return {'ok': False, 'errore': i18n.t('err.busy')}
         # La finestra puo' restare aperta mentre si cambia il link, e cambiarlo
         # dimentica la sorgente: senza questo controllo il lavoro partirebbe
         # senza sapere su cosa, e fallirebbe a meta' con un errore oscuro.
-        if not self._meta:
+        if not self._p().meta:
             return {'ok': False, 'errore': i18n.t('err.no_file')}
         self._in_thread(self._riassunto_locale)
         return {'ok': True, 'avviato': True}
@@ -1167,27 +1460,38 @@ class Api:
         opzioni.update({'api_key': '', 'translate': True,
                         'summarize': True, 'visual': False})
         self._apri_lavoro(opzioni, ['info', 'summarize'])
-        risultato = engine.summary_only(self._meta, opzioni, RISULTATI,
+        risultato = engine.summary_only(self._p().meta, opzioni, RISULTATI,
                                         on_progress=self._riferisci)
-        self._avanz.concludi()
-        _verso_pagina('mostraRisultato', self._risultato(risultato, self._meta))
+        self._p().avanz.concludi()
+        _verso_pagina('mostraRisultato', self._risultato(risultato, self._p().meta))
 
-    def continua_in_locale(self) -> dict:
+    def continua_in_locale(self, dove: str = 'cloud') -> dict:
         """Completa sul computer una trascrizione Groq rimasta senza crediti.
 
         Riusa il parziale gia' salvato: solo la coda non ancora trascritta passa
-        dal modello locale, e viene ricucita con quello che c'era. Si sposta
-        anche la scelta del motore, cosi' tornando alla sezione «Motore» si
-        trova quello che sta davvero girando.
+        dal modello locale, e viene ricucita con quello che c'era.
+
+        Il lavoro NON cambia stanza
+            Resta in «Cloud», dove e' cominciato, e da li' continua a
+            raccontarsi. Cambia solo il modello che lo porta a termine, ed e'
+            ``_opzioni(motore='local')`` a imporlo.
+
+            Prima questa riga spostava anche la scelta del motore, quando la
+            scelta era una cosa a parte che si poteva spostare. Adesso il
+            motore E' la stanza: spostarlo vorrebbe dire far saltare il lavoro
+            da una lavagna all'altra a meta' strada, lasciando il suo diario e
+            il suo avanzamento in quella di prima.
         """
-        if self._occupato:
+        # Prima riga di tutte: da quale delle due stanze arriva questo
+        # clic. Da qui in poi lo sa il thread, e ogni cosa che questo
+        # metodo dira' alla pagina partira' gia' con l'indirizzo giusto.
+        self._entra(dove)
+        if self._p().occupato:
             return {'ok': False, 'errore': i18n.t('err.busy')}
-        if not self._meta or not self._src:
+        if not self._p().meta or not self._p().src:
             return {'ok': False, 'errore': i18n.t('err.no_file')}
-        self.scelte['motore'] = 'local'
-        i18n.save_prefs(**self.scelte)
         self._in_thread(self._coda_in_locale)
-        return {'ok': True, 'avviato': True, 'scelte': self.scelte}
+        return {'ok': True, 'avviato': True}
 
     def _coda_in_locale(self) -> None:
         """Finisce in locale una trascrizione che Groq ha lasciato a meta'.
@@ -1203,11 +1507,11 @@ class Api:
         piano = piano_fasi('local', self.scelte['sorgente'], opzioni)
         self._apri_lavoro(opzioni, piano)
         meta, segmenti, etichetta, _ = engine.continue_local_from_groq(
-            self._src, opzioni, on_progress=self._riferisci)
+            self._p().src, opzioni, on_progress=self._riferisci)
         risultato = engine.save_results(meta, segmenti, etichetta, opzioni,
                                         RISULTATI, None, on_progress=self._riferisci)
-        self._avanz.concludi()
-        _verso_pagina('mostraRisultato', self._risultato(risultato, self._meta))
+        self._p().avanz.concludi()
+        _verso_pagina('mostraRisultato', self._risultato(risultato, self._p().meta))
 
     # ── Playlist ─────────────────────────────────────────────────────────────
 
@@ -1219,7 +1523,7 @@ class Api:
         fallisce non ferma gli altri; se Groq esaurisce i crediti ci si ferma li'
         I blocchi gia' fatti restano salvati e domani si riprende.
         """
-        playlist = self._playlist
+        playlist = self._p().playlist
         voci = playlist['items']
         radice = os.path.join(RISULTATI, playlist['subdir'])
         opzioni = self._opzioni()
@@ -1254,7 +1558,7 @@ class Api:
                 # Come per un video singolo: l'ultima fase riferisce e poi tace,
                 # quindi senza questa la barra di ogni video resterebbe a un
                 # passo dalla fine con tutto gia' scritto sul disco.
-                self._avanz.concludi()
+                self._p().avanz.concludi()
             except engine.RateLimitReached:
                 senza_crediti = True
                 break
@@ -1262,7 +1566,7 @@ class Api:
                 falliti.append(meta['title'])
                 continue
 
-        self._ultima_cartella = radice
+        self._p().ultima_cartella = radice
         _verso_pagina('mostraRisultatoPlaylist', {
             'titolo': i18n.t('playlist.res.title'),
             'cartella': radice,
@@ -1287,9 +1591,9 @@ class Api:
         I file vengono raggruppati per cartella perche' e' cosi' che stanno sul
         disco, ed e' l'unico modo in cui l'elenco di dieci nomi resta leggibile.
         """
-        self._ultima_cartella = res.get('video_dir', '')
+        self._p().ultima_cartella = res.get('video_dir', '')
         visiva = res.get('visual') or {}
-        self._ultima_visiva = visiva.get('dir') or ''
+        self._p().ultima_visiva = visiva.get('dir') or ''
 
         gruppi: dict[str, list[str]] = {}
         for percorso in res.get('files', []):
@@ -1331,7 +1635,7 @@ class Api:
 
     # ── Aprire cose nel sistema ──────────────────────────────────────────────
 
-    def apri(self, quale: str = 'cartella') -> dict:
+    def apri(self, quale: str = 'cartella', dove: str = 'locale') -> dict:
         """Apre una cartella con il gestore di file del sistema.
 
         E' il modo piu' rapido di arrivare ai file appena prodotti, e sostituisce
@@ -1341,7 +1645,11 @@ class Api:
         che apre gli indirizzi, che davanti a un percorso locale apre il
         gestore di file.
         """
-        percorso = self._ultima_visiva if quale == 'visiva' else self._ultima_cartella
+        # Prima riga di tutte: da quale delle due stanze arriva questo
+        # clic. Da qui in poi lo sa il thread, e ogni cosa che questo
+        # metodo dira' alla pagina partira' gia' con l'indirizzo giusto.
+        self._entra(dove)
+        percorso = self._p().ultima_visiva if quale == 'visiva' else self._p().ultima_cartella
         if not percorso:
             return {'ok': False}
         try:
@@ -1374,34 +1682,55 @@ class Api:
     def _in_thread(self, funzione, *argomenti) -> None:
         """Fa girare il lavoro fuori dal thread della finestra.
 
-        L'output dei moduli viene dirottato al diario solo per la durata del
-        lavoro: farlo per sempre catturerebbe anche i messaggi di pywebview, che
-        alla pagina non servono.
+        Il passaggio di consegne fra i due thread
+            Questo metodo gira nel thread della finestra, che sa in quale
+            stanza e' stato premuto il bottone perche' gliel'ha appena detto
+            la pagina. Il lavoro girera' invece in un thread nuovo, che non sa
+            niente di niente.
+
+            Quindi l'indirizzo si legge QUI e si consegna la' dentro, come
+            prima riga. Leggerlo dentro il thread nuovo non funzionerebbe: e'
+            appena nato, la sua variabile e' vuota, e risponderebbe «locale» a
+            tutti, compreso un lavoro partito da «Cloud».
 
         Il crediti-esauriti non passa di qui come errore: e' una condizione
         prevista e recuperabile, non un guasto, e chi la incontra la gestisce da
         se' con una finestra che offre come proseguire.
         """
+        dove = _qui()
+        posto = self._posti[dove]
+
         def guscio():
             """Fa girare il lavoro in un thread, con tutte le reti di sicurezza.
 
-            E' l'involucro che sta intorno a ogni operazione lunga, e fa quattro
+            E' l'involucro che sta intorno a ogni operazione lunga, e fa cinque
             cose che nessuna di quelle operazioni deve ripetere per conto suo:
 
-            segna che si sta lavorando, cosi' la pagina non ne fa partire due;
+            dice a questo thread in quale postazione si trova, e da quel
+            momento tutto cio' che dira' arriva alla lavagna giusta;
 
-            dirotta quello che viene stampato dentro il diario a schermo;
+            segna che si sta lavorando, cosi' la pagina non ne fa partire due
+            NELLA STESSA STANZA, mentre nell'altra si puo' eccome;
+
+            manda quello che viene stampato dentro il diario di questa
+            postazione, e non in quello dell'altra;
 
             distingue i crediti finiti da un guasto vero, perche' sono due
             cose diverse e portano a due messaggi diversi;
 
-            e rimette tutto com'era alla fine, anche quando e' andata male.
+            e si cancella dal registro alla fine, anche quando e' andata male.
             """
-            self._occupato = True
+            _DOVE.dove = dove
+            posto.occupato = True
             _verso_pagina('cambiaStato', 'working')
+
+            # Il diario si iscrive allo smistatore invece di prendere il posto
+            # dell'uscita standard. E' la differenza che permette ai due lavori
+            # di convivere: prima il secondo a partire avrebbe sovrascritto il
+            # dirottamento del primo, e le righe dei due sarebbero finite
+            # mescolate in un diario solo.
             diario = Diario()
-            vecchio_out, vecchio_err = sys.stdout, sys.stderr
-            sys.stdout = sys.stderr = diario
+            _SMISTATORE.registra(diario)
             try:
                 funzione(*argomenti)
                 _verso_pagina('cambiaStato', 'done')
@@ -1414,8 +1743,8 @@ class Api:
                 _verso_pagina('erroreLavoro', i18n.t('err.unexpected', e=exc))
             finally:
                 diario.flush()
-                sys.stdout, sys.stderr = vecchio_out, vecchio_err
-                self._occupato = False
+                _SMISTATORE.dimentica()
+                posto.occupato = False
 
         threading.Thread(target=guscio, daemon=True).start()
 
@@ -1431,5 +1760,5 @@ class Api:
             'testo': i18n.t('rate.msg',
                             fatto=text._format_timestamp(int(getattr(exc, 'done_seconds', 0) or 0)),
                             totale=text._format_timestamp(int(getattr(exc, 'total_seconds', 0) or 0))),
-            'puo_locale': self._src != '' and self._meta is not None,
+            'puo_locale': self._p().src != '' and self._p().meta is not None,
         })

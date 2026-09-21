@@ -1,9 +1,14 @@
-/* I tre riquadri: modelli, chiave, video.
+/* I riquadri di una postazione: modelli, chiave, video.
  *
  * Cosa sono
- *     Le tre cose da sapere prima di poter cominciare. Ogni riquadro mostra
- *     COSA si e' scelto, e un pulsante per cambiarlo; il come si cambia sta in
- *     una finestra che si apre solo quando serve.
+ *     Le cose da sapere prima di poter cominciare, in questa stanza. Ogni
+ *     riquadro mostra COSA si e' scelto, e un pulsante per cambiarlo; il come
+ *     si cambia sta in una finestra che si apre solo quando serve.
+ *
+ *     In «Cloud» sono tre, in «Locale» due: li' la chiave non c'e' proprio,
+ *     perche' non si paga niente, e i due che restano si allargano a riempire
+ *     lo spazio. La griglia conta i riquadri che ci sono, non quanti
+ *     potrebbero essercene.
  *
  * Perche' il contenuto delle finestre non si costruisce al momento
  *     Perche' esiste gia'. I menu dei modelli li riempie Python all'avvio, e
@@ -12,85 +17,92 @@
  *     gli ascoltatori e ricordarsi quale valore era selezionato: due cose che
  *     si possono dimenticare, e che non danno errore quando si dimenticano.
  *
- *     Quindi gli elementi vivono in un magazzino nascosto dentro la pagina.
- *     Aprendo una finestra ci vengono spostati dentro, e alla chiusura tornano
- *     a casa. Sono sempre gli stessi oggetti: si portano dietro stato e
- *     collegamenti senza che nessuno ci pensi.
+ *     Quindi gli elementi vivono in un magazzino nascosto dentro la
+ *     postazione. Aprendo una finestra ci vengono spostati dentro, e alla
+ *     chiusura tornano a casa. Sono sempre gli stessi oggetti: si portano
+ *     dietro stato e collegamenti senza che nessuno ci pensi.
+ *
+ * I magazzini sono due, uno per stanza
+ *     Ed e' il motivo per cui riporta() ha bisogno di sapere a chi restituire.
+ *     Rimettere il modulo dei modelli di «Cloud» nel magazzino di «Locale»
+ *     sarebbe come rimettere a posto un attrezzo nel cassetto del vicino: non
+ *     da' nessun errore, e la volta dopo non lo si trova piu'.
  *
  * La regola da non violare
- *     Ogni blocco spostato DEVE tornare nel magazzino alla chiusura. La
- *     finestra e' una sola e riempirla svuota quello che conteneva prima: se
- *     un blocco fosse ancora li' dentro nel momento in cui si apre un'altra
- *     finestra, verrebbe distrutto, e da quel momento i menu dei modelli non
- *     esisterebbero piu'. Ci pensa riporta(), chiamata dalla chiusura.
+ *     Ogni blocco spostato DEVE tornare nel suo magazzino alla chiusura. La
+ *     finestra e' una sola per tutto il programma e riempirla svuota quello che
+ *     conteneva prima: un blocco rimasto dentro verrebbe distrutto, e da quel
+ *     momento i menu dei modelli di quella stanza non esisterebbero piu'. Ci
+ *     pensa riporta(), che la chiusura chiama sempre, e ci pensa anche
+ *     finestra() stessa, che chiude quella aperta prima di svuotarla.
  */
 
-/* Quale riquadro dei modelli serve, a seconda di dove si sta lavorando.
- * Si guarda il motore e non la sezione aperta perche' e' il motore a decidere
- * quali modelli verranno davvero usati. */
-const MODULO_MODELLI = { local: '#modulo-modelli-locale', groq: '#modulo-modelli-cloud' };
-
-/* Le tre voci del riepilogo dei modelli, per motore: quale scelta mostrare e
- * con che etichetta. Sono gli stessi nomi che Python usa nelle scelte. */
+/* Le voci del riepilogo dei modelli, per stanza: quale scelta mostrare e con
+ * che etichetta. Sono gli stessi nomi che Python usa nelle scelte. */
 const VOCI_MODELLI = {
-  local: [['whisper', 'eng.model.whisper'], ['ollama', 'eng.model.ollama'],
-          ['vision', 'eng.model.vision']],
-  groq: [['groq', 'eng.model.groq'], ['groq_testo', 'eng.model.groqtesto'],
-         ['groq_vista', 'eng.model.groqvista']],
+  locale: [['whisper', 'eng.model.whisper'], ['ollama', 'eng.model.ollama'],
+           ['vision', 'eng.model.vision']],
+  cloud:  [['groq', 'eng.model.groq'], ['groq_testo', 'eng.model.groqtesto'],
+           ['groq_vista', 'eng.model.groqvista']],
 };
 
-function initCarte() {
-  $('#apri-modelli').addEventListener('click', apriModelli);
-  $('#apri-video').addEventListener('click', apriVideo);
-  aggiornaCarte();
+function initCarte(p) {
+  p.q('apri-modelli').addEventListener('click', () => apriModelli(p));
+  p.q('apri-video').addEventListener('click', () => apriVideo(p));
+  aggiornaCarte(p);
 }
 
 /* ── Spostare i blocchi fra il magazzino e la finestra ────────────────────── */
 
-function presta(selettore) {
-  const blocco = $(selettore);
-  blocco.dataset.prestato = '1';
+function presta(p, nome) {
+  const blocco = p.q(nome);
+  blocco.dataset.prestato = p.dove;
   return blocco;
 }
 
-/* Rimette nel magazzino tutto quello che era stato prestato.
+/* Rimette nel magazzino della sua stanza tutto quello che era stato prestato.
  *
  * Passa in rassegna la finestra invece di ricordarsi cosa aveva dato: cosi'
  * funziona anche se un giorno una finestra prendesse due blocchi, e soprattutto
- * non c'e' niente da tenere allineato fra chi presta e chi restituisce. */
+ * non c'e' niente da tenere allineato fra chi presta e chi restituisce.
+ *
+ * A quale magazzino tornare lo dice il blocco stesso, che se l'e' scritto
+ * addosso nel momento in cui e' uscito. Chiederlo alla stanza che si sta
+ * guardando sarebbe sbagliato: si puo' aprire una finestra e cambiare stanza
+ * mentre e' aperta, e allora il blocco finirebbe nel magazzino dell'altra. */
 function riporta() {
-  const magazzino = $('#magazzino');
   $$('#finestra-corpo [data-prestato]').forEach((b) => {
+    const casa = POSTI[b.dataset.prestato];
     delete b.dataset.prestato;
-    magazzino.appendChild(b);
+    if (casa) casa.q('magazzino').appendChild(b);
   });
 }
 
 /* ── La finestra dei modelli ──────────────────────────────────────────────── */
 
-function apriModelli() {
-  const motore = scelte().motore === 'groq' ? 'groq' : 'local';
+function apriModelli(p) {
   finestra({
-    titolo: t(motore === 'groq' ? 'fin.modelli.cloud' : 'fin.modelli.locale'),
+    titolo: t(p.dove === 'cloud' ? 'fin.modelli.cloud' : 'fin.modelli.locale'),
     icona: 'cpu',
-    corpo: [presta(MODULO_MODELLI[motore])],
+    corpo: [presta(p, p.dove === 'cloud' ? 'modulo-modelli-cloud'
+                                         : 'modulo-modelli-locale')],
     // Un bottone solo, e dice «Fatto» e non «Salva»: le scelte sono gia' state
     // salvate nell'istante in cui si e' toccato un menu. Un bottone «Salva»
     // farebbe credere che annullando si torni indietro, e non e' cosi'.
     azioni: [{ testo: t('fin.fatto'), tono: 'pieno', icona: 'spunta' }],
-    suChiusura: () => { riporta(); aggiornaCarte(); },
+    suChiusura: () => { riporta(); aggiornaCarte(p); },
   });
 }
 
 /* ── La finestra del video ────────────────────────────────────────────────── */
 
-function apriVideo() {
+function apriVideo(p) {
   finestra({
     titolo: t('fin.video'),
     icona: 'video',
-    corpo: [presta('#modulo-video')],
+    corpo: [presta(p, 'modulo-video')],
     azioni: [{ testo: t('fin.fatto'), tono: 'pieno', icona: 'spunta' }],
-    suChiusura: () => { riporta(); aggiornaCarte(); },
+    suChiusura: () => { riporta(); aggiornaCarte(p); },
   });
 }
 
@@ -104,45 +116,29 @@ function voce(chi, cosa) {
   return riga;
 }
 
-function aggiornaCarte() {
-  aggiornaCartaModelli();
-  aggiornaCartaChiave();
-  aggiornaCartaVideo();
+function aggiornaCarte(p) {
+  aggiornaCartaModelli(p);
+  aggiornaCartaVideo(p);
 }
 
-function aggiornaCartaModelli() {
-  const motore = scelte().motore === 'groq' ? 'groq' : 'local';
-  const box = $('#riepilogo-modelli');
+function aggiornaCartaModelli(p) {
+  const box = p.q('riepilogo-modelli');
   box.innerHTML = '';
-  VOCI_MODELLI[motore].forEach(([chiave, etichetta]) => {
+  VOCI_MODELLI[p.dove].forEach(([chiave, etichetta]) => {
     box.appendChild(voce(t(etichetta), scelte()[chiave] || t('carta.vuoto')));
   });
 }
 
-/* La chiave serve solo in nuvola, e in locale il suo riquadro sparisce.
- *
- * Prima restava al suo posto, spento, con scritto perche' non serviva. Provato
- * a schermo e' risultato peggio: e' un terzo di larghezza occupato per dire
- * che li' non c'e' niente da fare, in una sezione che di suo non ha nessun
- * rapporto con Groq. Chi lavora in locale una chiave non ce l'ha e non deve
- * nemmeno pensarci.
- *
- * I due riquadri che restano si allargano da soli per riempire lo spazio: la
- * griglia conta i riquadri che ci sono, non quanti potrebbero essercene. */
-function aggiornaCartaChiave() {
-  $('#carta-chiave').hidden = scelte().motore !== 'groq';
-}
-
-/* Cosa si e' scelto di trascrivere. Finche' non si e' scelto niente, la riga
- * dice «nessuna sorgente» invece di restare vuota: una riga vuota si legge
- * come un difetto, una riga che dice di essere vuota si legge come uno stato. */
-function aggiornaCartaVideo() {
-  const box = $('#riepilogo-video');
+/* Cosa si e' scelto di trascrivere IN QUESTA STANZA. Finche' non si e' scelto
+ * niente, la riga dice «nessuna sorgente» invece di restare vuota: una riga
+ * vuota si legge come un difetto, una riga che dice di essere vuota si legge
+ * come uno stato. */
+function aggiornaCartaVideo(p) {
+  const box = p.q('riepilogo-video');
   box.innerHTML = '';
-  const youtube = scelte().sorgente !== 'local';
-  const valore = youtube ? $('#url').value.trim() : $('#file').value.trim();
-  box.appendChild(voce(t('src.label'),
-                       t(youtube ? 'src.youtube' : 'src.local')));
+  const youtube = p.opz.sorgente !== 'local';
+  const valore = youtube ? p.q('url').value.trim() : p.q('file').value.trim();
+  box.appendChild(voce(t('src.label'), t(youtube ? 'src.youtube' : 'src.local')));
   box.appendChild(voce(t(youtube ? 'src.input.url' : 'src.input.file'),
                        valore || t('carta.vuoto')));
 
@@ -151,7 +147,7 @@ function aggiornaCartaVideo() {
   // niente da dire.
   const attivi = [['translate', 'opt.translate'], ['summarize', 'opt.summary'],
                   ['visual', 'opt.visual']]
-    .filter(([k]) => scelte()[k]).map(([, k]) => t(k));
+    .filter(([k]) => p.opz[k]).map(([, k]) => t(k));
   if (attivi.length) box.appendChild(voce(t('opts.title'), attivi.join(' · ')));
 }
 

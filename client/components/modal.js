@@ -94,6 +94,23 @@ function finestra(opzioni) {
   const corpo = document.getElementById('finestra-corpo');
   const azioni = document.getElementById('finestra-azioni');
 
+  /* Se una finestra era gia' aperta, la si chiude PRIMA di svuotare il corpo.
+   *
+   * Non e' una pulizia formale, e' la riga che tiene in piedi il magazzino.
+   * Certe finestre non costruiscono il proprio contenuto: se lo fanno
+   * prestare, e lo restituiscono nella chiusura. Svuotando il corpo senza
+   * eseguire quella chiusura, il blocco in prestito non torna a casa: viene
+   * buttato via insieme al resto, e da quel momento in poi non esiste piu'
+   * nella pagina.
+   *
+   * Succedeva davvero. Dentro la finestra del video c'e' il bottone «Guarda
+   * cos'e'»: premendolo il motore leggeva il link e rispondeva aprendo la
+   * finestra di conferma, cioe' chiamando questa funzione mentre il modulo del
+   * video era in prestito. Il modulo spariva, e la prima riga che andava a
+   * cercarsi un pezzo di quel modulo dava errore.
+   */
+  if (velo.classList.contains('visibile')) chiudiFinestra();
+
   riquadro.className = 'finestra' + (opzioni.tono ? ' ' + opzioni.tono : '');
   document.getElementById('finestra-titolo').textContent = opzioni.titolo || '';
   riquadro.querySelector('.finestra-testa .icona use')
