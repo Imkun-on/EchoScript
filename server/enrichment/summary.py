@@ -146,7 +146,12 @@ PROMPT_ATTIVO = None
 
 
 def prompt_base() -> str:
-    """Le regole del riassunto quando c'e' solo il parlato."""
+    """Le regole del riassunto quando c'e' soltanto il parlato.
+
+    E' una funzione e non il testo letto direttamente, cosi' chi lo usa passa
+    sempre dalla stessa porta e il giorno in cui la scelta del prompt dovesse
+    dipendere da qualcos'altro, si cambia qui dentro e basta.
+    """
     return _SUMMARY_SYSTEM_PROMPT
 
 
@@ -162,7 +167,13 @@ def prompt_visivo(mappa_concetti: bool) -> str:
 
 
 def prompt_attivo() -> str:
-    """Quello da usare in questo momento: il visivo se c'e', il base altrimenti."""
+    """Le regole da usare adesso: quelle visive se ci sono, altrimenti le base.
+
+    E' la porta che usano tutti quelli che riassumono davvero, e serve a non
+    far decidere a ciascuno di loro se per questo video ci fossero o no delle
+    note visive. Quella decisione e' gia' stata presa da chi ha messo in fila
+    il lavoro, e sta scritta in PROMPT_ATTIVO.
+    """
     return PROMPT_ATTIVO or prompt_base()
 
 
@@ -179,7 +190,15 @@ def prompt_attivo() -> str:
 #     lo si tagliasse a un numero fisso di caratteri.
 
 def _summary_user_prompt(text: str, section_title: str | None) -> str:
-    """Messaggio utente per il modello: titolo della sezione (se c'è) + testo."""
+    """Il messaggio che si manda al modello: il testo, col suo titolo davanti.
+
+    Il titolo della sezione, quando c'e', cambia il risultato piu' di quanto si
+    creda: dice al modello di cosa si sta parlando prima ancora che legga, e lo
+    aiuta a capire quali sono i termini importanti e quali le divagazioni.
+
+    Le regole di COME riassumere non sono qui: stanno nel messaggio di sistema
+    (vedi i prompt in cima al file). Qui c'e' solo il materiale.
+    """
     head = f"Titolo della sezione: «{section_title}».\n\n" if section_title else ""
     return f"{head}Testo da riassumere:\n\n{text}"
 def _groq_chat_capture(client, model: str, **kwargs):
@@ -201,7 +220,17 @@ def _groq_chat_capture(client, model: str, **kwargs):
         pass
     return raw.parse()
 def _summarize_groq(client, text: str, section_title: str | None) -> str:
-    """Riassume un testo con un modello di CHAT di Groq (non Whisper)."""
+    """Riassume un pezzo di testo con un modello di Groq.
+
+    Attenzione, non e' lo stesso modello che trascrive. Whisper trasforma
+    l'audio in parole e non sa fare altro; qui serve un modello che capisca il
+    testo, ed e' un modello diverso, con un prezzo diverso e un limite di
+    crediti a parte. Nei menu compaiono infatti come due scelte distinte.
+
+    La temperatura bassa non e' un dettaglio: significa «attieniti al testo».
+    Un riassunto creativo sarebbe un riassunto che aggiunge cose che nel video
+    non c'erano, ed e' il difetto peggiore che possa avere.
+    """
     resp = _groq_chat_capture(
         client, settings.GROQ_SUMMARY_MODEL,
         messages=[
@@ -212,7 +241,19 @@ def _summarize_groq(client, text: str, section_title: str | None) -> str:
     )
     return (resp.choices[0].message.content or "").strip()
 def _summarize_ollama(text: str, section_title: str | None) -> str:
-    """Riassume un testo con un modello locale via Ollama (HTTP, niente pip)."""
+    """Riassume un pezzo di testo con un modello che gira su questo computer.
+
+    Si parla con Ollama via rete locale invece che con una libreria Python, e
+    non e' un ripiego: vuol dire che nel pacchetto del programma non entra
+    nessuna libreria in piu', e che il giorno in cui Ollama cambia versione non
+    c'e' niente da aggiornare qui dentro.
+
+    La finestra di contesto viene alzata apposta. Ollama, lasciato ai suoi
+    valori, ne usa una piccola: il modello leggerebbe solo l'inizio del testo e
+    riassumerebbe quello, senza nessun errore, dando un riassunto che sembra
+    solo un po' sbrigativo. E' un difetto difficile da scoprire proprio perche'
+    non si presenta come tale.
+    """
     import urllib.request
     payload = {
         "model": settings.OLLAMA_MODEL,
@@ -245,8 +286,28 @@ def _make_summarizer(client=None):
     label = f"Riassunto automatico (locale · Ollama {settings.OLLAMA_MODEL})"
     return (lambda text, title: _summarize_ollama(text, title)), label
 def _summarize_long(summarize_fn, text: str, section_title: str | None) -> str:
-    """Riassume un testo anche lungo: se supera SUMMARY_MAX_CHARS lo divide in
-    blocchi, li riassume singolarmente e poi unisce i parziali (map-reduce)."""
+    """Riassume un testo lungo quanto si vuole, a costo di farlo in due giri.
+
+    Il problema
+        Ogni modello ha un tetto a quanto testo riesce a tenere in mente in una
+        volta. Una sezione lunga lo supera, e quello che succede allora non e'
+        un errore: il modello legge quello che ci sta e ignora il resto, in
+        silenzio. Il riassunto che ne esce sembra solo un po' povero.
+
+    La soluzione, in due passaggi
+        Prima si taglia il testo in blocchi e si riassume ogni blocco per conto
+        suo. Poi si prendono quei riassunti parziali e si riassumono a loro
+        volta, ottenendone uno solo.
+
+        Il secondo giro non e' facoltativo: senza, il risultato sarebbe un
+        elenco di riassunti scollegati, con le stesse cose ripetute tre volte
+        perche' comparivano in tre blocchi diversi.
+
+    Perche' riusa il tagliatore della traduzione
+        Perche' il problema e' identico, tagliare un testo lungo sui confini
+        delle frasi, e averne due copie vorrebbe dire correggere ogni difetto
+        due volte.
+    """
     text = (text or "").strip()
     if not text:
         return ""

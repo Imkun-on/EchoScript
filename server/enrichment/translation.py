@@ -84,7 +84,13 @@ def _translate_ollama(text: str, target: str) -> str:
 
 
 def _translate_engine_label(target: str = "it", local: bool = False) -> str:
-    """Etichetta del motore di traduzione, mostrata in testa ai file salvati."""
+    """La riga che dice, in testa al file tradotto, chi l'ha tradotto.
+
+    Non e' decorazione. Una traduzione automatica va letta sapendo che e'
+    automatica, e sapendo da CHI: Google Translate e un modello locale
+    sbagliano in modi diversi, e chi rilegge il file mesi dopo non ha altro
+    modo di ricordarselo.
+    """
     lang = _lang_name(target) or target
     if local:
         return f"Traduzione automatica (locale · Ollama {settings.OLLAMA_TRANSLATE_MODEL}) → {lang}"
@@ -135,15 +141,36 @@ def _protect_anglicisms(text: str) -> tuple[str, dict[str, str]]:
     mapping: dict[str, str] = {}
 
     def repl(m: "re.Match") -> str:
+        """Sostituisce un termine inglese con un segnaposto, e se lo ricorda.
+
+        Il segnaposto ha quella forma strana apposta: deve essere qualcosa che
+        un traduttore automatico non provi a tradurre, non spezzi e non
+        riordini. Le lettere maiuscole senza vocali riconoscibili e il numero
+        in mezzo servono proprio a non sembrare una parola.
+
+        Si conserva la forma ESATTA trovata nel testo, maiuscole comprese:
+        rimettendo a posto si deve ritrovare quello che c'era, non una versione
+        normalizzata.
+        """
         token = f"NGZ{len(mapping)}ZQ"
-        mapping[token] = m.group(0)   # conserva la forma esatta trovata nel testo
+        mapping[token] = m.group(0)
         return token
 
     return _ANGLICISM_RE.sub(repl, text), mapping
 
 
 def _restore_anglicisms(text: str, mapping: dict[str, str]) -> str:
-    """Ripristina gli inglesismi originali al posto dei segnaposto."""
+    """Rimette i termini inglesi dov'erano, al posto dei segnaposto.
+
+    L'ultima riga toglie i segnaposto eventualmente sopravvissuti storpiati.
+    Serve perche' il traduttore, ogni tanto, ci mette dentro uno spazio o
+    cambia una maiuscola: a quel punto il segnaposto non viene piu'
+    riconosciuto e, senza questa pulizia, resterebbe a schermo come una sigla
+    senza senso in mezzo alla frase.
+
+    Meglio una parola mancante che una sigla incomprensibile: la prima si
+    nota appena, la seconda fa sembrare rotto tutto il documento.
+    """
     for token, original in mapping.items():
         text = text.replace(token, original)
     # Sicurezza: se qualche segnaposto fosse sopravvissuto storpiato, lo togliamo.
@@ -169,6 +196,13 @@ def _make_translator(target: str = "it", local: bool = False):
     google = GoogleTranslator(source="auto", target=target).translate
 
     def translate(text: str) -> str:
+        """Traduce un pezzo di testo proteggendo prima i termini inglesi.
+
+        I tre passaggi sono sempre questi e in quest'ordine: nascondi, traduci,
+        rimetti. Stanno insieme in una funzione sola perche' saltarne uno
+        produce un risultato che sembra giusto e non lo e', ed e' il tipo di
+        errore che si scopre leggendo il documento finito.
+        """
         protected, mapping = _protect_anglicisms(text)
         result = google(protected) or ""
         return _restore_anglicisms(result, mapping)

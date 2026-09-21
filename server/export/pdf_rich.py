@@ -115,7 +115,18 @@ __BODY__
 </body></html>
 """
 def _md_inline_to_html(text: str) -> str:
-    """Converte il markup inline di una riga: escape HTML + grassetto **…**."""
+    """Una riga di markdown diventa una riga di HTML.
+
+    L'ordine dei due passaggi non e' scambiabile, ed e' tutta la sostanza di
+    questa funzione. Prima si neutralizzano i caratteri che in HTML hanno un
+    significato, POI si mette il grassetto.
+
+    Al contrario, il grassetto appena inserito verrebbe neutralizzato insieme
+    al resto e comparirebbe a schermo come testo invece che come formato. E
+    soprattutto: un riassunto che parla di HTML, e contiene per esempio del
+    codice con delle parentesi angolari, finirebbe per essere interpretato
+    come struttura della pagina invece che mostrato.
+    """
     import re
     import html as _html
     text = _html.escape(text, quote=False)
@@ -133,6 +144,17 @@ def _md_to_html(md: str) -> str:
     block_keys: set[str] = set()  # placeholder che sono elementi di blocco (pre/mermaid)
 
     def _stash(content: str, block: bool = False) -> str:
+        """Mette da parte un pezzo di HTML gia' pronto e lascia un segnaposto.
+
+        Serve ai pezzi che NON vanno toccati dal resto della conversione: un
+        blocco di codice, un diagramma, un'immagine. Se restassero nel testo,
+        i passaggi successivi ci metterebbero dentro il grassetto, andrebbero
+        a capo dove non si deve, e rovinerebbero il codice proprio dove e'
+        importante che resti esatto.
+
+        Il segnaposto e' fatto con un carattere che in un testo scritto da una
+        persona non esiste, cosi' non puo' collidere con niente.
+        """
         key = f"\x00{len(store)}\x00"
         store[key] = content
         if block:
@@ -143,6 +165,13 @@ def _md_to_html(md: str) -> str:
     # il browser lo de-escapa nel textContent, quindi mermaid riceve i caratteri
     # giusti (es. le frecce -->), ma l'HTML resta valido.
     def _fence(m):
+        """Un blocco di codice fra apici tripli diventa HTML.
+
+        Due destini diversi a seconda di com'e' marcato. Se dice `mermaid`, e'
+        un diagramma e va consegnato alla libreria che lo disegnera'. Tutto il
+        resto e' codice e va mostrato cosi' com'e', con gli spazi al posto
+        giusto.
+        """
         lang = (m.group(1) or "").strip().lower()
         body = _html.escape(m.group(2))
         if lang == "mermaid":
@@ -154,6 +183,16 @@ def _md_to_html(md: str) -> str:
     # 1b) Immagini ![alt](src): elemento di blocco. I percorsi locali diventano
     # file:// così il browser headless li carica.
     def _img(m):
+        """Un'immagine di markdown diventa un tag HTML.
+
+        Il giro sul percorso serve ai fotogrammi estratti dal video, che sono
+        file sul disco. Un browser, in una pagina locale, non carica un
+        percorso scritto alla maniera di Windows: gli va dato nella forma degli
+        indirizzi, e la conversione la fa la riga qui sotto.
+
+        Se non riesce si lascia com'era: peggio che vada, quell'immagine non si
+        vede, e il resto del documento esce lo stesso.
+        """
         import pathlib
         alt = _html.escape(m.group(1))
         src = m.group(2).strip()
@@ -187,11 +226,29 @@ def _md_to_html(md: str) -> str:
     in_list = False
 
     def _flush_para():
+        """Chiude il paragrafo che si stava accumulando, se ce n'era uno.
+
+        Il testo arriva riga per riga, ma un paragrafo puo' essere fatto di
+        piu' righe: le si mette da parte finche' non si incontra qualcosa che
+        chiude il discorso, cioe' una riga vuota, un titolo o un elenco. A quel
+        punto le si unisce in un paragrafo solo.
+        """
         if para:
             out.append("<p>" + _md_inline_to_html(" ".join(para)) + "</p>")
             para.clear()
 
     def _close_list():
+        """Chiude l'elenco puntato aperto, se ce n'era uno.
+
+        Stessa logica del paragrafo: un elenco comincia alla prima riga che
+        sembra una voce e finisce alla prima che non lo sembra piu'. Nessuno
+        dice esplicitamente dove finisce, quindi lo si chiude quando si incontra
+        altro.
+
+        Un elenco lasciato aperto non produce un errore: produce una pagina in
+        cui tutto quello che viene dopo risulta rientrato, e la causa non si
+        capisce guardando il punto in cui si vede il difetto.
+        """
         nonlocal in_list
         if in_list:
             out.append("</ul>")
@@ -248,7 +305,25 @@ def _ensure_pdf_assets():
         paths[name] = p
     return paths["tex-svg.js"], paths["mermaid.min.js"]
 def _find_browser() -> str | None:
-    """Trova un browser Chromium (Edge/Chrome) per la stampa PDF. None se assente."""
+    """Cerca un browser sul computer, perche' e' lui a disegnare il PDF.
+
+    Perche' se ne cercano tanti
+        Perche' la ricerca deve funzionare su una macchina qualunque, e non c'e'
+        modo di sapere in anticipo cosa ci sia installato. Su Windows 11 Edge
+        c'e' sempre; altrove puo' esserci Chrome, Chromium o Brave. Vanno tutti
+        bene: sono lo stesso motore con nomi diversi, e stampano lo stesso PDF.
+
+    L'ordine in cui si cerca
+        Prima quello eventualmente indicato a mano nelle impostazioni, perche'
+        chi l'ha scritto sa cosa vuole. Poi quelli raggiungibili per nome. Poi
+        i posti in cui Windows li installa di solito, che serve quando il
+        browser c'e' ma nessuno lo ha messo fra i programmi richiamabili.
+
+    None non e' un guasto
+        Vuol dire che non c'e' nessun browser, e chi chiama fara' il PDF
+        semplice. Il documento esce lo stesso, solo con le formule scritte in
+        testo invece che disegnate.
+    """
     candidates: list[str] = []
     if BROWSER_PATH:
         candidates.append(BROWSER_PATH)

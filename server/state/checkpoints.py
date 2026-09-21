@@ -57,11 +57,27 @@ def _checkpoint_key(meta: dict) -> str:
 
 
 def checkpoint_path(meta: dict) -> str:
+    """Dove sta, o dove andra', il parziale di questo video trascritto su Groq.
+
+    Il nome del file viene dal titolo ripulito (vedi _checkpoint_key), non
+    dall'indirizzo del video: e' l'unica cosa che si ritrova uguale anche
+    ricostruendo i dati da un file gia' salvato.
+    """
     return os.path.join(_checkpoints_dir(), _checkpoint_key(meta) + ".json")
 
 
 def load_checkpoint(meta: dict) -> dict | None:
-    """Legge il checkpoint del video, o None se non esiste / è corrotto."""
+    """Rilegge il parziale di questo video, o None se non c'e' da riprendere.
+
+    Tre casi diversi danno tutti None, e va bene cosi': il file non c'e' (non
+    si era mai cominciato), il file e' illeggibile (si era interrotto proprio
+    mentre lo scriveva), oppure c'e' ma non contiene un conto dei blocchi (non
+    e' un parziale da cui si possa ripartire).
+
+    Chi chiama non deve distinguerli, perche' portano tutti e tre alla stessa
+    azione: si ricomincia da capo. Sollevare un errore per un file rovinato
+    sarebbe peggio, perche' bloccherebbe un lavoro che si puo' fare lo stesso.
+    """
     p = checkpoint_path(meta)
     if not os.path.isfile(p):
         return None
@@ -76,7 +92,20 @@ def load_checkpoint(meta: dict) -> dict | None:
 
 
 def save_checkpoint(meta: dict, data: dict) -> None:
-    """Salva (atomicamente) il parziale del video, così si può riprendere dopo."""
+    """Scrive il parziale in modo che non possa mai restare a meta'.
+
+    Il giro dello scrivi-e-rinomina
+        Si scrive tutto in un file temporaneo e solo alla fine lo si rinomina
+        sopra a quello vero. Il rinominare, sui sistemi che ci interessano, o
+        avviene del tutto o non avviene: non esiste un momento in cui il file
+        esiste ma e' scritto a meta'.
+
+        Senza questo giro basterebbe una chiusura brusca durante la scrittura
+        per lasciare un parziale rovinato. E il momento in cui si scrive un
+        parziale e' esattamente il momento in cui le cose stanno andando
+        storte, cioe' quello in cui e' piu' probabile che il programma venga
+        interrotto.
+    """
     os.makedirs(_checkpoints_dir(), exist_ok=True)
     p = checkpoint_path(meta)
     tmp = p + ".tmp"
@@ -86,6 +115,13 @@ def save_checkpoint(meta: dict, data: dict) -> None:
 
 
 def delete_checkpoint(meta: dict) -> None:
+    """Butta via il parziale: il video e' stato trascritto fino in fondo.
+
+    Se il file non c'era, non e' un problema e non si dice niente. Capita
+    normalmente: un video corto finisce senza che sia mai stato necessario
+    salvare un parziale, e arrivati alla fine si prova a cancellarlo lo stesso
+    invece di stare a chiedersi se esisteva.
+    """
     try:
         os.remove(checkpoint_path(meta))
     except OSError:
@@ -104,7 +140,16 @@ LOCAL_CHECKPOINT_EVERY = 120
 
 
 def local_checkpoint_path(meta: dict) -> str:
-    """Path of the local-transcription checkpoint for this source."""
+    """Dove sta il parziale di questo video trascritto sul computer.
+
+    E' un file diverso da quello di Groq, con lo stesso nome piu' `_local`, e
+    non e' un doppione: i due motori si fermano in modi diversi e riprendono da
+    cose diverse. Groq lavora a blocchi e si ricorda quanti blocchi ha fatto;
+    quello locale macina di seguito e si ricorda a che SECONDO era arrivato.
+
+    Tenerli separati vuol dire anche che si puo' cominciare con uno, fermarsi,
+    e ripartire con l'altro senza che i due parziali si confondano.
+    """
     return os.path.join(_checkpoints_dir(), _checkpoint_key(meta) + "_local.json")
 
 
@@ -128,7 +173,16 @@ def load_local_checkpoint(meta: dict) -> dict | None:
 
 def save_local_checkpoint(meta: dict, segments: list, done_seconds: float,
                           model: str, duration: float, detected=None) -> None:
-    """Atomically save the partial local transcription (for resuming)."""
+    """Scrive il parziale della trascrizione locale, senza rischio di romperlo.
+
+    Stesso giro dello scrivi-e-rinomina spiegato in save_checkpoint, e per lo
+    stesso motivo.
+
+    Qui dentro si salva anche il nome del modello usato: riprendendo con un
+    modello diverso il risultato sarebbe un documento scritto a due mani, con
+    un cambio di qualita' e di stile a meta'. Chi riprende puo' accorgersene e
+    decidere.
+    """
     os.makedirs(_checkpoints_dir(), exist_ok=True)
     p = local_checkpoint_path(meta)
     tmp = p + ".tmp"
@@ -140,6 +194,10 @@ def save_local_checkpoint(meta: dict, segments: list, done_seconds: float,
 
 
 def delete_local_checkpoint(meta: dict) -> None:
+    """Butta via il parziale locale: la trascrizione e' arrivata in fondo.
+
+    Come per il gemello di Groq, un file che non c'era non e' un problema.
+    """
     try:
         os.remove(local_checkpoint_path(meta))
     except OSError:

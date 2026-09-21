@@ -56,12 +56,24 @@ STAGE_SKIP = "skip"
 
 
 def state_path(meta: dict) -> str:
-    """Percorso del file di stato della pipeline per questo video/file."""
+    """Dove sta il foglietto con le fasi gia' fatte di questo video.
+
+    Sta nella stessa cartella dei parziali e con lo stesso nome di base, piu'
+    `_state`. I tre file di un video (il parziale di Groq, quello locale, e
+    questo) si riconoscono cosi' a colpo d'occhio aprendo la cartella.
+    """
     return os.path.join(_checkpoints_dir(), _checkpoint_key(meta) + "_state.json")
 
 
 def _empty_state(meta: dict, backend: str = "groq") -> dict:
-    """Nuovo stato "vuoto": tutte le fasi ancora da fare."""
+    """Un foglietto nuovo, con tutte le fasi ancora da fare.
+
+    Dentro ci finiscono anche titolo, indirizzo e motore usato, che a rigore
+    sarebbero un doppione dei metadati. Il doppione e' voluto: questo file
+    viene riletto giorni dopo, quando i metadati non ci sono piu' perche' nessuno
+    li ha ricaricati. Senza quei campi, il foglietto direbbe che qualcosa e'
+    stato fatto ma non su cosa.
+    """
     return {
         "key": _checkpoint_key(meta),
         "title": meta.get("title"),
@@ -76,7 +88,15 @@ def _empty_state(meta: dict, backend: str = "groq") -> dict:
 
 
 def load_state(meta: dict) -> dict | None:
-    """Legge lo stato della pipeline, o None se assente/corrotto."""
+    """Rilegge il foglietto delle fasi, o None se non c'e' o non si capisce.
+
+    Il controllo sulla forma del contenuto non e' pignoleria. Questo file viene
+    scritto e riscritto man mano che le fasi avanzano, e un'interruzione nel
+    momento sbagliato puo' lasciare qualcosa che e' json valido ma non e' uno
+    stato. Trattarlo come assente fa ricominciare da capo, che e' spiacevole
+    ma corretto; fidarsi porterebbe a un errore molto piu' avanti, in un punto
+    che con questo file non c'entra niente.
+    """
     p = state_path(meta)
     if not os.path.isfile(p):
         return None
@@ -91,7 +111,14 @@ def load_state(meta: dict) -> dict | None:
 
 
 def save_state(meta: dict, state: dict) -> None:
-    """Salva (atomicamente) lo stato della pipeline, timbrando l'orario."""
+    """Scrive il foglietto delle fasi, con l'ora dell'ultimo aggiornamento.
+
+    Stesso giro dello scrivi-e-rinomina degli altri file di stato: o c'e' tutto
+    o non c'e' niente, mai un file a meta'.
+
+    L'orario serve a chi guarda: riaprendo un video lasciato indietro, «fermo
+    da tre settimane» e «fermo da dieci minuti» portano a decisioni diverse.
+    """
     os.makedirs(_checkpoints_dir(), exist_ok=True)
     p = state_path(meta)
     tmp = p + ".tmp"
@@ -131,7 +158,14 @@ def update_stage(meta: dict, stage: str, *, status=None, done=None, total=None,
 
 
 def delete_state(meta: dict) -> None:
-    """Rimuove il file di stato (es. su "Ritrascrivi tutto" o a job concluso)."""
+    """Butta via il foglietto: o il lavoro e' finito, o si ricomincia da capo.
+
+    Sono i due casi in cui non ha piu' senso ricordare a che punto si era, e
+    sono opposti fra loro: «ho finito» e «rifai tutto». In tutti e due, quello
+    che c'era scritto adesso sarebbe una bugia.
+
+    Un file che non c'era non e' un problema e non si dice niente.
+    """
     try:
         os.remove(state_path(meta))
     except OSError:
@@ -139,14 +173,33 @@ def delete_state(meta: dict) -> None:
 
 
 def stage_status(state: dict | None, stage: str) -> str:
-    """Stato ('pending'/'partial'/'done'/'skip') di una fase, robusto a None."""
+    """A che punto e' una fase: da fare, a meta', fatta, oppure saltata.
+
+    Regge senza lamentarsi uno stato che non c'e', una fase mai vista e un
+    foglietto scritto da una versione precedente del programma: in tutti quei
+    casi risponde «da fare». E' la risposta giusta, perche' se non risulta
+    fatta allora va fatta.
+
+    La quarta possibilita', «saltata», non e' un fallimento: e' una fase che
+    non era stata chiesta. Distinguerla da «da fare» serve perche' «Riprendi»
+    non deve mettersi a tradurre un video per cui nessuno aveva chiesto una
+    traduzione.
+    """
     if not state:
         return STAGE_PENDING
     return state.get("stages", {}).get(stage, {}).get("status", STAGE_PENDING)
 
 
 def stage_sections(state: dict | None, stage: str) -> list[dict]:
-    """Sezioni già completate salvate per una fase (lista, eventualmente vuota)."""
+    """I pezzi gia' fatti di una fase rimasta a meta'.
+
+    Serve a riprendere davvero da dove si era: senza questi pezzi, «riprendi»
+    saprebbe solo che la fase era incompleta e la rifarebbe tutta.
+
+    Torna sempre una lista, anche quando dentro il file c'era qualcos'altro.
+    Chi chiama ci deve girare sopra in un ciclo, e un None a quel punto
+    sarebbe un errore in un posto lontano da qui.
+    """
     if not state:
         return []
     secs = state.get("stages", {}).get(stage, {}).get("sections")
@@ -182,6 +235,13 @@ def resume_sections(meta: dict, stage: str, total: int, key: str, value):
         done = done[:total]  # trascrizione più corta di prima: taglia l'eccesso
 
     def persist(done_list):
+        """Scrive sul foglietto i pezzi fatti finora, e li segna come parziali.
+
+        Viene passata a chi sta lavorando perche' la chiami dopo OGNI pezzo,
+        non alla fine. E' tutto il senso della cosa: un salvataggio finale non
+        servirebbe a niente, visto che il caso da coprire e' proprio quello in
+        cui alla fine non ci si arriva.
+        """
         update_stage(meta, stage, status=STAGE_PARTIAL, done=len(done_list),
                      total=total, sections=done_list, extra={key: value})
 
@@ -243,22 +303,29 @@ NOMI_VECCHI = {
 
 
 def trans_subdir() -> str:
-    """Il nome della sottocartella delle TRASCRIZIONI."""
+    """Il nome della sottocartella delle trascrizioni.
+
+    E' una funzione e non il nome scritto direttamente nei punti che lo usano,
+    per una ragione che vale anche per le tre sorelle qui sotto: sono una
+    decina i posti che compongono quel percorso, e il giorno in cui la cartella
+    cambiasse nome, cercarne dieci occorrenze in un programma intero e'
+    esattamente il modo in cui se ne dimentica una.
+    """
     return TRANS_SUBDIR
 
 
 def transl_subdir() -> str:
-    """Il nome della sottocartella delle TRADUZIONI."""
+    """Il nome della sottocartella delle traduzioni. Vedi trans_subdir."""
     return TRANSL_SUBDIR
 
 
 def summary_subdir() -> str:
-    """Il nome della sottocartella dei RIASSUNTI."""
+    """Il nome della sottocartella dei riassunti. Vedi trans_subdir."""
     return SUMMARY_SUBDIR
 
 
 def visual_subdir() -> str:
-    """Il nome della sottocartella dell'ANALISI VISIVA."""
+    """Il nome della sottocartella dell'analisi visiva. Vedi trans_subdir."""
     return VISUAL_SUBDIR
 
 

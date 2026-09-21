@@ -75,7 +75,29 @@ def _env_candidates() -> list[str]:
 
 
 def _load_env_file() -> None:
-    """Read KEY=value lines from a sibling .env into os.environ (no overwrite)."""
+    """Legge il file .env e mette i suoi valori fra le variabili d'ambiente.
+
+    Perche' i valori del file NON sovrascrivono quelli gia' presenti
+        Perche' l'ordine di precedenza deve essere prevedibile, e quello
+        sensato e': chi e' piu' vicino al momento in cui si lancia il
+        programma, vince.
+
+        Una variabile scritta nel terminale un secondo prima di lanciare e'
+        l'intenzione piu' recente di chi sta usando il programma. Il file .env
+        e' una preferenza scritta settimane fa e dimenticata. Se il file
+        vincesse, non ci sarebbe modo di fare una prova al volo con un valore
+        diverso senza modificare il file e poi ricordarsi di rimetterlo com'era.
+
+    Perche' tollera righe scritte in tanti modi
+        Perche' un .env viene scritto a mano, spesso copiando da un esempio.
+        Le righe vuote e i commenti si saltano, la parola `export` davanti (che
+        serve su Linux e su Windows non vuol dire niente) si ignora, e le
+        virgolette intorno al valore si tolgono.
+
+        Una riga senza segno di uguale viene semplicemente saltata invece di
+        far fallire tutto: un file .env scritto male non deve impedire al
+        programma di partire.
+    """
     for env_path in _env_candidates():
         try:
             with open(env_path, "r", encoding="utf-8") as f:
@@ -97,13 +119,24 @@ def _load_env_file() -> None:
 
 
 def _env_str(key: str, default: str) -> str:
-    """Read a string env var; blank/absent -> the default."""
+    """Una manopola di testo: il valore scritto fuori, o quello di partenza.
+
+    Assente e vuoto contano come la stessa cosa. E' voluto: chi scrive
+    `ECHOSCRIPT_QUALCOSA=` nel file .env quasi sempre sta cancellando la
+    propria scelta, non chiedendo una stringa vuota.
+    """
     v = os.environ.get(key, "").strip()
     return v if v else default
 
 
 def _env_int(key: str, default: int) -> int:
-    """Read an integer env var; invalid/absent -> the default."""
+    """Una manopola numerica, con il valore di partenza se non si capisce.
+
+    Un valore illeggibile non fa cadere il programma: si usa quello di
+    partenza. Il motivo e' che questi valori li scrive una persona a mano in un
+    file di testo, e un errore di battitura li' dentro non deve impedire di
+    trascrivere un video.
+    """
     try:
         return int(os.environ.get(key, "").strip())
     except (ValueError, TypeError):
@@ -111,13 +144,28 @@ def _env_int(key: str, default: int) -> int:
 
 
 def _env_opt(key: str) -> str | None:
-    """Read an OPTIONAL string env var; blank/absent -> None."""
+    """Una manopola che puo' anche non esserci, e allora vale None.
+
+    Diversa da _env_str perche' qui NON esiste un valore di partenza: l'assenza
+    e' essa stessa un'informazione. La lingua dell'audio ne e' l'esempio: None
+    vuol dire «riconoscila da sola», che e' una richiesta precisa e non la
+    mancanza di una richiesta.
+    """
     v = os.environ.get(key, "").strip()
     return v or None
 
 
 def _env_bool(key: str, default: bool) -> bool:
-    """Read a boolean env var ('1/true/yes/on'); blank/absent -> the default."""
+    """Una manopola acceso/spento.
+
+    Accetta parecchi modi di dire «si'» perche' chi scrive un file .env a mano
+    usa quello che gli viene in mente: 1, true, yes, on, e anche si e si'
+    accentato, che a scriverli in italiano vengono naturali.
+
+    Qualunque altra cosa conta come «no». Non e' distrazione: fra il dubbio di
+    aver capito male e l'accendere una funzione che costa crediti, conviene non
+    accenderla.
+    """
     v = os.environ.get(key, "").strip().lower()
     if not v:
         return default
