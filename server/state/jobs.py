@@ -315,17 +315,29 @@ def trans_subdir() -> str:
 
 
 def transl_subdir() -> str:
-    """Il nome della sottocartella delle traduzioni. Vedi trans_subdir."""
+    """Il nome della sottocartella delle traduzioni.
+
+    Funzione e non costante scritta nei punti d'uso, per lo stesso motivo
+    spiegato in trans_subdir.
+    """
     return TRANSL_SUBDIR
 
 
 def summary_subdir() -> str:
-    """Il nome della sottocartella dei riassunti. Vedi trans_subdir."""
+    """Il nome della sottocartella dei riassunti.
+
+    Funzione e non costante scritta nei punti d'uso, per lo stesso motivo
+    spiegato in trans_subdir.
+    """
     return SUMMARY_SUBDIR
 
 
 def visual_subdir() -> str:
-    """Il nome della sottocartella dell'analisi visiva. Vedi trans_subdir."""
+    """Il nome della sottocartella dell'analisi visiva.
+
+    Funzione e non costante scritta nei punti d'uso, per lo stesso motivo
+    spiegato in trans_subdir.
+    """
     return VISUAL_SUBDIR
 
 

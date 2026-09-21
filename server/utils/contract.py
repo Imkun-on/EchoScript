@@ -132,6 +132,13 @@ class TranscriptionInterrupted(Exception):
     """
 
     def __init__(self, segments: list, done: int, total: int, lang):
+        """Raccoglie il lavoro gia' fatto, perche' non vada perduto.
+
+        La lingua riconosciuta viaggia insieme ai pezzi e non viene ricavata di
+        nuovo al momento di riprendere: riconoscerla una seconda volta, su un
+        pezzo diverso dell'audio, puo' dare una risposta diversa, e il
+        documento finale risulterebbe meta' in una lingua e meta' in un'altra.
+        """
         self.segments = segments
         self.done = done
         self.total = total

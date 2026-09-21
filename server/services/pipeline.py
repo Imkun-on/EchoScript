@@ -96,6 +96,13 @@ class RateLimitReached(EngineError):
 
     def __init__(self, done: int, total: int, done_seconds: float = 0.0,
                  total_seconds: float = 0.0):
+        """Si porta dietro quanto era stato fatto quando i crediti sono finiti.
+
+        Due misure e non una: i blocchi e i secondi. I blocchi servono a
+        riprendere dal punto giusto; i secondi servono a DIRLO a chi guarda,
+        perche' «fatti 47 minuti su 1h 20m» significa qualcosa, mentre
+        «fatti 23 blocchi su 40» non significa niente per nessuno.
+        """
         self.done = done
         self.total = total
         self.done_seconds = done_seconds
@@ -111,7 +118,18 @@ class RateLimitReached(EngineError):
 
 
 def _friendly_groq_error(e: Exception) -> str:
-    """Turn a raw Groq exception into a short, user-friendly Italian message."""
+    """Traduce un errore di Groq in una frase che significhi qualcosa.
+
+    Gli errori che arrivano dalla rete sono scritti per chi sviluppa: parlano
+    di codici, di nomi di campi, a volte contengono mezzo documento json. Chi
+    sta usando il programma da quella roba non ricava nessuna decisione.
+
+    Qui si riconoscono i tre casi che capitano davvero e si dice cosa fare:
+    i crediti sono finiti (torna piu' tardi), la chiave e' sbagliata
+    (controllala), non c'e' rete (guarda la connessione). Tutto il resto passa
+    cosi' com'e', perche' inventare una spiegazione generica per un errore che
+    non si e' riconosciuto e' peggio che mostrarlo grezzo.
+    """
     msg = str(e)
     if "429" in msg or "rate_limit" in msg or "tokens per day" in msg.lower():
         return ("limite giornaliero Groq raggiunto per la trascrizione. "
@@ -128,6 +146,13 @@ def _friendly_groq_error(e: Exception) -> str:
 # 'detail' is a short human note. A no-op default keeps every function callable
 # without a callback.
 def _noop(phase, current, total, detail=""):  # pragma: no cover - trivial
+    """La richiamata di riserva: riceve l'avanzamento e non ne fa niente.
+
+    Sta qui perche' chi chiama il motore possa non passarne una. Senza, ogni
+    riga che riferisce qualcosa andrebbe protetta da un controllo, e quelle
+    righe sono decine: con questa, il caso «nessuno sta guardando» smette di
+    essere un caso da trattare.
+    """
     pass
 
 
@@ -197,7 +222,13 @@ def _L(key: str, **fmt) -> str:
 # ponti che traducono contract.MediaError in EngineError.
 
 def get_video_info(url: str) -> dict:
-    """Metadati del video (senza scaricarlo). Raises EngineError on failure."""
+    """Cosa c'e' dietro questo link, senza scaricare niente.
+
+    E' un ponte di una riga verso il modulo dei metadati, e serve a una cosa
+    sola: tradurre l'errore. Chi lavora solleva MediaError, che e' il
+    linguaggio dei moduli di lavoro; chi ha chiamato il motore si aspetta
+    EngineError. Il passaggio da uno all'altro lo fa _shared.
+    """
     return _shared(metadata.get_video_info, url)
 
 
@@ -247,8 +278,13 @@ from datetime import datetime as _datetime, timedelta as _timedelta
 
 
 def _reset_clock(seconds: float | None) -> str | None:
-    """Local wall-clock time (HH:MM) at which a limit resets, given a duration
-    in seconds from now. None if 'seconds' is None."""
+    """Da «fra due ore e dieci» a «alle 16:45».
+
+    Sono la stessa informazione, ma non si usano allo stesso modo. Una durata
+    dice quanto aspettare, un orario dice quando tornare, e per decidere
+    servono tutt'e due: chi legge «fra 2h 10m» deve fare il conto a mente, e
+    chi legge solo «alle 16:45» non sa se sono dieci minuti o dieci ore.
+    """
     if seconds is None:
         return None
     return (_datetime.now() + _timedelta(seconds=seconds)).strftime("%H:%M")
@@ -277,7 +313,16 @@ def _parse_ratelimit_headers(headers) -> list[dict]:
 
 
 def _silent_probe_audio(workdir: str) -> str:
-    """Generate a ~1s silent 16 kHz mono mp3 used only to read rate-limit headers."""
+    """Un secondo di silenzio, da mandare a Groq solo per farsi dire i limiti.
+
+    Serve al pannello dei crediti quando non si e' ancora fatto niente: i
+    limiti si leggono dalle intestazioni delle risposte, e senza una richiesta
+    non c'e' nessuna risposta da leggere.
+
+    Si manda un secondo di silenzio perche' e' la richiesta piu' piccola
+    possibile: costa quasi niente in crediti e in tempo, e porta indietro
+    esattamente le stesse intestazioni di una trascrizione vera.
+    """
     out_path = os.path.join(workdir, "probe.mp3")
     cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i",
            f"anullsrc=r={settings.AUDIO_SAMPLE_RATE}:cl=mono", "-t", "1",
@@ -354,6 +399,13 @@ def get_cached_credits() -> list[dict]:
     cache_by_model = {snap.get("model", ""): snap for snap in credits.cached_rate_limits()}
 
     def _items_from(snap: dict) -> list[dict]:
+        """Da una fotografia dei limiti alle righe da mostrare nel pannello.
+
+        Il conto di quanto manca al ripristino si rifa' adesso e non si legge
+        com'era: quella fotografia puo' essere stata presa mezz'ora fa, e
+        mostrare «fra due ore» quando ne mancano una e mezza sarebbe peggio che
+        non dire niente.
+        """
         items: list[dict] = []
         for it in snap.get("items", []):
             rem_s = None
@@ -377,6 +429,12 @@ def get_cached_credits() -> list[dict]:
         return items
 
     def _checked(snap: dict) -> str:
+        """L'ora in cui quei numeri sono stati letti l'ultima volta.
+
+        Serve a far capire quanto sono freschi. Se la data salvata non si
+        riesce a leggere si mette l'ora attuale: e' impreciso, ma una riga
+        vuota o un errore in un pannello informativo sarebbero peggio.
+        """
         try:
             return _datetime.fromisoformat(snap["checked_at_iso"]).strftime("%H:%M")
         except Exception:
@@ -406,7 +464,11 @@ def get_cached_credits() -> list[dict]:
 # lingua del motore cosi' i testi di avanzamento arrivano gia' tradotti.
 
 def download_audio(url: str, workdir: str, on_progress=_noop) -> str:
-    """Scarica la sola traccia audio in 'workdir'. Raises EngineError on failure."""
+    """Scarica l'audio, traducendo gli errori nel linguaggio del motore.
+
+    Come gli altri ponti di questo file: il lavoro lo fa il modulo dello
+    scaricamento, qui si cambia solo il tipo di errore. Vedi _shared.
+    """
     return _shared(download.download_audio, url, workdir, on_progress)
 
 
@@ -1145,7 +1207,13 @@ def _load_saved_transcript(meta: dict, out_root: str):
 def _post_result(disk_meta: dict, segments: list[dict], engine_label: str,
                  video_dir: str, created: list[str], warnings: list[str],
                  summary_status=None) -> dict:
-    """Dizionario risultato per la GUI (stessa forma di save_results)."""
+    """Il riepilogo di com'e' andata, nella forma che la pagina si aspetta.
+
+    Stessa forma di quello che produce un lavoro completo, ed e' voluto: le
+    operazioni parziali (solo traduzione, solo riassunto, ripresa) finiscono
+    nello stesso pannello di riepilogo, e la pagina non deve sapere da quale
+    delle strade si e' arrivati li'.
+    """
     return {
         "title": disk_meta["title"],
         "video_dir": video_dir,
@@ -1238,13 +1306,25 @@ def resume(meta: dict, options: dict, out_root: str, on_progress=_noop) -> dict:
 
 
 def can_resume(meta: dict, out_root: str) -> bool:
-    """True se il video ha uno stato con una fase da riprendere (per il menu GUI)."""
+    """C'e' qualcosa da riprendere, per questo video?
+
+    Serve a decidere se mostrare o no la voce «Riprendi» quando si reincolla
+    un link gia' trascritto. Mostrarla sempre porterebbe a premerla e non
+    ottenere niente; non mostrarla mai farebbe rifare da capo lavori lasciati
+    a un passo dalla fine.
+    """
     disk_meta = dict(meta)
     return jobs.has_resumable_state(disk_meta)
 
 
 def resume_hint(meta: dict, out_root: str, lang: str = "it") -> str:
-    """Testo breve «riprende da…» per il video (o "" se niente da riprendere)."""
+    """La frase che dice da dove ripartirebbe, tipo «riassunto, sezione 8/20».
+
+    Va accanto alla voce «Riprendi» perche' quella parola da sola non dice
+    abbastanza: riprendere da una traduzione quasi finita e riprendere da una
+    trascrizione appena cominciata sono due decisioni diverse, e senza questo
+    testo si somigliano.
+    """
     return jobs.resume_info_text(dict(meta), lang)
 
 

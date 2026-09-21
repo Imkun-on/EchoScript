@@ -264,8 +264,16 @@ from server.state.jobs import (
 
 def _option_card(number: str, icon: str, title: str, rows: list[tuple[str, str]],
                  accent: str) -> Panel:
-    """Build a "card" (mini-box) for an option, with number, icon, title and a
-    list of rows (symbol, text). 'accent' is the border color."""
+    """Una scheda: il riquadro con cui si presenta una scelta nei menu.
+
+    Numero, icona, titolo e qualche riga di dettaglio. Le scelte importanti di
+    questo programma sono sempre due o tre, e messe una accanto all'altra in
+    riquadri della stessa forma si confrontano a colpo d'occhio: e' il motivo
+    per cui i menu non sono un elenco numerato.
+
+    Il colore del bordo distingue le alternative fra loro senza bisogno di
+    leggerle: locale e nuvola hanno due colori fissi in tutto il programma.
+    """
     body = Text()
     for i, (sym, txt) in enumerate(rows):
         if i:
@@ -655,7 +663,13 @@ def resolve_local_sources(path: str) -> list[str]:
 
 
 def display_local_sources(metas: list[dict]) -> None:
-    """Show a card (single file) or a table (folder/batch) of the local sources."""
+    """Mostra il file scelto, o l'elenco se si e' scelta una cartella intera.
+
+    Due forme diverse per due situazioni diverse. Un file solo merita una
+    scheda con i suoi dati; venti file meritano una tabella, perche' quello che
+    serve li' e' scorrere l'elenco e vedere la durata totale prima di far
+    partire qualcosa che durera' ore.
+    """
     if len(metas) == 1:
         m = metas[0]
         table = Table(show_header=False, box=None, expand=False, padding=(0, 1))
@@ -717,13 +731,24 @@ def display_playlist_sources(pl: dict, metas: list[dict]) -> None:
 # === PROMPT (user input with a consistent style) ===
 
 def _prompt(label: str, hint: str = "", accent: str = "bright_blue") -> str:
-    """User input with a consistent style: colored arrow + label."""
+    """Una domanda a chi sta usando il programma, sempre con lo stesso aspetto.
+
+    La freccia colorata all'inizio non e' decorazione: in un terminale pieno di
+    righe di avanzamento e' il segno che distingue «adesso tocca a te» da
+    «sto ancora lavorando». Senza, le domande si perdono nel flusso e restano
+    li' senza che nessuno se ne accorga.
+    """
     h = f" [dim]{hint}[/dim]" if hint else ""
     return console.input(f"\n[bold {accent}]›[/bold {accent}] [bold]{label}[/bold]{h}: ").strip()
 
 
 def _confirm(label: str, accent: str = "bright_blue") -> bool:
-    """Yes/no question with a consistent style; True only if the user answers 's'."""
+    """Una domanda da si' o no. Vale «si'» solo la s esplicita.
+
+    Qualunque altra cosa, compreso l'invio a vuoto, conta come no. E' voluto:
+    quasi tutte queste domande precedono qualcosa che costa tempo o crediti, e
+    davanti a una risposta ambigua conviene non farlo.
+    """
     return _prompt(label, "(s/n)", accent).lower() == "s"
 
 
@@ -741,7 +766,13 @@ from server.sources.metadata import (
 # con None ("non è andata, vai avanti") e stampare l'errore in rosso.
 
 def _cli_get_video_info(url: str) -> dict | None:
-    """get_video_info per la CLI: stampa l'errore e restituisce None."""
+    """Come get_video_info, ma parlando: stampa l'errore e torna None.
+
+    E' uno degli involucri che questo file mette intorno alle funzioni del
+    motore. Il motore solleva un'eccezione e non stampa niente, perche' non sa
+    chi lo sta guardando; qui si sa, quindi l'errore si scrive in rosso e si
+    torna al menu invece di far cadere il programma.
+    """
     try:
         return get_video_info(url)
     except MediaError as e:
@@ -750,7 +781,10 @@ def _cli_get_video_info(url: str) -> dict | None:
 
 
 def _cli_get_playlist_info(url: str) -> dict | None:
-    """get_playlist_info per la CLI: stampa l'errore e restituisce None."""
+    """Come get_playlist_info, ma stampando l'errore e tornando None.
+
+    Stesso involucro di _cli_get_video_info, per lo stesso motivo.
+    """
     try:
         return get_playlist_info(url)
     except MediaError as e:
@@ -768,8 +802,18 @@ from server.config.messages import _RUNTIME_MSGS, msg    # noqa: F401
 
 
 def display_video_info(meta: dict) -> None:
-    """Show the video card in a colored box (title, channel, views, likes,
-    subscribers, category, date, duration, number of chapters)."""
+    """La scheda del video, da guardare prima di dire di si'.
+
+    E' il momento in cui si scopre di aver incollato il link sbagliato, ed e'
+    il motivo per cui questa scheda esiste. Accorgersene qui costa un secondo;
+    accorgersene dopo costa mezz'ora di trascrizione e i crediti che sono
+    andati con lei.
+
+    Per questo ci sono anche i dati che apparentemente non servono a niente,
+    come le visualizzazioni e il canale: sono quelli da cui si riconosce il
+    video, molto piu' del titolo, che fra due lezioni della stessa serie e'
+    quasi identico.
+    """
     table = Table(show_header=False, box=None, expand=False, padding=(0, 1))
     table.add_column("Icona", justify="center", no_wrap=True)
     table.add_column("Campo", style="dim", justify="left", no_wrap=True)
@@ -833,6 +877,13 @@ def _download_progress(description: str):
     task_id = progress.add_task(description, total=None)  # total=None: unknown until yt-dlp reports it
 
     def on_progress(phase, current, total, detail="") -> None:
+        """Riceve l'avanzamento dal motore e lo mette dentro la barra.
+
+        Un avanzamento senza numeri non e' un errore: vuol dire «sto facendo
+        qualcosa di cui non conosco la durata», per esempio convertire un file
+        gia' scaricato. In quel caso si cambia solo la scritta e la barra resta
+        dov'e', invece di farla saltare a un punto inventato.
+        """
         if current is None:
             progress.update(task_id, description=detail or description)
             return
@@ -845,7 +896,12 @@ def _download_progress(description: str):
 
 
 def _cli_download_audio(url: str, workdir: str) -> str | None:
-    """download_audio per la CLI: barra rich, Ctrl+C e None su errore."""
+    """Scarica l'audio mostrando una barra, e gestisce il Ctrl+C.
+
+    Involucro del motore per il terminale: la funzione vera riferisce
+    l'avanzamento a chi la chiama, e qui quel racconto diventa una barra che
+    si riempie.
+    """
     progress, _task, on_progress = _download_progress("Scarico audio")
     try:
         with progress:
@@ -868,7 +924,13 @@ from server.transcription.audio import (
 )
 
 def _cli_split_audio(audio_path: str, duration: float, workdir: str) -> list[tuple[float, str]]:
-    """split_audio per la CLI: barra rich che cresce a ogni blocco creato."""
+    """Divide l'audio mostrando una barra che cresce a ogni blocco.
+
+    Il numero di blocchi si calcola prima invece di scoprirlo strada facendo,
+    cosi' la barra puo' dire «3 di 40» dal primo istante. Una barra che non sa
+    quanti pezzi saranno puo' solo girare a vuoto, e girare a vuoto per due
+    minuti non distingue un lavoro che procede da uno piantato.
+    """
     n_chunks = max(1, int((duration + CHUNK_SECONDS - 1) // CHUNK_SECONDS)) if duration else 1
     progress = Progress(
         SpinnerColumn("dots", style="bright_blue"),
@@ -882,6 +944,11 @@ def _cli_split_audio(audio_path: str, duration: float, workdir: str) -> list[tup
         task_id = progress.add_task("Creo i blocchi", total=n_chunks)
 
         def on_progress(phase, current, total, detail="") -> None:
+            """Sposta la barra al punto riferito, e basta.
+
+            La piu' semplice delle tre: qui il totale e' noto da prima e non
+            cambia, quindi non c'e' niente da decidere.
+            """
             progress.update(task_id, completed=current or 0)
 
         try:
@@ -1009,6 +1076,13 @@ def _cli_transcribe_local(model_name: str, audio_path: str, duration: float,
                                 completed=min(start_offset, duration) if duration else None)
 
     def on_progress(phase, current, total, detail="") -> None:
+        """L'avanzamento della trascrizione locale, che ha un caso in piu'.
+
+        Prima che il lavoro cominci c'e' il caricamento del modello, che la
+        prima volta scarica qualche gigabyte e dura parecchio. Non ha un
+        avanzamento, quindi si stampa come riga sopra la barra: la barra resta
+        a zero, ma almeno si sa che non e' piantato.
+        """
         if current is None:
             # Tick senza numeri = messaggio di stato (caricamento del modello):
             # lo stampiamo sopra la barra, che resta ferma finché non parte.
@@ -1150,7 +1224,11 @@ from server.sources.download import (
 )
 
 def _cli_download_video(url: str, workdir: str) -> str | None:
-    """download_video per la CLI: barra rich, Ctrl+C e None su errore."""
+    """Scarica il video mostrando una barra, e gestisce il Ctrl+C.
+
+    Come il gemello dell'audio. Si usa solo quando e' stata chiesta l'analisi
+    visiva, perche' e' l'unica cosa per cui servano i fotogrammi.
+    """
     progress, _task, on_progress = _download_progress("Scarico video")
     try:
         with progress:
@@ -1363,7 +1441,13 @@ def _save_outputs(meta: dict, segments: list[dict], engine_label: str,
     created: list[str] = []  # paths (relative to the video folder) of generated files, for the summary
 
     def _save(path: str, content: str) -> None:
-        # write_text_file: percorsi lunghi (_lp) + retry su OneDrive, condiviso col motore.
+        """Scrive un file e lo segna fra quelli prodotti.
+
+        Passa dalla scrittura condivisa col motore, che si occupa di due
+        fastidi: i percorsi oltre i 260 caratteri, che i titoli di video lunghi
+        raggiungono facilmente, e i tentativi ripetuti quando la cartella e'
+        dentro OneDrive e la sincronizzazione tiene il file occupato.
+        """
         write_text_file(path, content, created, video_dir)
 
     _save(f"{base_orig}.md", build_md(meta["title"], meta, engine_label, sections, with_timestamps=True))
@@ -1486,7 +1570,13 @@ def translate_existing(out_root: str, title: str, target: str = "it",
     created: list[str] = []
 
     def _save(path: str, content: str) -> None:
-        # write_text_file: percorsi lunghi (_lp) + retry su OneDrive, condiviso col motore.
+        """Scrive un file e lo segna fra quelli prodotti.
+
+        Passa dalla scrittura condivisa col motore, che si occupa di due
+        fastidi: i percorsi oltre i 260 caratteri, che i titoli di video lunghi
+        raggiungono facilmente, e i tentativi ripetuti quando la cartella e'
+        dentro OneDrive e la sincronizzazione tiene il file occupato.
+        """
         write_text_file(path, content, created, video_dir)
 
     # La versione tradotta non porta i timestamp (testo continuo, più leggibile).
@@ -1657,7 +1747,13 @@ def summarize_existing(out_root: str, title: str, client=None,
     created: list[str] = []
 
     def _save(path: str, content: str) -> None:
-        # write_text_file: percorsi lunghi (_lp) + retry su OneDrive, condiviso col motore.
+        """Scrive un file e lo segna fra quelli prodotti.
+
+        Passa dalla scrittura condivisa col motore, che si occupa di due
+        fastidi: i percorsi oltre i 260 caratteri, che i titoli di video lunghi
+        raggiungono facilmente, e i tentativi ripetuti quando la cartella e'
+        dentro OneDrive e la sincronizzazione tiene il file occupato.
+        """
         write_text_file(path, content, created, video_dir)
 
     # Fotogrammi nel riassunto: aggiungiamo i frame (per timestamp) alle sezioni.
@@ -1901,7 +1997,13 @@ def run() -> None:
         is_local_cp = bool(resume_cp) and "done_seconds" in resume_cp
 
         def _drop_cp() -> None:
-            """Delete whichever checkpoint kind applies to this run."""
+            """Butta via il parziale giusto per questo lavoro.
+
+        Ce ne sono due tipi, uno per Groq e uno per la trascrizione locale, e
+        vanno cancellati quello che si e' usato. Cancellarli tutti e due
+        sembrerebbe piu' prudente e invece butterebbe via un lavoro lasciato a
+        meta' con l'altro motore, che magari si voleva riprendere.
+        """
             delete_local_checkpoint(meta) if backend == "local" else delete_checkpoint(meta)
 
         # Di default, dopo una trascrizione COMPLETATA al 100% si genera anche la
