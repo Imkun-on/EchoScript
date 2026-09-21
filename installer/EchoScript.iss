@@ -9,7 +9,7 @@
 ;  Ma il modo giusto e' lanciare  .\costruisci.ps1  dalla radice del progetto:
 ;  fa prima PyInstaller e poi questo, che da solo non saprebbe cosa impacchettare.
 ;
-;  Risultato:  installer\output\EchoScript-Setup-<versione>.exe
+;  Risultato:  installer\output\EchoScript-Setup.exe
 ;              un file unico da mandare a chiunque.
 ;
 ;  COSA FA QUESTO FILE, E COSA NO
@@ -30,7 +30,7 @@
 ; che la passa costruisci.ps1. Il valore qui sotto e' solo la rete di sicurezza
 ; per chi lancia iscc a mano: senza #ifndef sovrascriverebbe quello ricevuto.
 #ifndef Versione
-  #define Versione       "1.0.0"
+  #define Versione       "3.0.0"
 #endif
 #define Autore           "Imkun-on"
 #define SitoApp          "https://github.com/Imkun-on/EchoScript"
@@ -80,7 +80,18 @@ DisableDirPage=auto
 
 ; -- Il file prodotto -------------------------------------------------------
 OutputDir=output
-OutputBaseFilename={#NomeApp}-Setup-{#Versione}
+; Il nome NON contiene la versione, ed e' voluto.
+;
+; GitHub offre un indirizzo fisso che scarica un allegato dell'ultima release:
+;     .../releases/latest/download/EchoScript-Setup.exe
+; Ci si clicca e parte il download, senza passare da nessuna pagina. Ma quel
+; giro funziona solo se il nome del file resta lo stesso fra una versione e
+; l'altra: mettendoci dentro il numero, l'indirizzo cambierebbe a ogni release
+; e il bottone nel README punterebbe a un file che non esiste piu'.
+;
+; La versione non si perde: VersionInfoVersion qui sopra la scrive dentro il
+; file, e si legge dalle proprieta' in Windows.
+OutputBaseFilename={#NomeApp}-Setup
 SetupIconFile=..\assets\EchoScript.ico
 LicenseFile=..\LICENSE
 ; lzma2/max: il pacchetto e' grosso (ffmpeg da solo sono 400 MB) e il tempo di

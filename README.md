@@ -23,6 +23,16 @@
   <b>Niente abbonamenti, niente limiti giornalieri, niente minutaggio ridotto.</b>
 </p>
 
+<p align="center">
+  <a href="https://github.com/Imkun-on/EchoScript/releases/latest/download/EchoScript-Setup.exe">
+    <img src="https://img.shields.io/badge/⬇%20Scarica%20per%20Windows-EchoScript--Setup.exe-2ea44f?style=for-the-badge" alt="Scarica EchoScript per Windows">
+  </a>
+</p>
+
+<p align="center">
+  <sub>Ci clicchi e parte il download dell'installatore. Windows 10/11 a 64 bit.</sub>
+</p>
+
 </div>
 
 ---
@@ -47,16 +57,17 @@
 
 Non serve installare Python né altro.
 
-1. Vai alla pagina **[Releases](https://github.com/Imkun-on/EchoScript/releases/latest)**.
-2. Scarica **`EchoScript-Setup-<versione>.exe`**.
-3. Doppio clic, Avanti, Installa.
-4. Trovi l'icona sul desktop e la voce nel menu Start.
+1. Clicca il bottone verde qui sopra, oppure prendi **`EchoScript-Setup.exe`** dalla pagina **[Releases](https://github.com/Imkun-on/EchoScript/releases/latest)**.
+2. Doppio clic, Avanti, Installa.
+3. Trovi l'icona sul desktop e la voce nel menu Start.
+
+> Il nome del file non contiene il numero di versione, ed e' voluto: e' cosi' che il bottone qui sopra puo' scaricare sempre l'ultima senza cambiare indirizzo. La versione si legge nelle proprieta' del file e nella voce «App installate».
 
 > 🔓 **Non serve essere amministratore.** Si installa per il tuo account, dentro `%LOCALAPPDATA%\Programs\EchoScript`, e Windows non chiede nessuna conferma di sicurezza. Funziona anche sul computer dell'ufficio.
 
 > 🛡️ **SmartScreen.** Il programma non è firmato digitalmente, quindi Windows può mostrare *"Windows ha protetto il PC"*: clicca **"Ulteriori informazioni" → "Esegui comunque"**. Per controllare di aver scaricato davvero il file pubblicato, confronta l'impronta con quella nelle note della release:
 > ```powershell
-> Get-FileHash .\EchoScript-Setup-1.0.0.exe -Algorithm SHA256
+> Get-FileHash .\EchoScript-Setup.exe -Algorithm SHA256
 > ```
 
 **Cosa è incluso:**

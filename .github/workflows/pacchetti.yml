@@ -17,8 +17,8 @@
 #  -----------
 #  Per pubblicare una versione, si mette un'etichetta e la si spedisce:
 #
-#      git tag v1.0.0
-#      git push origin v1.0.0
+#      git tag v3.1.0
+#      git push origin v3.1.0
 #
 #  Dopo una quindicina di minuti la pagina Releases ha il suo installatore.
 #  Per una prova senza pubblicare niente c'e' il pulsante "Run workflow" nella
@@ -34,7 +34,7 @@
 name: Pacchetti
 
 on:
-  # Un'etichetta che comincia per v (v1.0.0, v1.2.3) vuol dire "pubblica".
+  # Un'etichetta che comincia per v (v3.0.0, v3.1.2) vuol dire "pubblica".
   push:
     tags:
       - 'v*'
@@ -44,7 +44,7 @@ on:
       versione:
         description: 'Numero di versione (senza la v davanti)'
         required: true
-        default: '0.0.0-prova'
+        default: '3.0.0-prova'
 
 # Se si spedisce una correzione mentre la costruzione precedente sta ancora
 # girando, quella vecchia viene fermata: due pacchetti della stessa versione
@@ -72,7 +72,7 @@ jobs:
       # Da dove esce il numero di versione
       # --------------------------------------------------------------------
       # Due strade, perche' ci sono due modi di far partire questa costruzione.
-      # Con l'etichetta (v1.0.0) il numero e' nell'etichetta stessa e basta
+      # Con l'etichetta (v3.0.0) il numero e' nell'etichetta stessa e basta
       # togliere la v davanti. Col pulsante manuale lo scrive chi preme.
       # Il risultato finisce in una variabile che i passi successivi leggono.
       - name: Decidi il numero di versione
@@ -159,7 +159,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: EchoScript-Setup-${{ steps.versione.outputs.valore }}
-          path: installer/output/EchoScript-Setup-*.exe
+          path: installer/output/EchoScript-Setup.exe
           retention-days: 30
           compression-level: 0   # e' gia' compresso da Inno Setup, rifarlo non toglie niente
 
@@ -177,7 +177,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $v = '${{ steps.versione.outputs.valore }}'
-          $file = "installer\output\EchoScript-Setup-$v.exe"
+          # Il nome del file non contiene la versione: vedi la spiegazione in
+          # installer\EchoScript.iss, accanto a OutputBaseFilename.
+          $file = 'installer\output\EchoScript-Setup.exe'
           $impronta = (Get-FileHash $file -Algorithm SHA256).Hash
           $peso = '{0:N1}' -f ((Get-Item $file).Length / 1MB)
           # Le note si costruiscono riga per riga invece che con un blocco di
@@ -189,7 +191,7 @@ jobs:
           $righe = @(
             "## EchoScript $v",
             "",
-            "Scarica **EchoScript-Setup-$v.exe** qui sotto e fai doppio clic.",
+            "Scarica **EchoScript-Setup.exe** qui sotto e fai doppio clic.",
             "Non serve essere amministratore: si installa per il tuo account e",
             "mette l'icona sul desktop.",
             "",
@@ -201,4 +203,21 @@ jobs:
             "«Esegui comunque»."
           )
           Set-Content -Path note.md -Value $righe -Encoding utf8
-          gh release create "v$v" $file --title "EchoScript $v" --notes-file note.md
+
+          # Creare oppure aggiornare, a seconda di cosa c'e' gia'.
+          #
+          # `gh release create` da solo fallisce se quella release esiste, e
+          # succede davvero: pubblicando a mano con gh viene creato anche il tag
+          # sul remoto, e la nascita di un tag fa partire questo workflow. Senza
+          # questo bivio quel giro finirebbe in rosso pur avendo funzionato
+          # tutto, e chi lo guarda dopo si chiederebbe cosa si e' rotto.
+          #
+          # --clobber sovrascrive l'allegato invece di rifiutarsi perche' ce
+          # n'e' gia' uno con quel nome.
+          $esiste = gh release view "v$v" 2>$null
+          if ($LASTEXITCODE -eq 0) {
+              Write-Host "La release v$v c'e' gia': aggiorno l'allegato."
+              gh release upload "v$v" $file --clobber
+          } else {
+              gh release create "v$v" $file --title "EchoScript $v" --notes-file note.md
+          }

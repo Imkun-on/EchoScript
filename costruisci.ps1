@@ -8,7 +8,7 @@
      .\costruisci.ps1 -SoloInstallatore     (salta PyInstaller, riusa dist\)
 
  Risultato:
-     installer\output\EchoScript-Setup-<versione>.exe
+     installer\output\EchoScript-Setup.exe
 
  I due passaggi, e perche' sono due
  ----------------------------------
@@ -27,9 +27,14 @@
 #>
 [CmdletBinding()]
 param(
-    # Finisce nel nome del file prodotto, nella voce di "App installate" e nelle
-    # proprieta' dell'eseguibile. Va alzata a ogni versione pubblicata.
-    [string] $Versione = '1.0.0',
+    # Finisce nella voce di "App installate" e nelle proprieta' dell'eseguibile.
+    # Va alzata a ogni versione pubblicata.
+    #
+    # NON finisce nel nome del file: quello resta sempre EchoScript-Setup.exe,
+    # perche' l'indirizzo di scaricamento diretto pubblicato nel README funziona
+    # solo se il nome non cambia fra una versione e l'altra. La spiegazione per
+    # esteso sta in installer\EchoScript.iss, accanto a OutputBaseFilename.
+    [string] $Versione = '3.0.0',
 
     # Per quando si sta lavorando sullo script di installazione e la cartella
     # dist\ e' gia' buona: PyInstaller ci mette dieci minuti, Inno Setup uno.
@@ -165,7 +170,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Inno Setup ha fallito: vedi il registro qui so
 # ---------------------------------------------------------------------------
 # 4. Il risultato
 # ---------------------------------------------------------------------------
-$Prodotto = Join-Path $Uscita "EchoScript-Setup-$Versione.exe"
+$Prodotto = Join-Path $Uscita 'EchoScript-Setup.exe'
 if (-not (Test-Path $Prodotto)) { throw "Atteso $Prodotto, non trovato." }
 
 $Mb = [math]::Round((Get-Item $Prodotto).Length / 1MB, 1)
