@@ -119,7 +119,13 @@ def carica_motore() -> None:
 
 
 def _avanzamento(quota: float) -> None:
-    """Dice alla pagina a che punto e' il caricamento, da 0 a 1."""
+    """Dice alla pagina a che punto e' il caricamento del motore, da 0 a 1.
+
+    Se la pagina non c'e' ancora, il messaggio si perde e non succede niente.
+    Capita davvero nei primi istanti, perche' il motore comincia a caricarsi
+    prima che la finestra esista: e' voluto, ed e' il motivo per cui l'avvio
+    dura la meta' di prima.
+    """
     _verso_pagina('avanzamentoAvvio', quota)
 
 
@@ -182,7 +188,12 @@ def riempi_cataloghi() -> None:
 
 
 def _ora() -> str:
-    """L'ora, per le righe del diario: dice quanto e' durato ogni pezzo."""
+    """L'ora attuale, come si scrive in testa a una riga di diario.
+
+    Serve a poter dire, rileggendo, quanto e' durato ogni passaggio. Su un
+    lavoro lungo e' spesso l'unica informazione da cui si capisce dove il
+    programma ha impiegato tutto quel tempo.
+    """
     return _dt.datetime.now().strftime('%H:%M:%S')
 
 
@@ -211,10 +222,29 @@ class Diario(io.TextIOBase):
     _ANSI = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
 
     def __init__(self):
+        """Prepara il pezzo di riga avanzato e il lucchetto che lo protegge.
+
+        Il pezzo avanzato serve perche' chi stampa non lo fa mai una riga
+        intera alla volta: manda un po' di caratteri, poi altri, e il fine riga
+        arriva quando arriva. Quello che avanza si tiene da parte fino al
+        pezzo successivo.
+
+        Il lucchetto perche' a stampare possono essere piu' thread insieme, e
+        senza, due righe finirebbero mescolate carattere per carattere.
+        """
         self._resto = ''
         self._lucchetto = threading.Lock()
 
     def write(self, s: str) -> int:      # type: ignore[override]
+        """Riceve quello che qualcuno ha stampato e ne ricava righe intere.
+
+        Python chiama questo metodo ogni volta che qualcosa finisce sull'uscita
+        standard, con pezzi di lunghezza qualunque. Qui si accumulano finche'
+        non si trova un fine riga, e solo allora si manda la riga alla pagina.
+
+        Il motivo e' che il diario a schermo e' fatto di righe: mandare mezze
+        righe produrrebbe una cronologia spezzata in punti casuali.
+        """
         if not s:
             return 0
         with self._lucchetto:
@@ -225,12 +255,29 @@ class Diario(io.TextIOBase):
         return len(s)
 
     def flush(self) -> None:
+        """Manda anche l'ultimo pezzo, pure se non finiva con un a capo.
+
+        Si chiama alla fine di un lavoro. Senza, l'ultima riga stampata da un
+        programma che non ha messo l'a capo resterebbe in sospeso per sempre, e
+        sarebbe proprio quella che dice com'e' finita.
+        """
         with self._lucchetto:
             if self._resto:
                 self._manda(self._resto)
                 self._resto = ''
 
     def _manda(self, grezza: str) -> None:
+        """Ripulisce una riga dai codici colore e la consegna alla pagina.
+
+        Rich colora scrivendo delle sequenze di controllo che un terminale
+        interpreta come «da qui in poi scrivi in verde». Dentro una pagina web
+        quelle sequenze non vogliono dire niente e si vedrebbero come caratteri
+        strani in mezzo al testo.
+
+        Il colore non si perde: la pagina lo rimette guardando cosa dice la
+        riga. Le righe vuote si buttano, perche' nel diario a schermo non
+        aggiungono niente.
+        """
         testo = self._ANSI.sub('', grezza).rstrip()
         if testo:
             _verso_pagina('aggiungiRiga', testo)
@@ -257,6 +304,17 @@ class Avanzamento:
     """
 
     def __init__(self, piano: list[str]):
+        """Parte da un piano: l'elenco delle fasi previste per questo lavoro.
+
+        Serve a poter dire un numero vero invece di far girare una barra a
+        vuoto. Sapendo che le fasi sono cinque e che si e' alla terza, la barra
+        puo' dire sessanta per cento e non mentire.
+
+        Il massimo raggiunto si tiene da parte perche' la barra non deve MAI
+        tornare indietro: una fase che riferisce un valore piu' basso della
+        precedente capita, e vedere una barra che arretra fa pensare che
+        qualcosa sia andato storto anche quando va tutto bene.
+        """
         self.piano = piano
         self._massimo = 0.0
         self._fase_detta: str | None = None
@@ -287,6 +345,12 @@ class Avanzamento:
             _verso_pagina('aggiungiRiga', f'{_ora()}     {dettaglio}')
 
     def riferisci(self, fase: str, corrente, totale, dettaglio: str = '') -> None:
+        """Il motore dice a che punto e'; qui diventa una barra e una riga.
+
+        Traduce due cose diverse in una sola: quanto manca alla fine di QUESTA
+        fase, e quanto pesa questa fase sul lavoro intero. Il motore sa solo la
+        prima, perche' non ha idea di quante altre fasi siano previste.
+        """
         self._racconta(fase, dettaglio or '')
         if fase not in self.piano:
             # Una fase fuori piano (rara: il motore ne aggiunge una che non
@@ -350,6 +414,17 @@ class Api:
     """
 
     def __init__(self):
+        """Prepara lo stato di una sessione di lavoro, ancora vuoto.
+
+        Qui NON si tocca il motore, e non e' un caso: questo oggetto nasce
+        insieme alla finestra, e la finestra nasce prima del motore. Tutto
+        quello che ha bisogno di sapere qualcosa del motore si riempie dopo,
+        in _leggi_scelte(), quando la pagina fa il suo primo saluto.
+
+        C'e' un controllo automatico che verifica proprio questa cosa, perche'
+        e' un errore che non si vede compilando: si vede solo aprendo il
+        programma e trovandolo piantato sulla schermata di caricamento.
+        """
         self._occupato = False
         self._avanz: Avanzamento | None = None
 
@@ -472,6 +547,13 @@ class Api:
         cambiando lingua non serve richiederle di nuovo.
         """
         def spunta(nome: str) -> str:
+            """La spunta accanto a un modello gia' scaricato in Ollama.
+
+            Nessuna spunta quando ancora non si sa: la lettura di Ollama avviene
+            in sottofondo e puo' non essere arrivata. Mostrare «non scaricato»
+            in quel momento sarebbe una bugia, e manderebbe a scaricare
+            qualcosa che c'e' gia'.
+            """
             if self._ollama_presenti is None:
                 return ''
             return ' ✓' if ollama._ollama_has_model(nome, self._ollama_presenti) else ''
@@ -531,6 +613,14 @@ class Api:
     # ── La chiave Groq ───────────────────────────────────────────────────────
 
     def _stato_chiave(self) -> dict:
+        """Cosa sapere della chiave Groq, senza mai mandarla alla pagina.
+
+        Si dice solo SE c'e' e da quale file e' stata presa. La chiave in se'
+        resta in memoria qui dentro e non attraversa mai il ponte verso
+        l'interfaccia: una chiave che arriva nella pagina e' una chiave che si
+        puo' leggere aprendo gli strumenti del browser, e non c'e' nessun
+        motivo per cui debba trovarsi li'.
+        """
         return {'presente': bool(self._chiave), 'nome': self._chiave_nome}
 
     def scegli_chiave(self) -> dict:
@@ -570,7 +660,18 @@ class Api:
 
     @staticmethod
     def _estrai_chiave(grezzo: str) -> str:
-        """Il primo valore utile di un file: chiave nuda o riga NOME=valore."""
+        """Pesca la chiave da un file di testo, comunque sia scritto dentro.
+
+        Chi scarica la chiave dalla console di Groq si ritrova un file che a
+        volte contiene solo la chiave, a volte una riga tipo `GROQ_API_KEY=...`,
+        a volte con virgolette intorno e un commento sopra. Chiedere di
+        ripulirlo a mano sarebbe scortese e per giunta un'altra occasione di
+        sbagliare.
+
+        Quindi si prende la prima riga che non sia vuota ne' un commento, si
+        butta via quello che sta prima dell'uguale se c'e', e si tolgono le
+        virgolette.
+        """
         for riga in grezzo.splitlines():
             riga = riga.strip()
             if not riga or riga.startswith('#'):
@@ -601,6 +702,17 @@ class Api:
         return {'ok': True, 'avviato': True}
 
     def _carica_davvero(self, url: str) -> None:
+        """Legge cosa c'e' dietro un link, in un thread a parte.
+
+        Sta in un thread perche' su una playlist lunga yt-dlp interroga YouTube
+        un video per volta, e sono parecchi secondi. Farlo nel thread della
+        finestra la bloccherebbe: niente si muove, niente risponde, e sembra
+        piantato.
+
+        Prima si guarda se e' una playlist, perche' un link di playlist
+        contiene anche un video e trattandolo come singolo si prenderebbe solo
+        quello, senza dire niente degli altri quarantanove.
+        """
         try:
             playlist = engine.get_playlist_info(url) if 'list=' in url else None
             if playlist and playlist['count'] >= 1:
@@ -708,6 +820,13 @@ class Api:
         }
 
     def _scheda_playlist(self, playlist: dict) -> dict:
+        """La scheda da mostrare per una playlist, prima di confermare.
+
+        La durata totale e' il numero che conta davvero: e' quello da cui si
+        capisce se si sta per cominciare una cosa da dieci minuti o da sei ore.
+        Il numero di video da solo non lo dice, perche' cinquanta video possono
+        essere cinquanta minuti o due giornate.
+        """
         voci = playlist['items']
         totale = sum((m.get('duration') or 0) for m in voci)
         return {
@@ -725,6 +844,13 @@ class Api:
         }
 
     def _scheda_file(self, meta: dict, percorso: str) -> dict:
+        """La scheda da mostrare per un file scelto dal disco.
+
+        Piu' scarna di quella di un video: niente copertina, niente canale,
+        niente data di pubblicazione, perche' un file non ha nessuna di quelle
+        cose. Restano il nome e la durata, che sono anche le uniche due da cui
+        si capisce se si e' scelto il file giusto.
+        """
         return {
             'tipo': 'file',
             'titolo': meta.get('title') or os.path.basename(percorso),
@@ -904,7 +1030,15 @@ class Api:
         return {'ok': True, 'avviato': True}
 
     def _apri_lavoro(self, opzioni: dict, piano: list[str]) -> None:
-        """Prepara la pagina per un lavoro nuovo: piano, checklist, barra a zero."""
+        """Prepara la pagina per un lavoro che sta per cominciare.
+
+        Manda tre cose insieme: l'elenco delle fasi previste, la riga che
+        riassume cosa si e' chiesto, e la barra riportata a zero.
+
+        L'elenco delle fasi arriva prima che il lavoro cominci, e non mentre
+        procede, apposta: chi guarda vede subito quanti passaggi saranno, e
+        quindi capisce se sta aspettando due minuti o venti.
+        """
         self._avanz = Avanzamento(piano)
         parti = [i18n.t('ov.base')]
         if opzioni.get('visual'):
@@ -928,11 +1062,30 @@ class Api:
         })
 
     def _riferisci(self, fase, corrente, totale, dettaglio='') -> None:
-        """Il callback che il motore chiama mentre lavora (dal thread di lavoro)."""
+        """La funzione che il motore chiama per dire a che punto e'.
+
+        Gliela si passa quando gli si chiede di lavorare, ed e' l'unico modo
+        che ha di farsi sentire: il motore non sa che esiste una finestra, sa
+        solo di avere qualcuno a cui riferire.
+
+        Gira nel thread di lavoro, non in quello della finestra. Va bene,
+        perche' tutto quello che fa e' passare la notizia al ponte, che se la
+        cava da qualunque thread.
+        """
         if self._avanz:
             self._avanz.riferisci(fase, corrente, totale, dettaglio)
 
     def _trascrivi_davvero(self, riprendi: bool) -> None:
+        """Il lavoro completo su un video: dall'audio al documento finito.
+
+        E' la strada principale del programma. Gira in un thread a parte, e
+        riferisce alla pagina man mano.
+
+        Il caso «crediti finiti» non viene intercettato qui di proposito: lo
+        raccoglie _in_thread, che lo tratta per quello che e', cioe' un'attesa
+        e non un guasto. Prenderlo qui vorrebbe dire scriverne il trattamento
+        in cinque punti diversi, e prima o poi uno resterebbe indietro.
+        """
         opzioni = self._opzioni()
         piano = piano_fasi(opzioni['backend'], self.scelte['sorgente'], opzioni)
         self._apri_lavoro(opzioni, piano)
@@ -955,7 +1108,16 @@ class Api:
             _verso_pagina('mostraRisultato', self._risultato(risultato, meta_iniziale))
 
     def _dopo_davvero(self, azione: str) -> None:
-        """Traduzione, riassunto o ripresa su un video gia' trascritto."""
+        """Fare qualcosa in piu' su un video che era gia' stato trascritto.
+
+        Tradurre, riassumere, o riprendere un lavoro rimasto a meta'. Nessuna
+        delle tre ritrascrive niente: ripartono dai file gia' sul disco, ed e'
+        il motivo per cui costano pochissimo rispetto al lavoro originale.
+
+        L'analisi visiva resta spenta anche se era accesa nei menu: rifarla
+        vorrebbe dire riscaricare il video e rimandare tutti i fotogrammi, che
+        e' il contrario di quello che si sta chiedendo.
+        """
         opzioni = self._opzioni()
         opzioni.update({'translate': True, 'summarize': True, 'visual': False})
         piano = {'traduci': ['info', 'translate'],
@@ -989,6 +1151,15 @@ class Api:
         return {'ok': True, 'avviato': True}
 
     def _riassunto_locale(self) -> None:
+        """Finisce in locale un riassunto che Groq ha lasciato a meta'.
+
+        E' la via d'uscita quando i crediti finiscono durante un riassunto: il
+        parziale e' gia' salvato, e da li' si puo' proseguire sul proprio
+        computer invece di aspettare domani.
+
+        Si forza il motore locale anche se nei menu era scelto Groq, perche' e'
+        esattamente il punto: Groq in questo momento non risponde piu'.
+        """
         opzioni = self._opzioni(motore='local')
         opzioni.update({'api_key': '', 'translate': True,
                         'summarize': True, 'visual': False})
@@ -1016,6 +1187,15 @@ class Api:
         return {'ok': True, 'avviato': True, 'scelte': self.scelte}
 
     def _coda_in_locale(self) -> None:
+        """Finisce in locale una trascrizione che Groq ha lasciato a meta'.
+
+        Come il riassunto locale, ma sui blocchi di audio: quelli gia'
+        trascritti da Groq si tengono, e i rimanenti si macinano qui.
+
+        Il documento che ne esce e' stato scritto da due motori diversi, e
+        l'etichetta in testa lo dice: la qualita' puo' cambiare a meta',
+        e chi rilegge deve poterlo sapere.
+        """
         opzioni = self._opzioni(motore='local')
         piano = piano_fasi('local', self.scelte['sorgente'], opzioni)
         self._apri_lavoro(opzioni, piano)
@@ -1149,7 +1329,15 @@ class Api:
     # ── Aprire cose nel sistema ──────────────────────────────────────────────
 
     def apri(self, quale: str = 'cartella') -> dict:
-        """Apre nel sistema la cartella dei risultati o quella dell'analisi visiva."""
+        """Apre una cartella con il gestore di file del sistema.
+
+        E' il modo piu' rapido di arrivare ai file appena prodotti, e sostituisce
+        il dover ricordare dove il programma li aveva messi.
+
+        Su Windows c'e' una chiamata apposta; altrove si passa dal meccanismo
+        che apre gli indirizzi, che davanti a un percorso locale apre il
+        gestore di file.
+        """
         percorso = self._ultima_visiva if quale == 'visiva' else self._ultima_cartella
         if not percorso:
             return {'ok': False}
@@ -1164,7 +1352,13 @@ class Api:
         return {'ok': True}
 
     def apri_url(self, indirizzo: str) -> dict:
-        """Apre un indirizzo nel browser predefinito (per «Ottieni una chiave»)."""
+        """Apre un indirizzo nel browser di chi sta usando il programma.
+
+        Serve al pulsante «Ottieni una chiave», che porta alla pagina di Groq.
+        Si apre fuori e non dentro la finestra apposta: dentro sarebbe una
+        pagina web dentro un'altra pagina web, senza barra degli indirizzi e
+        senza il proprio accesso gia' fatto.
+        """
         import webbrowser
         try:
             webbrowser.open(indirizzo)
@@ -1186,6 +1380,20 @@ class Api:
         se' con una finestra che offre come proseguire.
         """
         def guscio():
+            """Fa girare il lavoro in un thread, con tutte le reti di sicurezza.
+
+            E' l'involucro che sta intorno a ogni operazione lunga, e fa quattro
+            cose che nessuna di quelle operazioni deve ripetere per conto suo:
+
+            segna che si sta lavorando, cosi' la pagina non ne fa partire due;
+
+            dirotta quello che viene stampato dentro il diario a schermo;
+
+            distingue i crediti finiti da un guasto vero, perche' sono due
+            cose diverse e portano a due messaggi diversi;
+
+            e rimette tutto com'era alla fine, anche quando e' andata male.
+            """
             self._occupato = True
             _verso_pagina('cambiaStato', 'working')
             diario = Diario()
