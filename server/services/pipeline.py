@@ -35,7 +35,7 @@ import shutil
 import subprocess
 import tempfile
 
-from server.config import paths, settings
+from server.config import messages, paths, settings
 from server.enrichment import summary
 from server.utils import text
 
@@ -125,22 +125,34 @@ def _noop(phase, current, total, detail=""):  # pragma: no cover - trivial
     pass
 
 
-# --- Lingua dei messaggi del motore (avanzamento/avvisi) --------------------
-# Il motore è UI-agnostico ma mostra i testi nella lingua dell'interfaccia:
-# ogni operazione pubblica (transcribe_only/save_results/continue_local/
-# translate_only/summary_only/resume) imposta _ENGINE_LANG da options["ui_lang"].
-# I run non sono concorrenti (la GUI ne esegue uno per volta), quindi un global va
-# bene. '_L' pesca dal catalogo condiviso in transcriber (fallback: italiano).
-_ENGINE_LANG = "it"
+# La lingua in cui si traduce e in cui si scrivono i riassunti.
+#
+# Era la lingua dell'interfaccia, e viaggiava fra le opzioni di ogni
+# lavorazione: `options["LINGUA_USCITA"]`. Adesso l'interfaccia ne ha una sola,
+# quindi quell'opzione poteva valere solo questo, e un'opzione che puo' valere
+# una cosa sola non e' un'opzione: e' una costante scritta nel posto sbagliato,
+# dove chi legge continua a chiedersi chi potrebbe cambiarla.
+LINGUA_USCITA = "it"
 
+
+# --- Le scelte fatte nei menu, applicate a questa lavorazione ---------------
 
 def _set_engine_lang(options: dict) -> None:
-    """Applica a inizio lavorazione le opzioni per-run: lingua dei messaggi e
-    modelli Ollama scelti dall'utente (GUI). Chiamata da OGNI punto d'ingresso
-    del motore, così gli override valgono per l'intera lavorazione."""
-    global _ENGINE_LANG
-    _ENGINE_LANG = options.get("ui_lang") or "it"
-    # Modelli Ollama (locale) scelti in GUI: diventano quelli attivi in
+    """Applica i modelli scelti nei menu, all'inizio di ogni lavorazione.
+
+    Va chiamata da OGNI punto d'ingresso del motore, non una volta sola
+    all'avvio: chi usa il programma puo' cambiare modello fra un video e
+    l'altro, e la scelta deve valere per la lavorazione che comincia adesso.
+
+    Scrive dentro ``settings`` e non in variabili proprie, perche' quei valori
+    li leggono anche i moduli che fanno il lavoro vero. E ci scrive con
+    ``settings.NOME = ...``, che e' l'unico modo perche' la modifica si veda
+    anche di la': la spiegazione per esteso sta in cima a settings.py.
+
+    Il nome della funzione e' rimasto quello di quando impostava anche la
+    lingua dei messaggi, che adesso e' una sola e non si imposta piu'.
+    """
+    # Modelli Ollama (locale) scelti nei menu: diventano quelli attivi in
     # transcriber per riassunto/traduzione e analisi visiva.
     m = options.get("ollama_model")
     if m:
@@ -163,8 +175,14 @@ def _set_engine_lang(options: dict) -> None:
 
 
 def _L(key: str, **fmt) -> str:
-    """Messaggio localizzato nella lingua del motore corrente (_ENGINE_LANG)."""
-    return tx.msg(key, _ENGINE_LANG, **fmt)
+    """Un messaggio di avanzamento, preso dal catalogo di server/config/messages.
+
+    Il giro da questa scorciatoia invece di chiamare direttamente ``msg`` e'
+    rimasto da quando il motore doveva scrivere nella lingua dell'interfaccia e
+    la lingua andava passata a ogni chiamata. Adesso non serve piu' a niente di
+    tecnico, ma le ottanta chiamate che la usano si leggono meglio cosi'.
+    """
+    return messages.msg(key, **fmt)
 
 
 # === VIDEO METADATA ===
@@ -383,7 +401,7 @@ def get_cached_credits() -> list[dict]:
 
 def download_audio(url: str, workdir: str, on_progress=_noop) -> str:
     """Scarica la sola traccia audio in 'workdir'. Raises EngineError on failure."""
-    return _shared(tx.download_audio, url, workdir, on_progress, lang=_ENGINE_LANG)
+    return _shared(tx.download_audio, url, workdir, on_progress)
 
 
 def download_video(url: str, workdir: str, on_progress=_noop) -> str:
@@ -391,7 +409,7 @@ def download_video(url: str, workdir: str, on_progress=_noop) -> str:
 
     Da questo unico file si estraggono SIA i fotogrammi SIA l'audio per la
     trascrizione. Raises EngineError on failure."""
-    return _shared(tx.download_video, url, workdir, on_progress, lang=_ENGINE_LANG)
+    return _shared(tx.download_video, url, workdir, on_progress)
 
 
 # === AUDIO SPLITTING (Groq only) ===
@@ -400,8 +418,7 @@ def split_audio(audio_path: str, duration: float, workdir: str, on_progress=_noo
     """Divide l'audio in blocchi da ~CHUNK_SECONDS (16 kHz mono).
 
     Returns a list of (offset_seconds, chunk_path) pairs."""
-    return _shared(tx.split_audio, audio_path, duration, workdir, on_progress,
-                   lang=_ENGINE_LANG)
+    return _shared(tx.split_audio, audio_path, duration, workdir, on_progress)
 
 # === TRANSCRIPTION ===
 
@@ -465,7 +482,7 @@ def transcribe_local(model_name: str, audio_path: str, duration: float, on_progr
     Returns (segments, detected_language). Raises EngineError on failure."""
     return _shared(tx.transcribe_local, model_name, audio_path, duration, on_progress,
                    language=language, meta=meta, resume_cp=resume_cp,
-                   workdir=workdir, lang=_ENGINE_LANG)
+                   workdir=workdir)
 
 # === FILE HELPERS ===
 
@@ -752,11 +769,11 @@ def _translate_outputs(meta: dict, sections: list[dict], options: dict,
     warning is appended instead."""
     # La traduzione punta alla lingua dell'INTERFACCIA: UI italiana -> italiano,
     # UI inglese -> inglese (un utente straniero vuole gli output nella sua lingua).
-    target = options.get("ui_lang", "it") or "it"
+    target = LINGUA_USCITA
     safe_title = text._safe_filename(meta["title"])
     trad_dir = os.path.join(video_dir, tx.transl_subdir())
     base = os.path.join(trad_dir, f"{safe_title}_{target}")
-    lang_label = tx._lang_name(target, _ENGINE_LANG) or target
+    lang_label = tx._lang_name(target) or target
 
     n = len(sections)
     # Resume: ricarica dallo stato le sezioni già tradotte (se una precedente
@@ -847,7 +864,6 @@ def _summarize_outputs(meta: dict, sections: list[dict], options: dict,
         return "skipped"
 
     safe_title = text._safe_filename(meta["title"])
-    ui_lang = options.get("ui_lang", "it")
     sum_dir = os.path.join(video_dir, tx.summary_subdir())
     suffix = tx.SUMMARY_SUFFIX
     base = os.path.join(sum_dir, f"{safe_title}_{suffix}")
@@ -862,7 +878,7 @@ def _summarize_outputs(meta: dict, sections: list[dict], options: dict,
     # metà); 'on_section' salva il parziale dopo ogni sezione. Se la lingua UI è
     # cambiata dall'ultima volta, il parziale (in un'altra lingua) non si riusa.
     done_secs, _persist_summary = tx.resume_sections(
-        meta, "summary", n, "lang", ui_lang or "it")
+        meta, "summary", n, "lang", LINGUA_USCITA)
 
     on_progress("summarize", len(done_secs), n, _L("summarizing"))
     # Lingua del riassunto = lingua dell'interfaccia; il prompt «visivo» (se ci
@@ -924,27 +940,33 @@ def _summarize_outputs(meta: dict, sections: list[dict], options: dict,
     # Riassunto completato e salvato: fase 'done' nello stato.
     tx.update_stage(meta, "summary", status=tx.STAGE_DONE,
                     done=len(summarized), total=len(summarized), sections=summarized,
-                    extra={"lang": ui_lang or "it"})
+                    extra={"lang": LINGUA_USCITA})
     return "done"
 
 
-def _visual_failure_reason(stats: dict, is_groq: bool, lang: str = "it") -> str:
-    """Frase (per i 'warnings' mostrati in GUI) che spiega perché l'analisi visiva
-    non ha prodotto note, partendo dall'esito raccolto in 'stats'. Prima questo
-    caso era SILENZIOSO: restava solo una cartella 'frames' vuota. Localizzata
-    nella lingua dell'interfaccia ('lang')."""
+def _visual_failure_reason(stats: dict, is_groq: bool) -> str:
+    """Perche' l'analisi visiva non ha prodotto niente, detto a parole.
+
+    Prima questo caso era SILENZIOSO: restava una cartella "frames" vuota e
+    nessuna spiegazione, quindi sembrava un guasto del programma anche quando
+    era, per esempio, Groq che aveva finito i crediti a meta' strada.
+
+    Le cause possibili sono distinte apposta, perche' portano a decisioni
+    diverse: se i crediti sono finiti si riprova domani, se il video non aveva
+    fotogrammi utili non c'e' niente da riprovare.
+    """
     if stats.get("unavailable"):
-        return tx.msg("vis_unavail", lang, e=stats["unavailable"])
+        return messages.msg("vis_unavail", e=stats["unavailable"])
     if stats.get("rate_limited"):
-        eng = tx.msg("vfr_eng_groq" if is_groq else "vfr_eng_other", lang)
-        return tx.msg("vfr_ratelimit", lang, eng=eng)
+        eng = messages.msg("vfr_eng_groq" if is_groq else "vfr_eng_other")
+        return messages.msg("vfr_ratelimit", eng=eng)
     frames = stats.get("frames", 0)
     if frames == 0:
-        return tx.msg("vfr_noframes", lang)
+        return messages.msg("vfr_noframes")
     if stats.get("errors"):
-        err = stats.get("last_error") or tx.msg("vfr_unknown_err", lang)
-        return tx.msg("vfr_allerrors", lang, n=frames, err=err)
-    return tx.msg("vfr_notech", lang, n=frames)
+        err = stats.get("last_error") or messages.msg("vfr_unknown_err")
+        return messages.msg("vfr_allerrors", n=frames, err=err)
+    return messages.msg("vfr_notech", n=frames)
 
 
 def save_results(meta: dict, segments: list[dict], engine_label: str, options: dict,
@@ -952,7 +974,7 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
     """PHASE 2 — write all outputs under 'out_root', creating the subfolders.
 
     Layout: out_root/<title>/<trascrizioni>/ (md, txt, json, + pdf if exporting).
-    The subfolder name follows the UI language passed in options["ui_lang"]
+    The subfolder name follows the UI language passed in options["LINGUA_USCITA"]
     (it -> "trascrizioni", en -> "transcriptions"), so an English user gets
     English-named folders. The chosen 'out_root' lets the user save anywhere
     (e.g. outside OneDrive). The 'client' argument (the Groq transcription
@@ -976,9 +998,8 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
 
     # Stato pipeline: la trascrizione è ora su disco. Registra il PIANO (quali
     # fasi erano richieste) così un futuro «Riprendi» sa cosa completare e da dove.
-    _ui_lang = options.get("ui_lang", "it") or "it"
     _want_tr = bool(options.get("translate")) and not tx._is_same_language(
-        meta.get("detected_language"), _ui_lang)
+        meta.get("detected_language"), LINGUA_USCITA)
     _want_sum = bool(options.get("summarize"))
     _st = tx._empty_state(meta, options.get("backend", "groq"))
     _st["stages"]["transcription"]["status"] = tx.STAGE_DONE
@@ -1028,11 +1049,11 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
                 visual_notes = tx.analyze_video_visuals(
                     meta["_video_path"], meta.get("duration") or 0.0, vwork,
                     client=chat_client, frames_out_dir=frames_out,
-                    on_progress=on_progress, stats=vstats, lang=_ENGINE_LANG,
+                    on_progress=on_progress, stats=vstats,
                     segments=segments)
             if visual_notes:
                 tx.save_visual_notes(out_root, meta, visual_notes, vis_label,
-                                     do_export, options.get("ui_lang", "it"), quiet=True)
+                                     do_export, LINGUA_USCITA, quiet=True)
                 visual_info = {
                     "count": len(visual_notes),
                     "with_image": sum(1 for n in visual_notes if n.get("image")),
@@ -1041,7 +1062,7 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
             else:
                 # Nessuna nota: spiega il MOTIVO (prima era silenzioso — cartella
                 # 'frames' vuota e basta) leggendo l'esito riportato in 'vstats'.
-                warnings.append(_visual_failure_reason(vstats, chat_client is not None, _ENGINE_LANG))
+                warnings.append(_visual_failure_reason(vstats, chat_client is not None))
         except Exception as e:
             warnings.append(_L("vis_incomplete", e=e))
         finally:
@@ -1053,9 +1074,9 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
     translated_sections = None
     audio_lang = meta.get("detected_language")
     if options.get("translate"):
-        if tx._is_same_language(audio_lang, _ui_lang):
+        if tx._is_same_language(audio_lang, LINGUA_USCITA):
             # L'audio è già nella lingua dell'interfaccia: tradurre sarebbe inutile.
-            _ln = tx._lang_name(_ui_lang, _ENGINE_LANG) or _ui_lang
+            _ln = tx._lang_name(LINGUA_USCITA) or LINGUA_USCITA
             warnings.append(_L("audio_already", lang=_ln))
         else:
             translated_sections = _translate_outputs(
@@ -1163,8 +1184,7 @@ def summary_only(meta: dict, options: dict, out_root: str, on_progress=_noop) ->
     # La traduzione è salvata col suffisso della lingua di destinazione, che è
     # quella dell'interfaccia: cercarla sempre come "_it" significava, con la UI
     # in inglese, non trovarla mai e riassumere l'originale di nascosto.
-    _ui_lang = options.get("ui_lang") or "it"
-    sections = (tx.load_existing_translation(out_root, disk_meta["title"], _ui_lang)
+    sections = (tx.load_existing_translation(out_root, disk_meta["title"], LINGUA_USCITA)
                 or tx._build_sections(disk_meta, segments))
     visual_notes = tx.load_visual_notes(out_root, disk_meta["title"]) or []
     created, warnings = [], []
@@ -1201,7 +1221,7 @@ def resume(meta: dict, options: dict, out_root: str, on_progress=_noop) -> dict:
         # Stessa lingua con cui la traduzione è stata scritta (vedi summary_only).
         src = (translated
                or tx.load_existing_translation(out_root, disk_meta["title"],
-                                               options.get("ui_lang") or "it")
+                                               LINGUA_USCITA)
                or sections)
         visual_notes = tx.load_visual_notes(out_root, disk_meta["title"]) or []
         summary_status = _summarize_outputs(disk_meta, src, options, video_dir,

@@ -772,7 +772,6 @@ class Api:
             'export': True,
             'source_kind': self.scelte['sorgente'],
             # I nomi delle cartelle seguono la lingua dell'interfaccia.
-            'ui_lang': i18n.LINGUA,
             'translate': self.scelte['translate'],
             'summarize': self.scelte['summarize'],
             'visual': self.scelte['visual'],
