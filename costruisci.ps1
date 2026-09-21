@@ -44,7 +44,7 @@ Set-StrictMode -Version Latest
 
 $Radice     = $PSScriptRoot
 $Dist       = Join-Path $Radice 'dist\EchoScript'
-$Spec       = Join-Path $Radice 'echoscriptapp.spec'
+$Spec       = Join-Path $Radice 'echoscript.spec'
 $Iss        = Join-Path $Radice 'installer\EchoScript.iss'
 $Uscita     = Join-Path $Radice 'installer\output'
 

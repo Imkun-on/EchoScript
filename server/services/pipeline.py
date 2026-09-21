@@ -1,45 +1,62 @@
-# =============================================================================
-#  EchoScript — shared engine (UI-agnostic)
-# =============================================================================
-#  This module is the headless "engine" behind the GUI (EchoScriptApp.py). It
-#  orchestrates the heavy work — fetching video info, downloading audio,
-#  splitting, transcribing (Groq or local), translating and exporting — WITHOUT
-#  touching the terminal: instead of printing to the rich console, it reports
-#  progress through a simple callback, so it works from a graphical front-end
-#  (where there is no terminal at all).
-#
-#  Rapporto con transcriber.py: NON e' un modulo indipendente, e' lo strato di
-#  orchestrazione sopra di esso. Le funzioni media (download, split, trascrizione
-#  locale), gli helper puri (formatter, builder MD/TXT/JSON/PDF, primitive di
-#  traduzione) e il catalogo dei messaggi vivono in transcriber.py e da li'
-#  vengono importati: unica fonte di verita'.
-#
-#  ATTENZIONE alla direzione delle dipendenze: engine importa transcriber, mai
-#  il contrario. La CLI (transcriber.run) ha oggi una sua pipeline separata; per
-#  farla passare da qui andrebbe prima estratta in un modulo a parte, altrimenti
-#  si crea un import circolare.
-# =============================================================================
+"""Il direttore d'orchestra: chiama gli altri nell'ordine giusto.
+
+Che mestiere fa
+    Un lavoro intero, dall'inizio alla fine: leggere cosa c'e' dietro un link,
+    scaricare l'audio, dividerlo in pezzi, trascriverlo (sui server Groq o su
+    questo computer), tradurlo, riassumerlo, guardare i fotogrammi, e scrivere
+    tutto su disco. Ma di queste cose non ne sa fare NESSUNA per conto suo:
+    sono altri moduli a saperle, e questo si limita a chiamarli in fila e a
+    passarsi i risultati di mano in mano.
+
+    E' una distinzione che conta. Il giorno in cui si vuole cambiare come si
+    trascrive, si apre il modulo della trascrizione; il giorno in cui si vuole
+    cambiare l'ORDINE delle cose, o aggiungere un passaggio, si apre questo.
+
+Perche' non stampa niente
+    Perche' non sa chi lo sta guardando. Stampando sul terminale funzionerebbe
+    solo dalla riga di comando, e dentro una finestra quelle righe non le
+    vedrebbe nessuno. Invece riferisce l'avanzamento chiamando una funzione che
+    gli viene passata da fuori: chi lo usa decide se scrivere in un terminale,
+    riempire una barra o non farne niente.
+
+La direzione delle dipendenze, che non va mai invertita
+    Questo modulo importa gli altri; gli altri non importano mai lui. Il giorno
+    in cui un modulo di trascrizione importasse questo, si chiuderebbe un
+    cerchio, e a quel punto Python si ferma con un errore che non indica il
+    file colpevole ma quello sfortunato che e' arrivato per primo.
+"""
 
 from __future__ import annotations
 
 import os
 import sys
 import json
-import time
 import shutil
 import subprocess
 import tempfile
 
-# Make the project root importable so we can reuse transcriber.py's pure helpers.
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
+from server.config import paths
 
-import yt_dlp                       # audio + metadata download
-import transcriber as tx           # reuse the pure helpers/builders/config
+# La radice del progetto deve essere raggiungibile, altrimenti `import
+# transcriber` qui sotto non trova niente.
+#
+# Si chiede a paths invece di contare le cartelle sopra questo file, e non e'
+# pignoleria: contandole, la riga si romperebbe in silenzio il giorno in cui
+# questo file si sposta di un livello, e per giunta darebbe la risposta
+# sbagliata dentro l'eseguibile, dove i moduli non stanno affatto dove stanno i
+# sorgenti. paths sa rispondere in tutti e due i casi.
+if paths.cartella_risorse() not in sys.path:
+    sys.path.insert(0, paths.cartella_risorse())
 
-# Where all results are written (same folder the CLI uses).
-RESULTS_DIR = os.path.join(_PROJECT_ROOT, "results")
+import transcriber as tx            # gli aiutanti condivisi con la riga di comando
+
+# Dove finisce tutto quello che si produce.
+#
+# E' la stessa cartella che usa la riga di comando, e non per comodita': e' il
+# motivo per cui il controllo "questo video l'ho gia' trascritto" funziona a
+# prescindere da come lo si era trascritto la prima volta. Due cartelle diverse
+# vorrebbero dire due archivi che non si vedono fra loro.
+RESULTS_DIR = paths.dati("results")
 
 
 class EngineError(Exception):

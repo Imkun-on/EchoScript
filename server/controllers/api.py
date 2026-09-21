@@ -1,76 +1,49 @@
-"""EchoScriptApp — interfaccia grafica in HTML, con Python come padrone di casa.
+"""Cio' che la pagina puo' chiedere a Python, e la risposta che riceve.
 
-Com'e' fatta
-    Una pagina web mostrata dentro il WebView che Windows ha gia' installato.
-    L'aspetto sta nel CSS, la struttura nell'HTML, il comportamento in un file
-    JavaScript per sezione, e Python fa solo da ponte verso il motore, che non
-    cambia di una riga: ``core/engine.py`` e ``transcriber.py`` non sanno
-    nemmeno che esiste un'interfaccia.
+Che mestiere fa
+    Sta in mezzo. La pagina sa disegnare e raccogliere clic ma non sa
+    trascrivere niente; il motore sa trascrivere ma non sa che esiste una
+    finestra. Ogni metodo pubblico di ``Api`` e' una domanda che la pagina puo'
+    fare: quel metodo chiama chi la sa eseguire e restituisce la risposta in
+    una forma che la pagina possa mostrare.
 
-    L'interfaccia precedente era scritta con un motore grafico Python, un file
-    solo da tremilaquattrocento righe in cui palette, testi, disposizione,
-    finestre modali e orchestrazione stavano mescolati: per spostare un bottone
-    bisognava leggere il codice che lancia i thread. Con la pagina web quelle
-    cose stanno in file diversi, e non c'e' piu' nessun motore grafico da
-    impacchettare: WebView2 e' gia' nel sistema, e l'eseguibile dimagrisce di
-    decine di megabyte.
-
-Come parlano fra loro i due mondi
-    In una sola direzione ciascuno, ed e' questo che tiene il tutto semplice:
-
-      JavaScript -> Python   ``pywebview.api.nome(...)`` chiama direttamente un
-                             metodo di ``Api``. Nessun protocollo, nessun
-                             server, nessuna porta aperta.
-
-      Python -> JavaScript   ``_verso_pagina(...)`` esegue una funzione della
-                             pagina. Serve per cio' che arriva quando vuole lui:
-                             righe di diario, avanzamento, fine lavoro.
+    E' lo stesso mestiere che in un'applicazione web fa un controller, solo
+    senza indirizzi web in mezzo: la pagina scrive ``pywebview.api.carica_info(...)``
+    e finisce dentro il metodo ``carica_info`` qui sotto, direttamente. Niente
+    protocollo, niente server, nessuna porta aperta sul computer.
 
 Il lavoro lungo non blocca la finestra
-    Ogni operazione che dura piu' di un istante gira in un thread suo e
-    riferisce alla pagina mentre procede. La finestra resta viva: si legge il
-    diario, e soprattutto si vede che sta succedendo qualcosa.
+    Ogni operazione che dura piu' di un istante viene messa in un thread suo e
+    riferisce alla pagina mentre procede, passando da ``bridge``. La finestra
+    resta viva: si legge il diario e, soprattutto, si vede che sta succedendo
+    qualcosa invece di una finestra che non risponde.
+
+Perche' il motore si importa tardi
+    Questo modulo viene caricato mentre la finestra si sta aprendo, e in quel
+    momento importare il motore costerebbe qualche secondo di schermo vuoto.
+    Percio' i nomi ``tx`` ed ``engine`` nascono vuoti e li riempie
+    ``carica_motore()``, che gira quando la pagina e' gia' sotto gli occhi di
+    chi aspetta. Nulla di quello che viene eseguito PRIMA di allora puo'
+    toccarli: ne' il corpo di questo modulo, ne' il costruttore di ``Api``.
 """
 from __future__ import annotations
 
 import datetime as _dt
 import io
-import json
 import os
 import re
 import sys
 import threading
 import traceback
 
-_QUI = os.path.dirname(os.path.abspath(__file__))
-for _p in (os.path.join(_QUI, 'core'), _QUI):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
-# ── Cosa si importa subito, e cosa no ────────────────────────────────────────
-#
-# Qui sotto ci sono soltanto cose leggere: i percorsi, i testi, il ponte con la
-# finestra. Messe insieme costano meno di mezzo secondo.
-#
-# Il motore no. transcriber si porta dietro Groq, yt-dlp e Rich, e da solo
-# prende cinque volte il tempo di tutto il resto: e' l'attesa vera, quella che
-# chi ha fatto doppio clic si trova davanti. Importarlo qui vorrebbe dire
-# restare senza niente sullo schermo per tutto quel tempo, perche' finche' un
-# import non finisce non gira nessuna riga di programma e quindi non c'e'
-# nessuno che possa disegnare un'attesa.
-#
-# Percio' si aspetta: la finestra si apre con quello che c'e', e il motore
-# arriva da dietro. Vedi _carica_motore() qui sotto.
-
-from server.config import i18n
-from server.config.paths import dati as _dati, risorsa as _risorsa, impacchettato
-from server.config.strings import TESTI
-
 import webview
 
-i18n.register(TESTI)
+from server.config import i18n
+from server.controllers import bridge
+from server.controllers.bridge import verso_pagina as _verso_pagina
 
-# I due nomi del motore restano vuoti finche' non li riempie _carica_motore().
+
+# I due nomi del motore restano vuoti finche' non li riempie carica_motore().
 tx = None                   # transcriber.py: gli aiutanti condivisi con la CLI
 engine = None               # il direttore d'orchestra
 RISULTATI = ''              # dove finiscono le trascrizioni: lo sa engine
@@ -78,7 +51,7 @@ RISULTATI = ''              # dove finiscono le trascrizioni: lo sa engine
 # Alzato quando il motore e' pronto. La pagina, al suo primo saluto, si mette
 # qui ad aspettare: e' il punto in cui i due tempi si incontrano senza che
 # nessuno dei due debba sapere quanto ha impiegato l'altro.
-_MOTORE_PRONTO = threading.Event()
+MOTORE_PRONTO = threading.Event()
 
 # Le tappe del caricamento, con quanto pesa ciascuna sulla barra.
 #
@@ -93,7 +66,7 @@ _TAPPA_ORCHESTRA = 0.70     # engine: sopra transcriber costa quasi niente
 _TAPPA_PRONTO = 0.80        # da qui in poi riempie la pagina
 
 
-def _carica_motore() -> None:
+def carica_motore() -> None:
     """Importa il motore mentre la finestra e' gia' sullo schermo.
 
     Viene eseguita da pywebview appena il giro della finestra e' partito, cioe'
@@ -113,11 +86,11 @@ def _carica_motore() -> None:
         _avanzamento(_TAPPA_PARTENZA)
         import transcriber as _transcriber
         tx = _transcriber
-        _riempi_cataloghi()
+        riempi_cataloghi()
         _avanzamento(_TAPPA_MOTORE)
 
-        import engine as _engine
-        engine = _engine
+        from server.services import pipeline as _pipeline
+        engine = _pipeline
         _avanzamento(_TAPPA_ORCHESTRA)
 
         # Fuori dall'eseguibile e' la stessa cartella della riga di comando,
@@ -125,19 +98,20 @@ def _carica_motore() -> None:
         # "questo video c'e' gia'" funziona a prescindere da come lo si e'
         # trascritto. Dentro l'eseguibile quella cartella sarebbe temporanea,
         # quindi si va accanto all'.exe.
-        RISULTATI = _dati('results') if impacchettato() else engine.RESULTS_DIR
+        # Una riga sola e non piu' un bivio: adesso e' pipeline a chiedere a
+        # paths dove sta la cartella dei dati, e paths risponde gia' in modo
+        # diverso a seconda che si stia lanciando i sorgenti o l'eseguibile.
+        # Il bivio che c'era qui faceva lo stesso lavoro una seconda volta.
+        RISULTATI = engine.RESULTS_DIR
         _avanzamento(_TAPPA_PRONTO)
     finally:
-        _MOTORE_PRONTO.set()
+        MOTORE_PRONTO.set()
 
 
 def _avanzamento(quota: float) -> None:
     """Dice alla pagina a che punto e' il caricamento, da 0 a 1."""
     _verso_pagina('avanzamentoAvvio', quota)
 
-# La finestra e' l'unica: la si tiene qui perche' i thread di lavoro devono
-# poterla raggiungere per spingere gli aggiornamenti alla pagina.
-_finestra: webview.Window | None = None
 
 # pywebview 6 ha rinominato le costanti dei selettori di file. Si prendono le
 # nuove quando esistono e si ricade sulle vecchie: cosi' il programma non stampa
@@ -145,6 +119,7 @@ _finestra: webview.Window | None = None
 # precedenti.
 _DLG_APRI = getattr(getattr(webview, 'FileDialog', None), 'OPEN',
                     getattr(webview, 'OPEN_DIALOG', 10))
+
 
 
 # ── Cataloghi dei modelli ────────────────────────────────────────────────────
@@ -164,8 +139,8 @@ _GROQ = ('whisper-large-v3-turbo', 'whisper-large-v3')
 
 # Gli altri quattro invece si costruiscono leggendo i cataloghi di
 # transcriber.py, che al momento in cui si legge questo file non e' ancora
-# stato importato: nascono vuoti e li riempie _riempi_cataloghi(), chiamata
-# da _carica_motore() appena il motore c'e'.
+# stato importato: nascono vuoti e li riempie riempi_cataloghi(), chiamata
+# da carica_motore() appena il motore c'e'.
 #
 # Nessuno li legge prima di allora. Chi li usa sono i metodi che rispondono
 # alla pagina, e la pagina non puo' chiedere niente finche' non ha ricevuto
@@ -176,7 +151,7 @@ _GROQ_TESTO: list = []
 _GROQ_VISTA: list = []
 
 
-def _riempi_cataloghi() -> None:
+def riempi_cataloghi() -> None:
     """Costruisce gli elenchi di modelli leggendoli da transcriber.py.
 
     Ogni voce porta con se' la chiave del testo che la descrive
@@ -194,68 +169,6 @@ def _riempi_cataloghi() -> None:
     _GROQ_VISTA = [(nome, f'gm.vis.{k}')
                    for k, (nome, _d) in tx.GROQ_VISION_MODELS.items()]
 
-
-# ── L'avvio: cosa si vede, e in che ordine ───────────────────────────────────
-#
-# Chi fa doppio clic su un eseguibile aspetta diversi secondi mentre il
-# contenuto viene riestratto in una cartella temporanea, e in quei secondi non
-# gira una riga di questo file: se sullo schermo non compare niente, il doppio
-# clic sembra non aver funzionato e se ne fa un altro, avviando due copie. La
-# sequenza e' questa:
-#
-#   1. si importano solo le cose leggere: i percorsi, i testi, il ponte con
-#      la finestra. Meno di mezzo secondo in tutto;
-#   2. la finestra si apre SUBITO, a schermo intero, con dentro la pagina. Il
-#      velo di caricamento la copre: stesso marchio, stesso viola, stesso nero
-#      dell'icona del programma;
-#   3. da dietro il velo si carica il motore, e a ogni pezzo caricato la barra
-#      del velo avanza (vedi _carica_motore in cima al file);
-#   4. la pagina chiede a Python i testi e le scelte. Quella richiesta aspetta
-#      che il motore sia pronto, ed e' li' che i due tempi si incontrano;
-#   5. il velo sfuma e sotto c'e' l'interfaccia.
-#
-# Il punto 2 e' quello che ha cambiato tutto. Prima la finestra restava
-# nascosta e l'attesa la copriva un'immagine disegnata dall'avviatore di
-# PyInstaller: misura fissa, mai riscalata, e come unica cosa animabile una
-# riga di testo lunga diciannove caratteri. Una barra che puo' stare solo in
-# diciannove punti si muove a scatti perche' non puo' fare altro, e un'immagine
-# che non si riscala non puo' stare a schermo intero.
-#
-# Adesso quella schermata e' la pagina stessa, disegnata dal CSS: scorre
-# davvero e si adatta a qualunque schermo.
-
-
-def _json_per_js(valore) -> str:
-    """JSON valido anche come pezzo di codice JavaScript.
-
-    JSON e JavaScript non coincidono del tutto: U+2028 e U+2029 sono caratteri
-    legittimi dentro una stringa JSON ma terminano una riga in JavaScript, quindi
-    finirebbero dentro ``window.funzione(...)`` spezzando l'istruzione a meta'.
-    Un titolo di video che li contiene farebbe fallire la chiamata in silenzio —
-    l'errore lo vedrebbe solo la console della pagina, che qui non si apre. Si
-    riscrivono nella loro forma con la barra rovesciata, che JSON accetta e
-    JavaScript legge come lo stesso carattere.
-    """
-    return (json.dumps(valore, ensure_ascii=False, default=str)
-            .replace('\u2028', '\\u2028').replace('\u2029', '\\u2029'))
-
-
-def _verso_pagina(funzione: str, *argomenti) -> None:
-    """Esegue una funzione JavaScript della pagina, da qualunque thread.
-
-    Gli argomenti passano per JSON: e' l'unico modo di trasportare un dizionario
-    Python dentro la pagina senza inventarsi una codifica, e protegge da apici e
-    accenti che altrimenti spezzerebbero la chiamata.
-    """
-    if _finestra is None:
-        return
-    try:
-        args = ', '.join(_json_per_js(a) for a in argomenti)
-        _finestra.evaluate_js(f'window.{funzione}({args})')
-    except Exception:
-        # Una finestra chiusa mentre un thread stava ancora riferendo non e' un
-        # errore: e' il normale ordine di spegnimento.
-        pass
 
 
 def _ora() -> str:
@@ -422,7 +335,7 @@ class Api:
 
     Qui non si decide niente di importante. Se un video sia una playlist, se
     esista gia' una trascrizione, quanto costera' un lavoro: sono domande a cui
-    rispondono ``core/engine.py`` e ``transcriber.py``, e questo file si limita
+    rispondono ``server/services/pipeline.py`` e ``transcriber.py``, e questo file si limita
     a girare la risposta alla pagina.
     """
 
@@ -504,7 +417,7 @@ class Api:
         risponde lo stesso: la pagina si scopre, l'interfaccia e' a meta' e
         qualcosa non funzionera', ma almeno si VEDE che qualcosa non funziona.
         """
-        _MOTORE_PRONTO.wait(timeout=60)
+        MOTORE_PRONTO.wait(timeout=60)
         self._leggi_scelte()
         threading.Thread(target=self._leggi_ollama, daemon=True).start()
         return {
@@ -619,7 +532,7 @@ class Api:
         ripulirlo a mano.
         """
         try:
-            scelti = _finestra.create_file_dialog(
+            scelti = bridge.attuale().create_file_dialog(
                 _DLG_APRI, allow_multiple=False,
                 file_types=('Testo (*.txt)', 'Tutti (*.*)'))
         except Exception as exc:                       # noqa: BLE001
@@ -723,7 +636,7 @@ class Api:
         """
         estensioni = ' '.join(f'*{e}' for e in sorted(tx.AUDIO_EXTENSIONS))
         try:
-            scelti = _finestra.create_file_dialog(
+            scelti = bridge.attuale().create_file_dialog(
                 _DLG_APRI, allow_multiple=False,
                 file_types=(f'Audio e video ({estensioni})', 'Tutti (*.*)'))
         except Exception as exc:                       # noqa: BLE001
@@ -1300,55 +1213,3 @@ class Api:
                             totale=tx._format_timestamp(int(getattr(exc, 'total_seconds', 0) or 0))),
             'puo_locale': self._src != '' and self._meta is not None,
         })
-
-
-def main() -> None:
-    global _finestra
-
-    _finestra = webview.create_window(
-        'EchoScript',
-        _risorsa('client', 'index.html'),
-        js_api=Api(),
-        # Massimizzata, non a schermo intero, e la differenza si vede subito.
-        #
-        # «Schermo intero» in pywebview vuol dire senza cornice: la finestra
-        # copre tutto, compresa la barra delle applicazioni, e con la cornice
-        # spariscono anche i tre pulsanti in alto a destra. Per un lettore
-        # video va bene; per un programma con cui si lavora no, perche' per
-        # chiuderlo o metterlo da parte bisogna sapere una scorciatoia da
-        # tastiera.
-        #
-        # «Massimizzata» occupa lo stesso spazio ma resta una finestra normale:
-        # barra del titolo, riduci a icona, ingrandisci, chiudi, e la barra
-        # delle applicazioni sotto. Le misure qui sotto non sono un doppione,
-        # sono quelle a cui torna quando la si rimpicciolisce.
-        maximized=True,
-        width=1180,
-        height=800,
-        min_size=(940, 640),
-        # Il fondo della finestra prima che la pagina dipinga: il nero
-        # violaceo del tema (--f1 in style.css). Con qualunque altro colore ogni
-        # avvio comincerebbe con un lampo di un tema che non esiste piu'.
-        background_color='#0a0a16',
-        text_select=False,
-        # Visibile subito. Prima restava nascosta perche' l'attesa la copriva
-        # un'immagine disegnata da PyInstaller; adesso l'attesa e' dentro la
-        # pagina, quindi la pagina deve vedersi. Il lampo bianco con cui
-        # WebView2 dipinge se stesso prima di inizializzarsi non si vede lo
-        # stesso, perche' il fondo della finestra e' gia' il nero del tema.
-    )
-
-    # L'icona della finestra. Su Windows pywebview, se non gliela si passa, la
-    # estrae dall'eseguibile: lanciando i sorgenti finirebbe quella di
-    # python.exe, quindi gliela si indica sempre quando c'e'.
-    icona = _risorsa('assets', 'EchoScript.ico')
-    # 'func' viene eseguito appena il giro della finestra e' partito, cioe'
-    # quando la pagina e il suo velo sono gia' sullo schermo. E' li' dentro che
-    # si carica il motore: e' l'unico posto da cui si possa farlo avendo gia'
-    # qualcosa da mostrare a chi aspetta.
-    webview.start(_carica_motore,
-                  icon=icona if os.path.isfile(icona) else None)
-
-
-if __name__ == '__main__':
-    main()

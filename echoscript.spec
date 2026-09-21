@@ -2,7 +2,7 @@
 # =============================================================================
 #  PyInstaller spec per EchoScript — interfaccia web dentro WebView2.
 # =============================================================================
-#  Costruzione:  pyinstaller echoscriptapp.spec --noconfirm
+#  Costruzione:  pyinstaller echoscript.spec --noconfirm
 #  Risultato:    dist/EchoScript/EchoScript.exe  (+ la cartella _internal/)
 #
 #  Qui non c'e' nessun motore grafico da impacchettare: WebView2 e' gia'
@@ -10,7 +10,7 @@
 #  dentro client/, qualche decina di kilobyte al posto di qualche decina
 #  megabyte.
 #
-#  Cosa entra: l'host (EchoScriptApp.py), i moduli condivisi, il motore, la
+#  Cosa entra: il punto d'ingresso (EchoScript.py), i moduli del server, la
 #  pagina, l'icona, e ffmpeg/ffprobe trovati nel PATH al momento della
 #  costruzione, cosi' l'eseguibile e' autosufficiente.
 #
@@ -49,10 +49,13 @@ for _immagine in (ICONA, os.path.join(ASSETS, 'EchoScript.png')):
     if os.path.isfile(_immagine):
         datas.append((_immagine, 'assets'))
 
-hiddenimports = ['transcriber', 'engine',
-                 'server', 'server.config', 'server.config.i18n',
+hiddenimports = ['transcriber',
+                 'server',
+                 'server.config', 'server.config.i18n',
                  'server.config.paths', 'server.config.strings',
-                 'server.config.splash']
+                 'server.controllers', 'server.controllers.api',
+                 'server.controllers.bridge',
+                 'server.services', 'server.services.pipeline']
 
 for _pacchetto in ('webview', 'faster_whisper', 'av', 'ctranslate2',
                    'onnxruntime', 'tokenizers', 'huggingface_hub', 'yt_dlp',
@@ -66,8 +69,8 @@ for _pacchetto in ('webview', 'faster_whisper', 'av', 'ctranslate2',
         pass
 
 a = Analysis(
-    ['EchoScriptApp.py'],
-    pathex=[ROOT, os.path.join(ROOT, 'core')],
+    ['EchoScript.py'],
+    pathex=[ROOT],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
