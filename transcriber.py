@@ -209,6 +209,14 @@ from server.utils.text import (
 # Le eccezioni con cui le funzioni di lavoro segnalano un guasto senza sapere
 # chi le sta guardando, e le due richiamate di riserva che permettono di
 # riferire l'avanzamento anche quando non sta ascoltando nessuno.
+# Domande sul materiale: da dove arriva, in che lingua parla.
+from server.utils.media import (
+    _is_italian, _is_local, _is_same_language, _lang_code, _lang_name,
+)
+# Le tre domande che si fanno a Ollama prima di cominciare.
+from server.utils.ollama import (
+    _check_ollama, _ollama_has_model, _ollama_installed_models,
+)
 from server.utils.contract import (
     GroqRateLimit, MediaError, TranscriptionInterrupted, _is_rate_limit,
     _never_stop, _noop_progress,
@@ -862,11 +870,6 @@ def _cli_get_playlist_info(url: str) -> dict | None:
         return None
 
 
-def _is_local(meta: dict) -> bool:
-    """True if the metadata describes a LOCAL file (not a YouTube video)."""
-    return meta.get("source") == "local"
-
-
 def local_file_meta(path: str) -> dict:
     """Build a synthetic metadata dict for a LOCAL audio/video file.
 
@@ -888,58 +891,6 @@ def local_file_meta(path: str) -> dict:
         "source": "local",
         "source_path": path,
     }
-
-
-def _lang_name(code: str | None) -> str | None:
-    """Nome di una lingua, in italiano (default) o in inglese ('lang="en"').
-
-    Accetta sia i codici ISO (faster-whisper: 'en') sia i nomi interi di Whisper
-    (Groq: 'english'). None se assente. Il parametro 'lang' serve alla GUI in
-    inglese, che vuole i nomi lingua in inglese ('English' invece di 'Inglese')."""
-    if not code:
-        return None
-    c = str(code).split("-")[0].strip().lower()
-    full = {"italian": "it", "english": "en", "spanish": "es",
-            "french": "fr", "german": "de"}
-    c = full.get(c, c)
-    names_it = {"it": "Italiano", "en": "Inglese", "es": "Spagnolo",
-                "fr": "Francese", "de": "Tedesco"}
-    names = names_it
-    return names.get(c, str(code).upper())
-
-
-def _is_italian(code: str | None) -> bool:
-    """True se il codice/nome lingua indica l'italiano (es. 'it', 'italian').
-
-    Usata per saltare la traduzione automatica quando l'audio è già in italiano
-    (tradurre it -> it sarebbe inutile)."""
-    if not code:
-        return False
-    c = str(code).split("-")[0].strip().lower()
-    return c in ("it", "ita", "italian", "italiano")
-
-
-def _lang_code(code: str | None) -> str | None:
-    """Codice ISO a 2 lettere da un codice/nome lingua ('english'->'en'), o None.
-
-    Normalizza sia i codici (faster-whisper: 'en') sia i nomi interi (Groq:
-    'english') e alcuni nomi italiani ('inglese')."""
-    if not code:
-        return None
-    c = str(code).split("-")[0].strip().lower()
-    full = {"italian": "it", "english": "en", "spanish": "es", "french": "fr",
-            "german": "de", "ita": "it", "eng": "en", "italiano": "it",
-            "inglese": "en", "spagnolo": "es", "francese": "fr", "tedesco": "de"}
-    return full.get(c, c)
-
-
-def _is_same_language(detected: str | None, target: str | None) -> bool:
-    """True se l'audio rilevato è GIÀ nella lingua 'target': tradurre sarebbe inutile.
-
-    Generalizza _is_italian a una lingua qualsiasi: con interfaccia in inglese il
-    target della traduzione è l'inglese, quindi un audio inglese non va tradotto."""
-    d, t = _lang_code(detected), _lang_code(target)
-    return bool(d and t and d == t)
 
 
 # === I MESSAGGI DI AVANZAMENTO: stanno in server/config/messages.py ==========
@@ -1568,453 +1519,33 @@ def _cli_transcribe_local(model_name: str, audio_path: str, duration: float,
         return [], None
 
 
-# === BUILDING THE FINAL DOCUMENT ===
+# === IL DOCUMENTO: sta in server/export/document.py ==========================
+#
+# Markdown, testo semplice e json: lo stesso contenuto per tre destinatari
+# diversi. Non stampano niente, quindi si sono spostate senza toccare una riga.
+from server.export.document import (
+    _build_sections, _md_header, _strip_md_bold, build_md,
+    build_transcript_json, build_txt,
+)
 
-def _build_sections(meta: dict, segments: list[dict]) -> list[dict]:
-    """Group the segments into SECTIONS, the common basis of all text formats.
+# === IL PDF SEMPLICE: sta in server/export/pdf_basic.py ======================
+#
+# Quello che funziona sempre, senza rete e senza browser: e' la rete di
+# sicurezza del PDF ricco.
+from server.export.pdf_basic import (
+    _section_heading, build_pdf,
+)
 
-    If the video has YouTube chapters, it creates one section per chapter,
-    joining the sentences that fall within it into a single flowing paragraph.
-    Otherwise it creates a single "untitled" section with all the text. Each
-    section is: {'start': seconds|None, 'title': str|None, 'text': str}."""
-    chapters = meta["chapters"]
-    sections: list[dict] = []
-    if chapters:
-        for ch in chapters:
-            ch_start = ch.get("start_time", 0)
-            ch_end = ch.get("end_time", float("inf"))
-            text = " ".join(s["text"] for s in segments if ch_start <= s["start"] < ch_end).strip()
-            sections.append({"start": ch_start, "title": ch.get("title") or "Sezione", "text": text})
-    else:
-        sections.append({"start": None, "title": None,
-                         "text": " ".join(s["text"] for s in segments).strip()})
-    return sections
-
-
-def _md_header(title: str, meta: dict, engine_label: str,
-               saved_in: str | None = None) -> list[str]:
-    """Markdown header lines (metadata) shared between original and translated.
-
-    Local files have no channel/views/date, so we show the source path instead.
-    'saved_in' (se passato) aggiunge la riga «Salvato in:» col percorso della
-    cartella di output, subito dopo «Trascritto con:» (usata nei PDF)."""
-    saved_line = [f"- **Salvato in:** {saved_in}"] if saved_in else []
-    if _is_local(meta):
-        return [
-            f"# {title}", "",
-            "- **Sorgente:** File audio locale",
-            f"- **File:** {meta['webpage_url']}",
-            f"- **Durata:** {_format_duration(meta['duration'])}",
-            f"- **Trascritto con:** {engine_label}",
-            *saved_line,
-            "", "---", "",
-        ]
-    return [
-        f"# {title}", "",
-        f"- **Canale:** {meta['channel']}",
-        f"- **Pubblicato:** {_format_upload_date(meta['upload_date'])}",
-        f"- **Visualizzazioni:** {_format_views(meta['views'])}",
-        f"- **Durata:** {_format_duration(meta['duration'])}",
-        f"- **URL:** {meta['webpage_url']}",
-        f"- **Trascritto con:** {engine_label}",
-        *saved_line,
-        "", "---", "",
-    ]
-
-
-def build_md(title: str, meta: dict, engine_label: str, sections: list[dict],
-             with_timestamps: bool = True, saved_in: str | None = None) -> str:
-    """Markdown document: header + sections.
-
-    The timings (if with_timestamps) appear ONLY in the section titles
-    (## [HH:MM:SS] Title); the body is flowing prose, tidier. The translated
-    version passes with_timestamps=False (no timings). 'saved_in' (usato dai PDF)
-    aggiunge la riga «Salvato in:» col percorso di output nell'intestazione."""
-    lines = _md_header(title, meta, engine_label, saved_in=saved_in)
-    for sec in sections:
-        if sec["title"] is None:
-            lines.append("## Trascrizione")
-        elif with_timestamps and sec["start"] is not None:
-            lines.append(f"## [{_format_timestamp(sec['start'])}] {sec['title']}")
-        else:
-            lines.append(f"## {sec['title']}")
-        lines.append("")
-        if sec["text"]:
-            lines.append(sec["text"])
-        lines.append("")
-    return "\n".join(lines)
-
-
-def _strip_md_bold(text: str) -> str:
-    """Toglie i marcatori **grassetto** del Markdown, lasciando il testo nudo.
-
-    Serve al .txt del riassunto: il grassetto è utile a video/PDF, ma nel testo
-    semplice gli asterischi sarebbero solo rumore."""
-    return re.sub(r"\*\*(.+?)\*\*", r"\1", text)
-
-
-def build_txt(title: str, meta: dict, sections: list[dict],
-              markdown: bool = False) -> str:
-    """Clean TXT version (for other LLMs): no timings, sections as [Title].
-
-    Con 'markdown=True' (riassunto) il testo può contenere **grassetto**: viene
-    ripulito dai marcatori per restare testo piano."""
-    def _plain(s: str) -> str:
-        return _strip_md_bold(s) if (markdown and s) else s
-    if _is_local(meta):
-        lines = [
-            title,
-            f"Sorgente: file locale | Durata: {_format_duration(meta['duration'])}",
-            f"File: {meta['webpage_url']}", "",
-        ]
-    else:
-        lines = [
-            title,
-            f"Canale: {meta['channel']} | Pubblicato: {_format_upload_date(meta['upload_date'])} "
-            f"| Durata: {_format_duration(meta['duration'])}",
-            f"URL: {meta['webpage_url']}", "",
-        ]
-    for sec in sections:
-        if sec["title"]:
-            lines.append(f"[{_plain(sec['title'])}]")
-        if sec["text"]:
-            lines.append(_plain(sec["text"]))
-        lines.append("")
-    return "\n".join(lines)
-
-
-def build_transcript_json(meta: dict, segments: list[dict], engine_label: str) -> str:
-    """Structured JSON version, ideal for RAG pipelines / programmatic use.
-
-    Contains the metadata, the chapters and all the segments with their
-    timestamps (start/end in seconds): a format easy to "split" into chunks and
-    index. ensure_ascii=False keeps the accented letters readable; indent=2 makes
-    it readable to the eye as well."""
-    data = {
-        "title": meta["title"],
-        "source": meta.get("source", "youtube"),
-        "channel": meta["channel"],
-        "upload_date": _format_upload_date(meta["upload_date"]),
-        "views": meta["views"],
-        "duration_seconds": meta["duration"],
-        "url": meta["webpage_url"],
-        "engine": engine_label,
-        "chapters": [
-            {"start": ch.get("start_time"), "end": ch.get("end_time"), "title": ch.get("title")}
-            for ch in meta["chapters"]
-        ],
-        "segments": segments,   # each segment is {start, end, text}
-    }
-    return json.dumps(data, ensure_ascii=False, indent=2)
-
-
-# === EXPORT FOR READING (PDF) ===
-
-def _section_heading(sec: dict, with_timestamps: bool) -> str:
-    """Build the visible title of a section (with or without timing)."""
-    if sec["title"] is None:
-        return "Trascrizione"
-    if with_timestamps and sec["start"] is not None:
-        return f"[{_format_timestamp(sec['start'])}] {sec['title']}"
-    return sec["title"]
-
-
-def build_pdf(title: str, meta: dict, sections: list[dict], out_path: str,
-              with_timestamps: bool = True, markdown: bool = False,
-              engine_label: str = "", saved_in: str | None = None) -> None:
-    """Create a readable PDF, divided by chapters, with fpdf2 (no LaTeX).
-
-    Uses Windows' Arial font (TrueType) to support accents and Unicode
-    characters. Large title, metadata in italics, section titles in bold and the
-    body text in paragraphs. Con 'markdown=True' (riassunto) il corpo interpreta
-    il **grassetto** Markdown, così le parole chiave risaltano anche nel PDF.
-    Aggiunge un SOMMARIO cliccabile in testa (link interni ai capitoli) e i
-    segnalibri/outline del PDF; NON stampa data, percorso o numero di pagina.
-    'saved_in' aggiunge la riga «Salvato in:» tra i metadati."""
-    from fpdf import FPDF                  # lazy import: needed only when exporting
-    from fpdf.enums import XPos, YPos       # to bring the cursor back to the left after each cell
-
-    font_dir = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
-    pdf = FPDF(format="A4")
-    pdf.set_auto_page_break(auto=True, margin=15)
-    # We register Arial with a custom family name so as not to conflict with
-    # fpdf's "core" fonts.
-    pdf.add_font("Doc", "", os.path.join(font_dir, "arial.ttf"))
-    pdf.add_font("Doc", "B", os.path.join(font_dir, "arialbd.ttf"))
-    pdf.add_font("Doc", "I", os.path.join(font_dir, "ariali.ttf"))
-    pdf.add_page()
-
-    # Helper: writes a full-width paragraph and brings the cursor back to the left
-    # margin (otherwise the next multi_cell would have no space).
-    def cell(h: float, txt: str, md: bool = False) -> None:
-        pdf.multi_cell(0, h, txt, new_x=XPos.LMARGIN, new_y=YPos.NEXT, markdown=md)
-
-    # Title
-    pdf.set_font("Doc", "B", 18)
-    cell(9, title)
-    pdf.ln(1)
-    # Metadata
-    pdf.set_font("Doc", "I", 10)
-    if _is_local(meta):
-        cell(5, f"Sorgente: file locale  |  Durata: {_format_duration(meta['duration'])}")
-        cell(5, meta["webpage_url"])
-    else:
-        cell(5, f"Canale: {meta['channel']}  |  Pubblicato: {_format_upload_date(meta['upload_date'])}"
-                f"  |  Durata: {_format_duration(meta['duration'])}")
-        cell(5, meta["webpage_url"])
-    if engine_label:
-        cell(5, f"Trascritto con: {engine_label}")
-    if saved_in:
-        cell(5, f"Salvato in: {saved_in}")
-    pdf.ln(4)
-
-    for sec in sections:
-        pdf.set_font("Doc", "B", 14)
-        # Ogni capitolo diventa una voce dei SEGNALIBRI/outline del PDF: è il
-        # «Sommario» cliccabile nel pannello laterale del lettore, che rimanda al
-        # capitolo. Nessun riquadro-indice dentro la pagina.
-        if sec.get("title"):
-            try:
-                pdf.start_section(_section_heading(sec, with_timestamps))
-            except Exception:
-                pass
-        cell(7, _section_heading(sec, with_timestamps))
-        pdf.ln(1)
-        if sec["text"]:
-            pdf.set_font("Doc", "", 11)
-            cell(6, sec["text"], md=markdown)
-        pdf.ln(3)
-
-    pdf.output(_lp(out_path))
-
-
-# === TRADUZIONE (Google Translate in cloud · Ollama in locale) ==============
-# Riusa una trascrizione GIÀ salvata e ne produce una versione tradotta, senza
-# ri-trascrivere (quindi senza spendere crediti di trascrizione). Due motori,
-# scelti come per il riassunto — cioè dal BACKEND, non dalla presenza di una
-# chiave: col backend Groq si usa Google Translate (deep_translator, endpoint
-# gratuito, nessuna API key dedicata); col backend locale si traduce con Ollama,
-# così una lavorazione «sul mio computer» resta 100% offline anche quando una
-# chiave è caricata per altri lavori.
-
-# Google Translate accetta ~5000 caratteri per richiesta: spezziamo il testo in
-# blocchi più piccoli sui confini di frase, per stare comodi sotto il limite.
-_TRANSLATE_MAX_CHARS = 4500
-
-
-def _translate_ollama(text: str, target: str) -> str:
-    """Traduce un testo verso 'target' con un modello locale via Ollama (HTTP).
-
-    Usato in modalità locale per restare 100% offline (nessun passaggio da
-    Google Translate). temperature=0 per una resa fedele e deterministica."""
-    import urllib.request
-    lang = _lang_name(target) or target
-    system = (
-        f"Sei un traduttore professionista. Traduci il testo dell'utente in "
-        f"{lang} in modo fedele e naturale. Conserva integralmente il "
-        f"significato, i nomi propri, le cifre e la punteggiatura. Mantieni "
-        f"INVARIATI, nella loro forma inglese, i termini tecnici e gli "
-        f"inglesismi di uso comune (per esempio «fine tuning», «deploy», "
-        f"«streaming», «feedback», «machine learning», «commit», «buffer», "
-        f"«dataset», «prompt»): non tradurli né adattarli. Non aggiungere e non "
-        f"omettere nulla. Rispondi esclusivamente con la traduzione, senza "
-        f"preamboli, note, virgolette o commenti.")
-    payload = {
-        "model": settings.OLLAMA_TRANSLATE_MODEL,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": text},
-        ],
-        "stream": False,
-        "options": {"temperature": 0.0, "num_ctx": OLLAMA_NUM_CTX},
-    }
-    req = urllib.request.Request(
-        OLLAMA_HOST + "/api/chat",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=600) as r:
-        data = json.loads(r.read().decode("utf-8"))
-    return (data.get("message", {}).get("content") or "").strip()
-
-
-def _translate_engine_label(target: str = "it", local: bool = False) -> str:
-    """Etichetta del motore di traduzione, mostrata in testa ai file salvati."""
-    lang = _lang_name(target) or target
-    if local:
-        return f"Traduzione automatica (locale · Ollama {settings.OLLAMA_TRANSLATE_MODEL}) → {lang}"
-    return f"Traduzione automatica (Google Translate) → {lang}"
-
-
-# Inglesismi / termini tecnici che devono restare in inglese anche nella
-# traduzione italiana. Google Translate non è istruibile via prompt, perciò li
-# «proteggiamo» con un segnaposto (NGZ<n>ZQ) prima di tradurre e li ripristiniamo
-# dopo: quel formato (maiuscole + cifra) attraversa Google Translate INTATTO
-# (verificato), così il termine originale non viene mai tradotto.
-_ANGLICISMS = [
-    "fine tuning", "fine-tuning", "machine learning", "deep learning",
-    "data science", "big data", "cloud computing", "code review",
-    "problem solving", "user experience", "smart working", "team building",
-    "know-how", "know how", "step by step", "open source", "real time",
-    "deploy", "deployment", "devops", "commit", "merge", "rebase", "branch",
-    "buffer", "streaming", "stream", "streamer", "download", "upload",
-    "feedback", "deadline", "meeting", "brainstorming", "briefing", "budget",
-    "business", "dataset", "endpoint", "export", "import", "firmware",
-    "framework", "hardware", "software", "hosting", "input", "output", "layout",
-    "login", "logout", "marketing", "network", "online", "offline", "overflow",
-    "password", "performance", "plugin", "prompt", "query", "rendering",
-    "router", "screenshot", "server", "setup", "smartphone", "startup",
-    "target", "template", "testing", "thread", "token", "toolkit", "tool",
-    "trend", "tuning", "update", "upgrade", "username", "wireless", "workflow",
-    "workshop", "backup", "benchmark", "cache", "container", "cookie",
-    "debugging", "debug", "encoder", "decoder", "gaming", "hashtag",
-    "influencer", "kernel", "latency", "mainstream", "malware", "middleware",
-    "patch", "pipeline", "podcast", "proxy", "refactoring", "release",
-    "rollback", "scroll", "shader", "sprint", "stack", "string", "throughput",
-    "timeout", "trigger", "webcam", "widget", "browser", "frontend", "backend",
-    "fullstack", "boilerplate", "changelog", "hotfix", "webinar", "wildcard",
-    "ransomware", "spyware", "touchscreen", "playlist",
-]
-# Regex unica, alternative ordinate dalla più lunga (le locuzioni multi-parola
-# devono avere la precedenza sulle singole parole al loro interno).
-_ANGLICISM_RE = re.compile(
-    r"\b(" + "|".join(re.escape(w) for w in sorted(_ANGLICISMS, key=len, reverse=True))
-    + r")\b", re.IGNORECASE)
-_ANGLICISM_TOKEN_RE = re.compile(r"NGZ\d+ZQ")
-
-
-def _protect_anglicisms(text: str) -> tuple[str, dict[str, str]]:
-    """Sostituisce gli inglesismi con segnaposto NGZ<n>ZQ (che Google preserva).
-
-    Restituisce (testo_con_segnaposto, mappa segnaposto→forma originale)."""
-    mapping: dict[str, str] = {}
-
-    def repl(m: "re.Match") -> str:
-        token = f"NGZ{len(mapping)}ZQ"
-        mapping[token] = m.group(0)   # conserva la forma esatta trovata nel testo
-        return token
-
-    return _ANGLICISM_RE.sub(repl, text), mapping
-
-
-def _restore_anglicisms(text: str, mapping: dict[str, str]) -> str:
-    """Ripristina gli inglesismi originali al posto dei segnaposto."""
-    for token, original in mapping.items():
-        text = text.replace(token, original)
-    # Sicurezza: se qualche segnaposto fosse sopravvissuto storpiato, lo togliamo.
-    return _ANGLICISM_TOKEN_RE.sub("", text)
-
-
-def _make_translator(target: str = "it", local: bool = False):
-    """Sceglie il motore di traduzione e restituisce una funzione (testo -> testo).
-
-    In modalità locale traduce con Ollama (100% offline); altrimenti usa Google
-    Translate (cloud, gratuito, sorgente autorilevata). In entrambi i casi gli
-    inglesismi restano in inglese: via prompt con Ollama, via segnaposto con
-    Google Translate. Solleva un RuntimeError chiaro se il motore scelto non è
-    disponibile (Ollama non raggiungibile o deep_translator non installato)."""
-    if local:
-        _check_ollama()
-        return lambda text: _translate_ollama(text, target)
-    try:
-        from deep_translator import GoogleTranslator
-    except ImportError:
-        raise RuntimeError("deep_translator non installato. Esegui:  "
-                           "pip install deep-translator")
-    google = GoogleTranslator(source="auto", target=target).translate
-
-    def translate(text: str) -> str:
-        protected, mapping = _protect_anglicisms(text)
-        result = google(protected) or ""
-        return _restore_anglicisms(result, mapping)
-
-    return translate
-
-
-def _split_for_translation(text: str) -> list[str]:
-    """Spezza 'text' in blocchi <= _TRANSLATE_MAX_CHARS sui confini di frase.
-
-    Se una singola frase supera il limite, viene tagliata a forza per non
-    eccedere il massimo accettato da Google Translate."""
-    text = (text or "").strip()
-    if not text:
-        return []
-    # Confini di frase mantenendo la punteggiatura (split su spazio dopo .?!).
-    parts = re.split(r"(?<=[.!?])\s+", text)
-    chunks: list[str] = []
-    buf = ""
-    for part in parts:
-        while len(part) > _TRANSLATE_MAX_CHARS:
-            # Frase mostruosa: tagliala in pezzi grezzi. Prima però va chiuso il
-            # blocco in preparazione: senza, i pezzi di questa frase finirebbero
-            # in coda PRIMA del testo che li precede, e la traduzione (o il
-            # riassunto, che riusa questo splitter) uscirebbe con i paragrafi
-            # scambiati di posto.
-            if buf:
-                chunks.append(buf)
-                buf = ""
-            chunks.append(part[:_TRANSLATE_MAX_CHARS])
-            part = part[_TRANSLATE_MAX_CHARS:]
-        if len(buf) + len(part) + 1 > _TRANSLATE_MAX_CHARS:
-            if buf:
-                chunks.append(buf)
-            buf = part
-        else:
-            buf = f"{buf} {part}".strip()
-    if buf:
-        chunks.append(buf)
-    return chunks
-
-
-def _translate_text(translate_fn, text: str) -> str:
-    """Traduce un testo (anche lungo) unendo i blocchi tradotti.
-
-    'translate_fn' è la funzione restituita da _make_translator (testo -> testo):
-    Google Translate (cloud) oppure Ollama (locale)."""
-    out = []
-    for chunk in _split_for_translation(text):
-        try:
-            out.append(translate_fn(chunk) or "")
-        except Exception:
-            # Un blocco fallito non deve far saltare l'intera traduzione:
-            # si tiene l'originale come fallback per quel pezzo.
-            out.append(chunk)
-    return " ".join(s for s in out if s).strip()
-
-
-def translate_sections(sections: list[dict], target: str = "it",
-                       local: bool = False, on_progress=None,
-                       done_sections: list[dict] | None = None,
-                       on_section=None) -> list[dict]:
-    """Traduce titolo e testo di ogni sezione verso 'target' (default italiano).
-
-    Con 'local=True' la traduzione avviene in locale via Ollama (100% offline);
-    altrimenti via Google Translate. 'on_progress(i, n)' (opzionale) viene
-    chiamato dopo ogni sezione tradotta, per aggiornare una barra/spinner.
-    Restituisce nuove sezioni (non muta quelle in ingresso).
-
-    Per il RESUME: 'done_sections' sono le sezioni già tradotte in una precedente
-    esecuzione (le prime len(done_sections) di 'sections'), che vengono saltate;
-    'on_section(list)' (opzionale) è chiamato dopo OGNI nuova sezione con l'elenco
-    completo tradotto finora, per persistere il parziale su disco (così un
-    interruzione a metà è riprendibile esattamente da lì)."""
-    translate_fn = _make_translator(target, local)
-    out: list[dict] = list(done_sections or [])
-    start_index = len(out)
-    n = len(sections)
-    if on_progress and start_index:
-        on_progress(start_index, n)  # riflette sulla barra il lavoro già fatto
-    for i in range(start_index, n):
-        sec = sections[i]
-        title = sec.get("title")
-        new_title = (_translate_text(translate_fn, title) if title else title)
-        new_text = _translate_text(translate_fn, sec.get("text", ""))
-        out.append({"start": sec.get("start"), "title": new_title, "text": new_text})
-        if on_section:
-            on_section(out)
-        if on_progress:
-            on_progress(i + 1, n)
-    return out
-
+# === LA TRADUZIONE: sta in server/enrichment/translation.py ==================
+#
+# Google Translate in nuvola oppure Ollama in locale, piu' il lavoro di
+# proteggere gli anglicismi perche' non vengano tradotti alla lettera.
+from server.enrichment.translation import (
+    _ANGLICISMS, _ANGLICISM_RE, _ANGLICISM_TOKEN_RE, _TRANSLATE_MAX_CHARS,
+    _make_translator, _protect_anglicisms, _restore_anglicisms,
+    _split_for_translation, _translate_engine_label, _translate_ollama,
+    _translate_text, translate_sections,
+)
 
 # === API KEY ===
 
@@ -2469,29 +2000,6 @@ def _vision_ollama(b64: str, context: str = "") -> str:
     with urllib.request.urlopen(req, timeout=600) as r:
         data = json.loads(r.read().decode("utf-8"))
     return _strip_think(data.get("message", {}).get("content") or "")
-
-
-def _ollama_installed_models(timeout: float = 3) -> set[str] | None:
-    """Nomi dei modelli GIÀ scaricati in Ollama (da /api/tags).
-
-    None se Ollama non è raggiungibile (spento/non installato): chi chiama può
-    così distinguere «nessun modello» da «nessuna informazione»."""
-    import urllib.request
-    try:
-        with urllib.request.urlopen(OLLAMA_HOST + "/api/tags", timeout=timeout) as r:
-            tags = json.loads(r.read().decode("utf-8"))
-        return {m.get("name", "") for m in tags.get("models", [])}
-    except Exception:
-        return None
-
-
-def _ollama_has_model(name: str, installed: set[str]) -> bool:
-    """True se 'name' risulta scaricato. Con il tag esplicito (qwen2.5vl:3b) il
-    confronto è esatto; senza tag (llama3.2-vision) basta lo stesso nome base
-    (llama3.2-vision:latest conta)."""
-    if ":" in name:
-        return name in installed or name + ":latest" in installed
-    return any(n.split(":")[0] == name for n in installed)
 
 
 def _check_ollama_vision() -> None:
@@ -3582,19 +3090,6 @@ def _summarize_groq(client, text: str, section_title: str | None) -> str:
         temperature=0.3,
     )
     return (resp.choices[0].message.content or "").strip()
-
-
-def _check_ollama() -> None:
-    """Verifica che Ollama sia raggiungibile; altrimenti spiega come installarlo."""
-    import urllib.request
-    try:
-        with urllib.request.urlopen(OLLAMA_HOST + "/api/tags", timeout=5) as r:
-            r.read()
-    except Exception:
-        raise RuntimeError(
-            f"Ollama non raggiungibile su {OLLAMA_HOST}. Per il riassunto in locale "
-            "installa Ollama (https://ollama.com), avvialo e scarica un modello, "
-            f"es:  ollama pull {settings.OLLAMA_MODEL}")
 
 
 def _summarize_ollama(text: str, section_title: str | None) -> str:
