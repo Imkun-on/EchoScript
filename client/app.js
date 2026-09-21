@@ -50,6 +50,7 @@ function riempiTesti() {
   if (!$('#diario').dataset.pieno) svuotaDiario();
   if (window.riempiMotore) window.riempiMotore();
   if (window.riempiTrascrivi) window.riempiTrascrivi();
+  if (window.aggiornaCarte) window.aggiornaCarte();
 }
 
 /* ── Cambio sezione ───────────────────────────────────────────────────────── */
@@ -88,6 +89,14 @@ function cambiaSezione(nome, immediato) {
       s.classList.toggle('attiva', s.dataset.sez === nome);
     });
     spostaLavoro(nome);
+    // I riquadri si riscrivono QUI, e non prima.
+    //
+    // Prima era nel punto in cui si cambia il motore, che avviene subito. Ma
+    // la sezione che se ne va resta a schermo altri due decimi di secondo
+    // mentre sfuma, e in quei due decimi si vedevano i nomi dei modelli
+    // dell'altro motore comparire dentro la sezione che stava ancora
+    // uscendo: il cambiamento si vedeva prima di essere avvenuto.
+    if (window.aggiornaCarte) window.aggiornaCarte();
   };
 
   if (uscente && uscente.dataset.sez !== nome && !immediato) {
@@ -420,6 +429,9 @@ function avvia() {
 
     if (window.initMotore) window.initMotore(dati);
     if (window.initTrascrivi) window.initTrascrivi(dati);
+    // I tre riquadri per ultimi: riassumono quello che i due qui sopra hanno
+    // appena messo a posto, quindi devono leggere una situazione gia' pronta.
+    if (window.initCarte) window.initCarte();
     passoAvvio();                     // 4. le due sezioni sono pronte
 
     riempiTesti();

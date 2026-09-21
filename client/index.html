@@ -127,9 +127,21 @@
   <div class="guscio">
 
     <aside class="barra">
+      <!-- Il marchio: lo stesso disegno dell'icona del programma, cosi' chi
+           l'ha appena lanciata dal desktop ritrova la stessa cosa dentro la
+           finestra. E' un disegno vettoriale e non l'immagine dell'icona,
+           perche' resta nitido a qualunque misura e prende il colore dal tema
+           invece di portarsi dietro il proprio. -->
       <div class="marchio">
+        <svg class="marchio-icona" viewBox="0 0 100 100" aria-hidden="true">
+          <rect x="14" y="34" width="8"  height="32" rx="4" fill="currentColor"/>
+          <rect x="26" y="22" width="8"  height="56" rx="4" fill="currentColor" class="alta"/>
+          <rect x="38" y="30" width="8"  height="40" rx="4" fill="currentColor"/>
+          <rect x="54" y="32" width="32" height="8"  rx="4" fill="currentColor" class="riga"/>
+          <rect x="54" y="46" width="26" height="8"  rx="4" fill="currentColor" class="riga"/>
+          <rect x="54" y="60" width="20" height="8"  rx="4" fill="currentColor" class="riga"/>
+        </svg>
         <div class="logo">EchoScript</div>
-        <div class="sottotitolo" data-t="app.subtitle"></div>
       </div>
 
       <nav class="menu">
@@ -164,10 +176,128 @@
            cambia solo la stanza in cui si trova. -->
       <div id="postazione">
 
-        <section class="vetro">
-          <div class="riga">
-            <div class="gruppo stretto">
-              <label data-t="src.label"></label>
+        <!-- I tre riquadri: cosa serve sapere prima di poter cominciare.
+             Modelli, chiave e video. Sono affiancati e della stessa misura
+             perche' sono tre risposte alla stessa domanda, «con cosa lo
+             faccio»: metterli uno sotto l'altro suggerirebbe un ordine che non
+             c'e', e nasconderebbe sotto il bordo dello schermo quello che
+             capita di dover cambiare piu' spesso.
+
+             Ogni riquadro mostra la scelta fatta e un pulsante per cambiarla.
+             Il come si cambia sta in una finestra a parte: sono tre menu a
+             tendina o un modulo intero, e tenerli sempre a schermo vorrebbe
+             dire una pagina piena di cose gia' decise. -->
+        <div class="carte">
+
+          <section class="vetro carta" id="carta-modelli">
+            <div class="carta-testa">
+              <svg class="icona-pannello" viewBox="0 0 24 24"><use href="#i-cpu"/></svg>
+              <span data-t="carta.modelli"></span>
+            </div>
+            <div class="carta-corpo" id="riepilogo-modelli"></div>
+            <button id="apri-modelli" class="bottone contorno carta-azione">
+              <svg class="icona" viewBox="0 0 24 24"><use href="#i-cpu"/></svg>
+              <span data-t="carta.modelli.bottone"></span>
+            </button>
+          </section>
+
+          <section class="vetro carta" id="carta-chiave">
+            <div class="carta-testa">
+              <svg class="icona-pannello" viewBox="0 0 24 24"><use href="#i-chiave"/></svg>
+              <span data-t="carta.chiave"></span>
+            </div>
+            <div class="carta-corpo" id="riepilogo-chiave">
+              <!-- Del file caricato si mostra il nome e nient'altro: la chiave
+                   e' un segreto, e vederla scritta a schermo non serve a
+                   nessuno. -->
+              <div class="stato-chiave" id="stato-chiave"></div>
+              <button id="ottieni-chiave" class="bottone nudo" data-t="eng.key.get"></button>
+            </div>
+            <button id="carica-chiave" class="bottone contorno carta-azione">
+              <svg class="icona" viewBox="0 0 24 24"><use href="#i-chiave"/></svg>
+              <span data-t="carta.chiave.bottone"></span>
+            </button>
+          </section>
+
+          <section class="vetro carta" id="carta-video">
+            <div class="carta-testa">
+              <svg class="icona-pannello" viewBox="0 0 24 24"><use href="#i-video"/></svg>
+              <span data-t="carta.video"></span>
+            </div>
+            <div class="carta-corpo" id="riepilogo-video"></div>
+            <button id="apri-video" class="bottone contorno carta-azione">
+              <svg class="icona" viewBox="0 0 24 24"><use href="#i-cerca"/></svg>
+              <span data-t="carta.video.bottone"></span>
+            </button>
+          </section>
+
+        </div>
+
+        <!-- Il pulsante che fa partire tutto sta da solo, sotto i tre riquadri
+             e non dentro uno di essi: non appartiene a nessuno dei tre, viene
+             dopo che tutti e tre hanno una risposta. -->
+        <div class="azioni azioni-avvio">
+          <button id="avvia" class="bottone pieno grande">
+            <svg class="icona" viewBox="0 0 24 24"><use href="#i-avvia" id="icona-avvia"/></svg>
+            <span id="testo-avvia" data-t="src.start"></span>
+          </button>
+        </div>
+
+        <!-- ══ IL MAGAZZINO ══════════════════════════════════════════════
+             Qui dentro sta il contenuto vero delle due finestre, nascosto.
+
+             Non viene costruito al momento di aprirle, e non e' pigrizia: i
+             menu dei modelli li riempie Python all'avvio, e gli ascoltatori
+             che reagiscono a un cambio sono gia' attaccati a QUESTI elementi.
+             Ricostruirli ogni volta vorrebbe dire riattaccare tutto e
+             ricordarsi quale valore era selezionato.
+
+             Aprendo una finestra questi blocchi ci vengono spostati dentro, e
+             alla chiusura tornano qui. Sono sempre gli stessi oggetti, quindi
+             si portano dietro stato e collegamenti senza che nessuno ci
+             pensi. -->
+        <div id="magazzino" hidden>
+
+          <div id="modulo-modelli-locale">
+            <p class="nota-riga" data-t="eng.local.hint"></p>
+            <div class="riga incolonna">
+              <div class="gruppo largo">
+                <label data-t="eng.model.whisper"></label>
+                <select id="m-whisper" class="campo"></select>
+              </div>
+              <div class="gruppo largo">
+                <label data-t="eng.model.ollama"></label>
+                <select id="m-ollama" class="campo"></select>
+              </div>
+              <div class="gruppo largo">
+                <label data-t="eng.model.vision"></label>
+                <select id="m-vision" class="campo"></select>
+              </div>
+            </div>
+          </div>
+
+          <div id="modulo-modelli-cloud">
+            <p class="nota-riga" data-t="eng.groq.hint"></p>
+            <div class="riga incolonna">
+              <div class="gruppo largo">
+                <label data-t="eng.model.groq"></label>
+                <select id="m-groq" class="campo"></select>
+              </div>
+              <div class="gruppo largo">
+                <label data-t="eng.model.groqtesto"></label>
+                <select id="m-groq-testo" class="campo"></select>
+              </div>
+              <div class="gruppo largo">
+                <label data-t="eng.model.groqvista"></label>
+                <select id="m-groq-vista" class="campo"></select>
+              </div>
+            </div>
+          </div>
+
+          <div id="modulo-video">
+            <div class="riga">
+              <div class="gruppo stretto">
+                <label data-t="src.label"></label>
               <select id="sorgente" class="campo">
                 <option value="youtube" data-t="src.youtube"></option>
                 <option value="local" data-t="src.local"></option>
@@ -220,18 +350,14 @@
             </label>
           </div>
 
-          <div class="azioni">
-            <button id="leggi" class="bottone contorno">
-              <svg class="icona" viewBox="0 0 24 24"><use href="#i-cerca"/></svg>
-              <span data-t="src.load"></span>
-            </button>
-            <div class="spazio"></div>
-            <button id="avvia" class="bottone pieno">
-              <svg class="icona" viewBox="0 0 24 24"><use href="#i-avvia" id="icona-avvia"/></svg>
-              <span id="testo-avvia" data-t="src.start"></span>
-            </button>
+            <div class="azioni azioni-modulo">
+              <button id="leggi" class="bottone contorno">
+                <svg class="icona" viewBox="0 0 24 24"><use href="#i-cerca"/></svg>
+                <span data-t="src.load"></span>
+              </button>
+            </div>
           </div>
-        </section>
+        </div>
 
         <div class="scorciatoie" data-t="scorciatoie"></div>
 
@@ -303,28 +429,7 @@
           <h1 data-t="sez.locale.title"></h1>
           <p data-t="sez.locale.desc"></p>
         </header>
-
-        <section class="vetro colonna" id="pannello-locale">
-          <div class="titolo-pannello">
-            <svg class="icona-pannello" viewBox="0 0 24 24"><use href="#i-casa"/></svg>
-            <span data-t="eng.local.title"></span>
-          </div>
-          <p class="nota-riga" data-t="eng.local.hint"></p>
-          <div class="riga">
-            <div class="gruppo largo">
-              <label data-t="eng.model.whisper"></label>
-              <select id="m-whisper" class="campo"></select>
-            </div>
-            <div class="gruppo largo">
-              <label data-t="eng.model.ollama"></label>
-              <select id="m-ollama" class="campo"></select>
-            </div>
-            <div class="gruppo largo">
-              <label data-t="eng.model.vision"></label>
-              <select id="m-vision" class="campo"></select>
-            </div>
-          </div>
-        </section>
+        <hr class="divisore">
 
         <div class="slot-lavoro"></div>
       </div>
@@ -337,46 +442,7 @@
           <h1 data-t="sez.cloud.title"></h1>
           <p data-t="sez.cloud.desc"></p>
         </header>
-
-        <section class="vetro colonna" id="pannello-groq">
-          <div class="titolo-pannello">
-            <svg class="icona-pannello" viewBox="0 0 24 24"><use href="#i-nuvola"/></svg>
-            <span data-t="eng.groq.title"></span>
-          </div>
-          <p class="nota-riga" data-t="eng.groq.hint"></p>
-          <div class="riga">
-            <div class="gruppo largo">
-              <label data-t="eng.model.groq"></label>
-              <select id="m-groq" class="campo"></select>
-            </div>
-            <div class="gruppo largo">
-              <label data-t="eng.model.groqtesto"></label>
-              <select id="m-groq-testo" class="campo"></select>
-            </div>
-            <div class="gruppo largo">
-              <label data-t="eng.model.groqvista"></label>
-              <select id="m-groq-vista" class="campo"></select>
-            </div>
-          </div>
-        </section>
-
-        <section class="vetro colonna">
-          <div class="titolo-pannello">
-            <svg class="icona-pannello" viewBox="0 0 24 24"><use href="#i-chiave"/></svg>
-            <span data-t="eng.key"></span>
-          </div>
-          <p class="nota-riga" data-t="eng.key.hint"></p>
-          <div class="azioni azioni-chiave">
-            <button id="carica-chiave" class="bottone contorno">
-              <svg class="icona" viewBox="0 0 24 24"><use href="#i-chiave"/></svg>
-              <span data-t="eng.key.load"></span>
-            </button>
-            <button id="ottieni-chiave" class="bottone nudo" data-t="eng.key.get"></button>
-          </div>
-          <!-- Del file caricato si mostra il nome e nient'altro: la chiave e'
-               un segreto, e vederla scritta a schermo non serve a nessuno. -->
-          <div class="stato-chiave" id="stato-chiave"></div>
-        </section>
+        <hr class="divisore">
 
         <div class="slot-lavoro"></div>
       </div>
@@ -438,6 +504,7 @@
   <script src="app.js"></script>
   <script src="features/engine.js"></script>
   <script src="features/transcribe.js"></script>
+  <script src="features/carte.js"></script>
   <script>avvia();</script>
 </body>
 </html>

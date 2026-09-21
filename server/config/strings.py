@@ -21,7 +21,6 @@ from __future__ import annotations
 TESTI: dict[str, str] = {
 
     # ── Cornice: marchio, barra laterale, sezioni ────────────────────────────
-    'app.subtitle':     'Ascolta  ·  Trascrivi  ·  Traduci',
 
     'menu.locale':      'Locale',
     'menu.cloud':       'Cloud',
@@ -34,6 +33,26 @@ TESTI: dict[str, str] = {
     'sez.cloud.desc':   "Quello che parte da qui gira in nuvola, con i modelli scelti "
                         "qui sotto e a carico della chiave. Molto più veloce, ma "
                         "l'audio viene inviato a Groq e ogni lavoro consuma crediti.",
+
+    # ── I tre riquadri e le loro finestre ────────────────────────────────────
+    # Modelli, chiave e video: le tre cose da sapere prima di poter cominciare.
+    # Ogni riquadro dice cosa si e' scelto; il come si sceglie sta in una
+    # finestra, e queste sono le sue intestazioni.
+    'carta.modelli':    'Modelli',
+    'carta.modelli.bottone': 'Scegli i modelli',
+    'carta.chiave':     'Chiave API',
+    'carta.chiave.bottone': 'Carica la chiave',
+    'carta.video':      'Video',
+    'carta.video.bottone': 'Scegli cosa trascrivere',
+    # Il posto di un valore che non c'è ancora. Una riga vuota si legge come un
+    # difetto; una riga che dice di essere vuota si legge come uno stato.
+    'carta.vuoto':      'da scegliere',
+
+    'fin.modelli.locale': 'I modelli sul tuo computer',
+    'fin.modelli.cloud': 'I modelli sui server Groq',
+    'fin.video':        'Cosa vuoi trascrivere',
+    'fin.fatto':        'Fatto',
+    'res.ancora':       'Trascrivi un altro video',
 
     # ── Diario e stato ───────────────────────────────────────────────────────
     'log.title':        'Diario',
@@ -119,7 +138,6 @@ TESTI: dict[str, str] = {
     'eng.tag.cloud':    'CLOUD',
     'eng.tag.offline':  'OFFLINE',
 
-    'eng.local.title':  'Solo modelli sul tuo computer',
     'eng.local.hint':   'Tutto quello che serve gira qui, senza rete e senza chiave: '
                         'trascrizione (Whisper), riassunto e traduzione (Ollama), '
                         'analisi visiva (Ollama vision). ✓ = già scaricato in Ollama.',
@@ -127,7 +145,6 @@ TESTI: dict[str, str] = {
     'eng.model.ollama':  'Riassunto e traduzione (Ollama)',
     'eng.model.vision':  'Analisi visiva (Ollama vision)',
 
-    'eng.groq.title':   'Solo modelli sui server Groq',
     'eng.groq.hint':    'Gli stessi tre mestieri, ma in nuvola e a carico della '
                         'chiave: trascrizione, riassunto e traduzione, analisi '
                         'visiva. Niente di tutto questo tocca il tuo computer.',
@@ -135,9 +152,6 @@ TESTI: dict[str, str] = {
     'eng.model.groqtesto': 'Riassunto e traduzione (Groq)',
     'eng.model.groqvista': 'Analisi visiva (Groq vision)',
     'eng.key':          'Chiave API',
-    'eng.key.hint':     'Scegli il file .txt con la chiave: viene letta e tenuta in '
-                        'memoria per questa sessione. A schermo resta solo il nome del '
-                        'file.',
     'eng.key.load':     'Carica da file .txt',
     'eng.key.get':      'Ottieni una chiave →',
     'eng.key.loaded':   '✓ {nome}',

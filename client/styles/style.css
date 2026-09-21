@@ -147,16 +147,29 @@ html, body {
   backdrop-filter: blur(10px);
 }
 
-.marchio { margin-bottom: var(--s6); padding-left: var(--s1); }
+/* Il marchio: il disegno sopra, il nome sotto, tutto in colonna e centrato.
+ *
+ * E' lo stesso disegno dell'icona sul desktop, e sta li' per quello: chi ha
+ * appena fatto doppio clic ritrova la stessa cosa dentro la finestra, e capisce
+ * di essere nel posto giusto senza dover leggere. */
+.marchio {
+  display: flex; flex-direction: column; align-items: center;
+  gap: var(--s2); margin-bottom: var(--s6);
+}
+.marchio-icona {
+  width: 56px; height: 56px; color: var(--iris);
+  filter: drop-shadow(0 0 16px #7c6cff59);
+}
+/* Le tre barre di livello e le tre righe scritte prendono due colori diversi:
+ * e' il verso del programma, dal parlato allo scritto, e distinguerli lo rende
+ * leggibile anche a 56 pixel. */
+.marchio-icona .alta { fill: var(--lume); }
+.marchio-icona .riga { fill: var(--onda); }
 .logo {
-  font-size: 26px; font-weight: 800; letter-spacing: -.5px; line-height: 1.1;
+  font-size: 21px; font-weight: 800; letter-spacing: -.3px; line-height: 1.1;
   background: linear-gradient(103deg, #fff 6%, var(--lume) 44%, var(--onda) 98%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
   filter: drop-shadow(0 0 22px #7c6cff4d);
-}
-.sottotitolo {
-  font-size: 10px; color: var(--t2); margin-top: var(--s1);
-  letter-spacing: .8px; text-transform: uppercase; font-weight: 600;
 }
 
 .menu { display: flex; flex-direction: column; gap: var(--s1); }
@@ -218,11 +231,44 @@ html, body {
  * piccolo invece di dover spostare gli occhi da un bordo all'altro. */
 .corpo > * { width: 100%; max-width: 1400px; margin-inline: auto; }
 
+/* Il titolo della sezione, centrato, con sotto la spiegazione di cosa fa.
+ *
+ * Centrato e non a sinistra perche' e' l'unica riga che dice in che stanza si
+ * e' entrati, e sotto ci sono tre riquadri affiancati: un titolo appoggiato a
+ * sinistra sembrerebbe appartenere al primo dei tre invece che a tutti. */
+.intestazione { text-align: center; flex: 0 0 auto; }
+/* Lo stesso sfumato del nome nella barra laterale, e piu' grande.
+ *
+ * Non e' decorazione ripetuta: e' il segno che quella riga e' un titolo di
+ * primo livello, come il nome del programma. Tutto il resto della pagina e'
+ * in tinta unita, quindi lo sfumato compare esattamente due volte, e le due
+ * volte vogliono dire la stessa cosa.
+ *
+ * Il ritaglio dello sfumato dentro il testo va dichiarato due volte perche'
+ * la forma senza prefisso e' recente: WebView2 la capisce, ma la riga col
+ * prefisso costa niente e copre i sistemi rimasti indietro. */
 .intestazione h1 {
-  margin: 0 0 5px; font-size: 25px; font-weight: 800; letter-spacing: -.5px;
+  margin: 0 0 7px; font-size: 34px; font-weight: 800; letter-spacing: -.8px;
+  line-height: 1.15;
   font-family: 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
+  background: linear-gradient(103deg, #fff 6%, var(--lume) 44%, var(--onda) 98%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 22px #7c6cff4d);
 }
-.intestazione p { margin: 0; color: var(--t1); font-size: 12.5px; max-width: 82ch; }
+.intestazione p {
+  margin: 0 auto; color: var(--t1); font-size: 12.5px; max-width: 74ch;
+}
+
+/* La linea che separa «dove sono» da «cosa faccio».
+ *
+ * Sfuma ai due estremi invece di finire di netto: una riga che tocca i bordi
+ * taglia la pagina in due, una che si dissolve la divide e basta. */
+.divisore {
+  flex: 0 0 auto;
+  width: 100%; height: 1px; border: 0; margin: var(--s4) 0 var(--s1);
+  background: linear-gradient(90deg, transparent, var(--bordo) 18%,
+                              var(--bordo) 82%, transparent);
+}
 
 /* ── Vetro ──────────────────────────────────────────────────────────────── */
 /* Il taglio di luce in alto e l'ombra sotto sono cio' che fa leggere una
@@ -450,6 +496,85 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 }
 .racconto .icona { width: 16px; height: 16px; flex: 0 0 16px; color: var(--lume); margin-top: 2px; }
 .racconto-piano { font-size: 11px; color: var(--t2); margin-top: 3px; line-height: 1.45; }
+
+/* ── I tre riquadri ─────────────────────────────────────────────────────── */
+/* Modelli, chiave e video, affiancati e della stessa misura.
+ *
+ * Perche' della stessa misura
+ *     Perche' sono tre risposte alla stessa domanda, «con cosa lo faccio», e
+ *     nessuna delle tre viene prima delle altre. Riquadri di misure diverse
+ *     direbbero che uno conta piu' degli altri, che non e' vero: senza tutti e
+ *     tre non si parte.
+ *
+ *     `1fr` tre volte e `align-items: stretch` bastano a ottenerlo: la
+ *     larghezza si divide in parti uguali, e l'altezza la detta il riquadro con
+ *     piu' contenuto dentro. */
+.carte {
+  display: grid;
+  /* Una colonna per riquadro, tutte uguali, contate da sole.
+   *
+   * Non `repeat(3, 1fr)`: in locale il riquadro della chiave non c'e', e tre
+   * colonne fisse lascerebbero un terzo di pagina vuoto al suo posto. Cosi'
+   * invece le colonne sono quante sono i riquadri, e i due che restano si
+   * allargano a riempire lo spazio. */
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  align-items: stretch;
+  gap: var(--s4);
+  flex: 0 0 auto;
+}
+
+/* Ogni riquadro e' una colonna: testa, contenuto, pulsante in fondo.
+ *
+ * Il pulsante e' spinto in basso da `margin-top: auto` invece di stare
+ * attaccato al contenuto. Cosi' i tre pulsanti restano allineati fra loro
+ * anche quando un riquadro ha tre righe di riepilogo e un altro una sola, e
+ * l'occhio li trova nello stesso punto invece di doverli cercare a tre
+ * altezze diverse. */
+.carta {
+  display: flex; flex-direction: column;
+  padding: var(--s4);
+  min-width: 0;
+}
+.carta-testa {
+  display: flex; align-items: center; gap: var(--s2);
+  font-size: 11px; font-weight: 700; letter-spacing: 1.1px;
+  text-transform: uppercase; color: var(--t1);
+  padding-bottom: var(--s3); margin-bottom: var(--s3);
+  border-bottom: 1px solid var(--bordo);
+}
+.carta-corpo {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column; gap: 7px;
+  font-size: 12.5px; color: var(--t1);
+  overflow-y: auto; overflow-x: hidden;
+  margin-bottom: var(--s3);
+}
+.carta-azione { width: 100%; justify-content: center; margin-top: auto; }
+
+/* Una riga del riepilogo: a cosa serve, e cosa si e' scelto.
+ *
+ * Il valore va a capo invece di essere troncato con i puntini: i nomi dei
+ * modelli sono lunghi e si somigliano tutti (qwen2.5:7b, qwen2.5vl:7b), e
+ * troncarli li renderebbe indistinguibili proprio dove serve distinguerli. */
+.carta-voce { display: flex; flex-direction: column; gap: 1px; }
+.carta-voce .chi {
+  font-size: 9.5px; color: var(--t2); font-weight: 700;
+  text-transform: uppercase; letter-spacing: .7px;
+}
+.carta-voce .cosa { color: var(--t0); word-break: break-word; line-height: 1.35; }
+
+/* Il pulsante che fa partire tutto: da solo, al centro, sotto i tre riquadri. */
+.azioni-avvio { justify-content: center; flex: 0 0 auto; margin-top: var(--s4); }
+.bottone.grande { padding: 12px 30px; font-size: 14px; }
+
+/* Dentro le finestre i tre menu vanno in colonna e non affiancati: una
+ * finestra e' stretta, e tre tendine in fila diventerebbero tre fessure in cui
+ * il nome del modello non ci sta. */
+.riga.incolonna { flex-direction: column; }
+.riga.incolonna .gruppo { flex: 1 1 auto; width: 100%; }
+.azioni-modulo { justify-content: flex-start; margin-top: var(--s3); }
+
 
 /* ── Colonne, elenchi, diario ───────────────────────────────────────────── */
 

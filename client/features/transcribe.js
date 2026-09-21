@@ -333,10 +333,29 @@ window.mostraRisultato = (res) => {
       // Non chiude: si apre la cartella e si torna a guardare il riepilogo.
       { testo: t('res.open'), tono: 'contorno', icona: 'cartella', chiudi: false,
         azione: () => window.pywebview.api.apri('cartella') },
-      { testo: t('comune.chiudi'), tono: 'pieno', icona: 'spunta' },
+      { testo: t('comune.chiudi'), tono: 'contorno', icona: 'spunta' },
+      // La via piu' corta per il video successivo. Azzera SOLO la sorgente e
+      // riapre la finestra del video: modelli e chiave restano come sono,
+      // perche' fra un video e l'altro quasi mai cambiano, e rifarli scegliere
+      // ogni volta sarebbe far ripetere una risposta gia' data.
+      { testo: t('res.ancora'), tono: 'pieno', icona: 'rifai',
+        azione: () => { azzeraSorgente(); if (window.apriVideoDaFuori) window.apriVideoDaFuori(); } },
     ],
   });
 };
+
+/* Svuota la sorgente per ricominciare con un altro video.
+ *
+ * Gli interruttori degli output NON si toccano: chi ha appena chiesto
+ * trascrizione piu' riassunto quasi sempre vuole lo stesso anche per il
+ * prossimo, e spegnerli sarebbe una sorpresa scoperta solo alla fine. */
+function azzeraSorgente() {
+  $('#url').value = '';
+  $('#file').value = '';
+  statoVuoto('#sorgente-scheda', 'src.empty', 'vuoto');
+  if (window.aggiornaAvvio) window.aggiornaAvvio();
+  if (window.aggiornaCarte) window.aggiornaCarte();
+}
 
 window.mostraRisultatoPlaylist = (res) => {
   const corpo = [];
