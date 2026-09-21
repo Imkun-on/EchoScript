@@ -494,7 +494,7 @@ class Api:
         threading.Thread(target=self._leggi_ollama, daemon=True).start()
         return {
             'ok': True,
-            'lingua': i18n.get_language(),
+            'lingua': i18n.LINGUA,
             'testi': i18n.catalogo(),
             'scelte': self.scelte,
             'modelli': self._modelli(),
@@ -576,11 +576,6 @@ class Api:
             'groq_testo': groq_testo,
             'groq_vista': groq_vista,
         }
-
-    def cambia_lingua(self, codice: str) -> dict:
-        i18n.set_language(codice)
-        i18n.save(codice)
-        return {'ok': True, 'lingua': i18n.get_language()}
 
     def imposta(self, valori: dict) -> dict:
         """Registra una scelta dell'interfaccia e la ricorda per la volta dopo.
@@ -758,7 +753,7 @@ class Api:
         if meta.get('category'):
             righe.append(('info.category', meta['category']))
         lingua = tx._lang_name(meta.get('detected_language') or meta.get('language'),
-                              i18n.get_language())
+                              i18n.LINGUA)
         if lingua:
             righe.append(('info.language', lingua))
         capitoli = meta.get('chapters') or []
@@ -848,7 +843,7 @@ class Api:
             'export': True,
             'source_kind': self.scelte['sorgente'],
             # I nomi delle cartelle seguono la lingua dell'interfaccia.
-            'ui_lang': i18n.get_language(),
+            'ui_lang': i18n.LINGUA,
             'translate': self.scelte['translate'],
             'summarize': self.scelte['summarize'],
             'visual': self.scelte['visual'],
@@ -892,7 +887,7 @@ class Api:
                      'titolo': i18n.t('already.again'),
                      'desc': i18n.t('already.again.desc')}]
             if engine.can_resume(meta, RISULTATI):
-                nota = engine.resume_hint(meta, RISULTATI, i18n.get_language())
+                nota = engine.resume_hint(meta, RISULTATI, i18n.LINGUA)
                 desc = i18n.t('already.resume.desc')
                 voci.append({'azione': 'riprendi_post', 'icona': 'riprendi', 'tono': 'primario',
                              'titolo': i18n.t('already.resume'),
@@ -1214,103 +1209,6 @@ class Api:
                        if visiva.get('count') else None),
         }
 
-    # ── Crediti Groq ─────────────────────────────────────────────────────────
-
-    def crediti(self) -> dict:
-        """I crediti residui per modello, letti dalla cache passiva.
-
-        Le richieste vere (trascrizione, riassunto, analisi visiva) portano
-        indietro negli header quanto e' rimasto: qui li si rilegge e basta.
-        Aprire questa sezione NON contatta Groq e non consuma nulla, quindi e'
-        istantanea e la si puo' guardare quanto si vuole.
-        """
-        modelli = []
-        for m in engine.get_cached_credits():
-            ruolo = m.get('role', 'other')
-            voci = []
-            for it in (m.get('items') or []):
-                tipo = it.get('kind', '')
-                voci.append({
-                    'tipo': tipo,
-                    'nome': i18n.t(f'lim.kind.{tipo}'),
-                    'usato': i18n.t('lim.used', v=self._quantita(it, it.get('used'))),
-                    'residuo': i18n.t('lim.left', v=self._residuo(it)),
-                    'ripristino': (i18n.t('lim.reset', v=self._ripristino(it))
-                                   if it.get('reset_seconds') is not None else ''),
-                })
-            modelli.append({
-                'ruolo': i18n.t(f'lim.role.{ruolo}'),
-                'modello': m.get('model', ''),
-                # 'or' e non un default di get(): la chiave c'e' sempre, ma vale
-                # None finche' quel modello non e' stato chiamato, e "aggiornato
-                # alle None" e' esattamente il genere di riga che fa sembrare
-                # rotto un programma che sta funzionando.
-                'aggiornato': i18n.t('lim.checked', v=m.get('checked_at') or '—'),
-                'voci': voci,
-                'nota': ('' if voci else
-                         (i18n.t('lim.none') if m.get('used') else i18n.t('lim.unused'))),
-            })
-        return {'ok': True, 'modelli': modelli}
-
-    def _quantita(self, voce: dict, valore) -> str:
-        """Una quantita' di credito: l'audio come durata, il resto come numero."""
-        if valore is None:
-            return '?'
-        if voce.get('kind') == 'audio_seconds':
-            return tx._format_timestamp(valore)
-        return f'{int(valore):,}'.replace(',', '.')
-
-    def _residuo(self, voce: dict) -> str:
-        rimasto, limite = voce.get('remaining'), voce.get('limit')
-        if limite is not None:
-            return i18n.t('lim.remaining', rem=self._quantita(voce, rimasto),
-                          lim=self._quantita(voce, limite))
-        return i18n.t('lim.remaining_only', rem=self._quantita(voce, rimasto))
-
-    def _ripristino(self, voce: dict) -> str:
-        """Quando i crediti tornano: l'ora esatta piu' l'attesa che manca.
-
-        L'ora da sola non dice quanto aspettare, l'attesa da sola non dice
-        quando tornare: servono tutt'e due, ed e' l'unica riga di questa finestra
-        su cui si prende una decisione.
-        """
-        durata = self._durata_breve(voce['reset_seconds'])
-        orologio = self._quando(voce.get('reset_at_iso'))
-        if orologio:
-            return i18n.t('lim.reset.at', orologio=orologio, durata=durata)
-        return i18n.t('lim.reset.in', durata=durata)
-
-    @staticmethod
-    def _durata_breve(secondi: float) -> str:
-        """Durata compatta: '2h 5m', '3m 20s', '45s'."""
-        s = int(round(secondi or 0))
-        ore, minuti, sec = s // 3600, (s % 3600) // 60, s % 60
-        pezzi = []
-        if ore:
-            pezzi.append(f'{ore}h')
-        if minuti:
-            pezzi.append(f'{minuti}m')
-        if sec or not pezzi:
-            pezzi.append(f'{sec}s')
-        return ' '.join(pezzi)
-
-    @staticmethod
-    def _quando(iso: str | None) -> str:
-        """L'istante di ripristino detto come lo direbbe una persona."""
-        if not iso:
-            return ''
-        try:
-            quando = _dt.datetime.fromisoformat(iso)
-        except ValueError:
-            return ''
-        oggi = _dt.date.today()
-        hm = quando.strftime('%H:%M')
-        if quando.date() == oggi:
-            return i18n.t('lim.reset.today', hm=hm)
-        if quando.date() == oggi + _dt.timedelta(days=1):
-            return i18n.t('lim.reset.tomorrow', hm=hm)
-        return i18n.t('lim.reset.date', dm=quando.strftime('%d/%m'), hm=hm)
-
     # ── Aprire cose nel sistema ──────────────────────────────────────────────
 
     def apri(self, quale: str = 'cartella') -> dict:
@@ -1392,8 +1290,6 @@ class Api:
 def main() -> None:
     global _finestra
     _scadenza_avvio()
-
-    i18n.set_language(i18n.load_saved() or 'it')
 
     _finestra = webview.create_window(
         'EchoScript',

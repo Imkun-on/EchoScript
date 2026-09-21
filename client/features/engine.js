@@ -128,13 +128,13 @@ function mostraChiave(chiave) {
 /* Le voci dei menu e la riga della chiave non hanno un data-t: sono composte
  * qui mettendo insieme un pezzo che viene da Python e uno tradotto. Vanno
  * quindi riscritte a mano, ed e' l'unico motivo per cui questa funzione esiste. */
-function traduciMotore() {
+function riempiMotore() {
   riempiMenu();
   mostraChiave(CHIAVE);
   sincronizzaMotore();
 }
 
 window.initMotore = initMotore;
-window.traduciMotore = traduciMotore;
+window.riempiMotore = riempiMotore;
 window.sincronizzaMotore = sincronizzaMotore;
 window.chiaveCaricata = () => CHIAVE.presente;

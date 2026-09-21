@@ -10,13 +10,12 @@
  */
 
 let TESTI = {};
-let LINGUA = 'it';
 // Nessuna, finche' l'avvio non apre quella del motore salvato.
 let SEZIONE = '';
 
 /* Le scelte dell'interfaccia: motore, modelli, interruttori. Vivono qui e in
- * Python, non nel documento, perche' devono sopravvivere al cambio di lingua
- * (che riscrive le voci dei menu) e perche' Python le salva per la volta dopo. */
+ * Python, non nel documento, perche' Python le salva per la volta dopo e le
+ * ritrova al prossimo avvio. */
 let SCELTE = {};
 
 /* Il piano del lavoro in corso: l'elenco delle fasi. Serve a disegnare i
@@ -26,22 +25,31 @@ let PIANO = [];
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
+/* La frase che sta dietro una chiave, con i buchi riempiti.
+ *
+ * Una chiave che non esiste torna indietro cosi' com'e': a schermo si vede una
+ * stringa strana, che e' brutta ma dice subito dove si e' sbagliato a scrivere.
+ * Meglio di un'etichetta vuota, che non dice niente a nessuno. */
 function t(chiave, valori) {
-  const voce = TESTI[chiave];
-  let testo = voce ? (voce[LINGUA] || voce.it || chiave) : chiave;
+  let testo = TESTI[chiave];
+  if (testo === undefined) testo = chiave;
   if (valori) {
     for (const [k, v] of Object.entries(valori)) testo = testo.split('{' + k + '}').join(v);
   }
   return testo;
 }
 
-function traduciPagina() {
+/* Riempie di testo ogni elemento che porta un data-t.
+ *
+ * Si chiama una volta sola, all'avvio. Finche' c'erano due lingue serviva a
+ * riscrivere la pagina intera a ogni cambio; adesso e' il riempimento
+ * iniziale, e il nome e' rimasto quello perche' il lavoro che fa e' lo stesso. */
+function riempiTesti() {
   $$('[data-t]').forEach((e) => { e.textContent = t(e.dataset.t); });
   $('#stato').textContent = t('status.' + (statoCorrente || 'idle'));
   if (!$('#diario').dataset.pieno) svuotaDiario();
-  if (window.traduciMotore) window.traduciMotore();
-  if (window.traduciTrascrivi) window.traduciTrascrivi();
-  if (window.traduciCrediti) window.traduciCrediti();
+  if (window.riempiMotore) window.riempiMotore();
+  if (window.riempiTrascrivi) window.riempiTrascrivi();
 }
 
 /* ── Cambio sezione ───────────────────────────────────────────────────────── */
@@ -91,10 +99,11 @@ function cambiaSezione(nome, immediato) {
   }
 }
 
-/* La postazione — link o file, output, avvio, sorgente, diario — e' una sola e
- * si sposta nella sezione aperta. Duplicarla vorrebbe dire due link incollati e
- * due cronologie, e non sapere piu' quale delle due si sta guardando. Dove non
- * c'e' uno slot — «Crediti», che non lavora — semplicemente sparisce. */
+/* La postazione, cioe' link o file, output, avvio, sorgente e diario, e' una
+ * sola e si sposta nella sezione aperta. Duplicarla vorrebbe dire due link
+ * incollati e due cronologie, e non sapere piu' quale delle due si sta
+ * guardando. Se un giorno esistesse una sezione senza posto dove metterla, la
+ * postazione semplicemente sparisce invece di finire fuori posto. */
 function spostaLavoro(nome) {
   const slot = document.querySelector(`.sezione[data-sez="${nome}"] .slot-lavoro`);
   const posto = $('#postazione');
@@ -375,18 +384,15 @@ function avvia() {
     }));
 
     TESTI = dati.testi;
-    LINGUA = dati.lingua;
     SCELTE = dati.scelte;
-    $('#lingua').value = LINGUA;
 
     if (window.initMotore) window.initMotore(dati);
     if (window.initTrascrivi) window.initTrascrivi(dati);
-    if (window.initCrediti) window.initCrediti(dati);
-    passoAvvio();                     // 4. le tre sezioni sono pronte
+    passoAvvio();                     // 4. le due sezioni sono pronte
 
-    traduciPagina();
+    riempiTesti();
     if (window.potenziaTendine) window.potenziaTendine();
-    passoAvvio();                     // 5. tutto e' nella lingua giusta
+    passoAvvio();                     // 5. ogni etichetta ha il suo testo
 
     // Si riapre nella stanza in cui si lavorava l'ultima volta: la scelta del
     // motore e' salvata, e riportarla a schermo e' il modo di non far ricominciare
@@ -397,12 +403,6 @@ function avvia() {
     $$('.voce[data-va]').forEach((v) =>
       v.addEventListener('click', () => cambiaSezione(v.dataset.va)));
     $('#svuota').addEventListener('click', svuotaDiario);
-
-    $('#lingua').addEventListener('change', async (e) => {
-      const esito = await window.pywebview.api.cambia_lingua(e.target.value);
-      LINGUA = esito.lingua;
-      traduciPagina();
-    });
 
     // Ctrl+Invio avvia la trascrizione da qualunque sezione: chi ha appena
     // riempito il modulo ha le mani sulla tastiera, non sul mouse.
@@ -429,7 +429,7 @@ function avvia() {
       const testo = (e.dataTransfer.getData('text/uri-list')
                   || e.dataTransfer.getData('text/plain') || '').trim();
       if (!testo || !window.accettaTrascinato) return;
-      // Chi trascina un link mentre guarda i crediti vuole trascriverlo: lo si
+      // Chi trascina un link da un'altra sezione vuole trascriverlo: lo si
       // porta nella postazione, che e' quella del motore scelto.
       cambiaSezione(sezioneDiLavoro());
       window.accettaTrascinato(testo);

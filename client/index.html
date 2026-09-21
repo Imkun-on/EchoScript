@@ -150,20 +150,7 @@
           <span data-t="menu.cloud"></span>
           <span class="targhetta-menu" id="targhetta-cloud"></span>
         </button>
-        <button class="voce" data-va="crediti">
-          <span class="rotaia"></span>
-          <svg class="icona" viewBox="0 0 24 24"><use href="#i-gettone"/></svg>
-          <span data-t="menu.crediti"></span>
-        </button>
       </nav>
-
-      <div class="piede">
-        <label class="etichetta" data-t="app.language"></label>
-        <select id="lingua" class="campo compatto">
-          <option value="it">Italiano</option>
-          <option value="en">English</option>
-        </select>
-      </div>
     </aside>
 
     <main class="corpo">
@@ -394,23 +381,6 @@
         <div class="slot-lavoro"></div>
       </div>
 
-      <!-- ══ CREDITI ════════════════════════════════════════════════════ -->
-      <div class="sezione" data-sez="crediti">
-        <header class="intestazione">
-          <h1 data-t="sez.crediti.title"></h1>
-          <p data-t="sez.crediti.desc"></p>
-        </header>
-
-        <section class="vetro colonna crescente">
-          <div class="titolo-pannello">
-            <span data-t="menu.crediti"></span>
-            <div class="spazio"></div>
-            <button id="aggiorna-crediti" class="bottone nudo" data-t="lim.refresh"></button>
-          </div>
-          <p class="nota-riga" data-t="lim.note"></p>
-          <div id="crediti" class="elenco"></div>
-        </section>
-      </div>
 
     </main>
   </div>
@@ -468,7 +438,6 @@
   <script src="app.js"></script>
   <script src="features/engine.js"></script>
   <script src="features/transcribe.js"></script>
-  <script src="features/credits.js"></script>
   <script>avvia();</script>
 </body>
 </html>

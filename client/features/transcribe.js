@@ -406,7 +406,7 @@ window.riassuntoInterrotto = (res) => {
 
 /* ── Cambio lingua ────────────────────────────────────────────────────────── */
 
-function traduciTrascrivi() {
+function riempiTrascrivi() {
   if (SCHEDA) mostraScheda(SCHEDA);
   else svuotaScheda();
   // La stima e' una frase composta da Python: gliela si richiede nella lingua
@@ -416,7 +416,7 @@ function traduciTrascrivi() {
 }
 
 window.initTrascrivi = initTrascrivi;
-window.traduciTrascrivi = traduciTrascrivi;
+window.riempiTrascrivi = riempiTrascrivi;
 window.riabilitaTrascrivi = riabilitaTrascrivi;
 window.aggiornaAvvio = aggiornaAvvio;
 window.mostraStima = mostraStima;
