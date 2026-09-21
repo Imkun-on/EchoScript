@@ -52,7 +52,17 @@ SU = 8          # supercampionamento: si disegna otto volte piu' grande
 
 
 def _forme(lato: int, semplice: bool) -> Image.Image:
-    """Le sei (o quattro) forme, su fondo trasparente, in un quadrato di lato."""
+    """Le forme del marchio, disegnate grandi e poi rimpicciolite.
+
+    Il disegno viene fatto a una misura molto maggiore di quella richiesta e
+    solo alla fine ridotto. E' l'unico modo di avere i bordi morbidi: disegnare
+    direttamente a 16 pixel darebbe angoli seghettati, perche' a quella misura
+    un bordo arrotondato cade fra un pixel e l'altro.
+
+    A misure piccole si usa la versione semplice, con meno forme: sotto una
+    certa dimensione le sei forme diventano una macchia in cui non si distingue
+    piu' niente, e quattro forme riconoscibili valgono piu' di sei confuse.
+    """
     grande = lato * SU
     tela = Image.new('RGBA', (grande, grande), (0, 0, 0, 0))
     pennello = ImageDraw.Draw(tela)
@@ -65,7 +75,11 @@ def _forme(lato: int, semplice: bool) -> Image.Image:
 
 
 def marchio(lato: int, semplice: bool | None = None, alone: bool = True) -> Image.Image:
-    """Il marchio da solo, con il suo alone viola. Fondo trasparente."""
+    """Il marchio completo, con l'alone, pronto da salvare o da comporre.
+
+    Decide da se' se usare la versione semplice, guardando la misura richiesta,
+    cosi' chi lo chiama non deve ricordarsi quella soglia.
+    """
     if semplice is None:
         semplice = lato < 32
     forme = _forme(lato, semplice)
@@ -126,6 +140,14 @@ def piastrella(lato: int) -> Image.Image:
 
 
 def _carattere(dimensione: int, grassetto: bool = True):
+    """Un carattere di sistema per le scritte di prova.
+
+    Si provano tre nomi in fila perche' non tutti i Windows hanno gli stessi
+    caratteri installati, e se non c'e' nessuno dei tre si ripiega su quello di
+    riserva incorporato: brutto, ma serve solo al foglio di prova, che e' uno
+    strumento per chi disegna l'icona e non finisce mai sotto gli occhi di chi
+    usa il programma.
+    """
     nomi = (['segoeuib.ttf', 'seguibl.ttf', 'arialbd.ttf'] if grassetto
             else ['segoeui.ttf', 'arial.ttf'])
     for nome in nomi:
@@ -136,7 +158,16 @@ def _carattere(dimensione: int, grassetto: bool = True):
 
 
 def foglio_prova(percorso: str) -> None:
-    """Le misure vere, affiancate, su due fondi: e' l'unico modo di giudicare."""
+    """Stampa il marchio a tutte le misure vere, su fondo chiaro e su fondo scuro.
+
+    Serve a chi mette le mani sul disegno. Un'icona si giudica alla misura in
+    cui verra' usata, non ingrandita: a 256 pixel qualunque cosa sembra bella,
+    e a 16 si scopre che due forme si toccano e sembrano una sola.
+
+    I due fondi ci sono perche' la barra delle applicazioni di Windows puo'
+    essere chiara o scura, e un dettaglio che si vede benissimo su uno puo'
+    sparire sull'altro.
+    """
     misure = [16, 20, 24, 32, 48, 64, 128, 256]
     larghezza = sum(m + 24 for m in misure) + 24
     tela = Image.new('RGB', (larghezza, 256 + 256 + 96), (0x1a, 0x1a, 0x1a))

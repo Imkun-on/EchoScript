@@ -64,7 +64,20 @@ from server.utils.text import _format_timestamp, _lp, _safe_filename
 
 
 def _parse_showinfo_times(stderr: str) -> list[float]:
-    """Estrae i pts_time (secondi) dalle righe 'showinfo' di ffmpeg, in ordine."""
+    """A che secondo del video corrisponde ciascun fotogramma estratto.
+
+    ffmpeg, quando tira fuori i fotogrammi, i tempi non li scrive in un file:
+    li stampa fra i suoi messaggi di servizio, mescolati a tutto il resto. Qui
+    si rileggono quelle righe e si pesca il numero.
+
+    Sembra un giro storto ed e' l'unico che c'e': i file estratti si chiamano
+    01, 02, 03 e non contengono nessuna traccia del momento in cui erano nel
+    video. Senza questi numeri, una nota visiva non saprebbe a che punto della
+    trascrizione attaccarsi.
+
+    Una riga che non si riesce a leggere viene saltata invece di far fallire
+    tutto: un fotogramma senza tempo si perde, gli altri no.
+    """
     times: list[float] = []
     for line in stderr.splitlines():
         idx = line.find("pts_time:")
@@ -245,6 +258,15 @@ def _dedup_visual_notes(notes: list[dict]) -> list[dict]:
     import re
 
     def sig(t: str) -> set:
+        """L'impronta di una nota: le parole che la distinguono dalle altre.
+
+        Serve a riconoscere due note che dicono la stessa cosa con parole un
+        po' diverse, cosa che capita continuamente quando due fotogrammi
+        mostrano la stessa slide.
+
+        Le parole di due lettere o meno si buttano perche' sono articoli e
+        preposizioni: compaiono in tutte le note e non distinguono niente.
+        """
         words = re.findall(r"[a-zà-ù0-9]+", t.lower())
         return {w for w in words if len(w) > 2}
 
@@ -260,17 +282,45 @@ def _dedup_visual_notes(notes: list[dict]) -> list[dict]:
         sigs.append(s)
     return kept
 def _fix_mermaid_arrows(text: str) -> str:
-    """Corregge la sintassi errata delle frecce Mermaid: '-->|etichetta|>' non è
-    valido, va scritto '-->|etichetta|'. I modelli la sbagliano spesso."""
+    """Raddrizza le frecce dei diagrammi, che i modelli scrivono quasi sempre male.
+
+    La forma giusta e' `-->|etichetta|`; i modelli ci aggiungono spesso un
+    altro segno di maggiore in fondo. Con quello di troppo il diagramma non
+    viene disegnato affatto: la libreria si ferma, e al posto della mappa resta
+    un rettangolo con dentro un messaggio d'errore.
+
+    Correggerlo qui e' molto piu' affidabile che chiederlo nelle istruzioni al
+    modello, perche' e' un errore che continua a fare anche quando gli si dice
+    di non farlo.
+    """
     import re
     return re.sub(r"(-->\s*\|[^|]*\|)>", r"\1", text or "")
 def _strip_mermaid_blocks(text: str) -> str:
-    """Rimuove i blocchi ```mermaid (rete di sicurezza quando la mappa concettuale
-    è disattivata e il modello ne genera comunque una)."""
+    """Toglie i diagrammi dal testo quando non erano stati chiesti.
+
+    E' una rete di sicurezza. Se la mappa dei concetti e' spenta, al modello
+    non viene chiesta; ma i modelli ogni tanto la fanno lo stesso, perche' il
+    materiale sembra chiederla.
+
+    Lasciarla passerebbe un blocco di codice di diagramma dentro un documento
+    che nessuno ha preparato per disegnarlo: chi legge si troverebbe una
+    ventina di righe di sintassi incomprensibile in mezzo al riassunto.
+    """
     import re
     return re.sub(r"```mermaid\b.*?```\s*", "", text or "", flags=re.S).strip()
 def _encode_image_b64(path: str) -> str:
-    """Legge un'immagine e la codifica in base64 (per le API vision)."""
+    """Trasforma un file immagine in testo, perche' e' cosi' che va spedito.
+
+    I modelli che guardano le immagini le ricevono dentro un messaggio fatto di
+    testo, non come file allegato. La codifica base64 e' il modo standard di
+    scrivere dei dati binari usando solo caratteri che un messaggio di testo
+    puo' contenere.
+
+    Costa circa un terzo in piu' di dimensione rispetto al file originale, ed
+    e' il motivo per cui i fotogrammi vengono rimpiccioliti prima: mandare
+    immagini grandi non migliora quello che il modello legge, e moltiplica
+    quello che si spedisce.
+    """
     import base64
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode("ascii")
@@ -325,7 +375,17 @@ def _vision_ollama(b64: str, context: str = "") -> str:
         data = json.loads(r.read().decode("utf-8"))
     return _strip_think(data.get("message", {}).get("content") or "")
 def _check_ollama_vision() -> None:
-    """Verifica Ollama + presenza di un modello vision; spiega come rimediare."""
+    """Ollama e' acceso E ha un modello che sa guardare le immagini?
+
+    Sono due controlli e non uno, perche' sono due problemi diversi con due
+    rimedi diversi: «Ollama non parte» e «Ollama c'e' ma quel modello non l'hai
+    scaricato». Un messaggio solo per tutti e due manderebbe meta' delle
+    persone a reinstallare qualcosa che era gia' a posto.
+
+    Il controllo si fa prima di cominciare perche' l'analisi visiva estrae
+    prima i fotogrammi e li manda dopo: scoprendolo a quel punto, si sarebbero
+    gia' spesi minuti di lavoro sul video per niente.
+    """
     installed = _ollama_installed_models(timeout=5)
     if installed is None:
         raise RuntimeError(
@@ -347,7 +407,17 @@ def _make_vision_analyzer(client=None):
     _check_ollama_vision()
     return (lambda b64, ctx="": _vision_ollama(b64, ctx)), f"locale · Ollama {settings.OLLAMA_VISION_MODEL}"
 def _is_empty_visual(text: str) -> bool:
-    """True se la risposta del modello vision equivale a 'NIENTE' (frame vuoto)."""
+    """Il modello ha detto che in questo fotogramma non c'era niente di utile?
+
+    Nelle istruzioni gli si chiede di rispondere NIENTE quando l'immagine non
+    contiene nulla da leggere: una faccia che parla, una sigla, una schermata
+    nera. Serve perche' un modello a cui si mostra qualcosa risponde comunque
+    qualcosa, e «si vede una persona che parla» non e' falso, e' inutile.
+
+    Il confronto si fa dopo aver tolto punteggiatura, asterischi e spazi,
+    perche' quella parola torna indietro vestita in tutti i modi possibili:
+    «NIENTE.», «**Niente**», «- niente». Sono tutte la stessa risposta.
+    """
     norm = (text or "").upper()
     for ch in "*_.!#>` \n\t-":
         norm = norm.replace(ch, "")
@@ -381,6 +451,13 @@ def analyze_video_visuals(video_path: str, duration: float, workdir: str,
     use_rich = on_progress is None and not quiet
 
     def _stat(key, value):
+        """Annota com'e' andata, se qualcuno ha chiesto di saperlo.
+
+        Serve a chi deve poi SPIEGARE perche' l'analisi visiva non ha prodotto
+        niente: crediti finiti, nessun fotogramma utile, errori su tutti. Prima
+        quel caso era silenzioso e restava solo una cartella vuota, che sembra
+        un guasto del programma anche quando non lo e'.
+        """
         if stats is not None:
             stats[key] = value
 
@@ -391,6 +468,12 @@ def analyze_video_visuals(video_path: str, duration: float, workdir: str,
     _stat("last_error", None)
 
     def _report(cur, total, detail):
+        """Riferisce l'avanzamento, se c'e' qualcuno che ascolta.
+
+        L'analisi visiva e' il passaggio piu' lento di tutti: decine di
+        fotogrammi, ciascuno mandato a un modello. Senza un avanzamento
+        sembrerebbe piantata per parecchi minuti.
+        """
         if on_progress:
             on_progress("visual", cur, total, detail)
 
@@ -422,6 +505,20 @@ def analyze_video_visuals(video_path: str, duration: float, workdir: str,
     notes: list[dict] = []
 
     def _process(update) -> None:
+        """Manda i fotogrammi al modello, uno per uno, e raccoglie le note.
+
+        Il ciclo vero dell'analisi visiva. Tre cose da sapere:
+
+        Si controlla fra un fotogramma e l'altro se qualcuno ha chiesto di
+        fermarsi, perche' quello e' il punto in cui interrompersi non fa danni.
+
+        Gli errori su singoli fotogrammi si contano e si va avanti: un'immagine
+        che il modello non digerisce non deve far perdere le altre quaranta.
+
+        I crediti finiti invece fermano tutto, perche' da li' in poi ogni altro
+        fotogramma darebbe lo stesso errore, e insistere vorrebbe dire solo
+        aspettare quaranta volte per niente.
+        """
         errors = 0
         for i, (ts, path) in enumerate(frames, 1):
             if fermarsi():
@@ -518,6 +615,13 @@ def save_visual_notes(out_root: str, meta: dict, notes: list[dict],
     # 'img_prefix' permette link RELATIVI per il .md (portabile) e ASSOLUTI per il
     # PDF (il browser headless deve trovare i file).
     def _companion_md(img_prefix: str, saved_in: str | None = None) -> str:
+        """Il documento che si legge da solo, con le note in ordine di tempo.
+
+        E' un file a parte e non un pezzo del riassunto, perche' risponde a una
+        domanda diversa: non «di cosa parlava il video» ma «cosa c'era scritto
+        a schermo, e a che minuto». Con i fotogrammi accanto, serve a ritrovare
+        un pezzo di codice o una formula senza riaprire il video.
+        """
         saved_line = [f"- **Salvato in:** {saved_in}"] if saved_in else []
         out = [f"# {meta['title']} — Analisi visiva", "",
                f"- **Estratto con:** {engine_label}",
@@ -553,7 +657,19 @@ def save_visual_notes(out_root: str, meta: dict, notes: list[dict],
         except Exception:
             pass
 def load_visual_notes(out_root: str, title: str) -> list[dict]:
-    """Rilegge le note visive salvate (per arricchire il riassunto). [] se assenti."""
+    """Rilegge le note visive gia' salvate per questo video.
+
+    Serve a «solo riassunto» fatto in un secondo momento: l'analisi visiva era
+    gia' stata fatta giorni prima, e rifarla costerebbe di nuovo tempo e
+    crediti per ottenere le stesse identiche note.
+
+    Si guarda anche nella cartella col nome inglese, che e' quello usato dalle
+    versioni in cui l'interfaccia poteva essere in inglese. Senza, a chi aveva
+    lavorato cosi' il programma direbbe che quelle note non esistono.
+
+    Lista vuota se non c'e' niente: chi chiama ci gira sopra in un ciclo, e un
+    None a quel punto sarebbe un errore lontano da qui.
+    """
     safe = _safe_filename(title)
     for sub in (VISUAL_SUBDIR, NOMI_VECCHI[VISUAL_SUBDIR]):
         p = os.path.join(out_root, safe, sub, f"{safe}_visivo.json")
@@ -627,6 +743,12 @@ def _append_frames_to_sections(sections: list[dict], notes: list[dict], img_path
         buckets = [list(notes)] + [[] for _ in out[1:]]
 
     def _img_md(n: dict) -> str:
+        """La riga markdown che mostra il fotogramma di una nota.
+
+        Il percorso lo compone chi chiama, perche' cambia a seconda di dove
+        finira' il documento: un file accanto ai fotogrammi li raggiunge in un
+        modo, uno in un'altra cartella in un altro.
+        """
         return f"![Fotogramma {_format_timestamp(n['start'])}]({img_path_fn(n['image'])})"
 
     for i, s in enumerate(out):
@@ -670,6 +792,13 @@ def _merge_visual_into_sections(sections: list[dict], notes: list[dict]) -> list
     out = [dict(s) for s in sections]
 
     def _annotate(items: list[dict]) -> str:
+        """Le note visive marcate, pronte da mescolare al parlato.
+
+        Il marcatore davanti a ciascuna non e' decorazione: e' quello che dice
+        al modello del riassunto che quel pezzo non e' stato DETTO ma VISTO.
+        Senza, il riassunto risulterebbe che qualcuno ha pronunciato a voce
+        venti righe di codice.
+        """
         return "\n\n".join(
             f"[A SCHERMO — {_format_timestamp(n['start'])}]\n{n['text']}" for n in items)
 
