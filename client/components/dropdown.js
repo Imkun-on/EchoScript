@@ -22,8 +22,9 @@
  *     se cambiano, il pannello si ridisegna da solo.
  */
 
-/* Le tendine costruite finora. Serve a chi cambia .value da codice — nessun
- * evento, nessuna modifica al documento — e vedrebbe altrimenti il bottone
+/* Le tendine costruite finora. Serve a chi cambia .value da codice, cosa che
+ * non produce nessun evento e nessuna modifica al documento, e vedrebbe
+ * altrimenti il bottone
  * fermo sulla voce di prima mentre il <select> dice un'altra cosa. */
 const AGGIORNA = [];
 
@@ -91,7 +92,7 @@ function potenzia(select) {
   function scegli(i) {
     // Con un elenco vuoto l'indice evidenziato resta -1, e assegnarlo
     // svuoterebbe il <select>: partirebbe un 'change' con valore vuoto, che
-    // Python salverebbe come modello scelto — un nome di modello inesistente
+    // Python salverebbe come modello scelto, e sarebbe un nome inesistente
     // che si scopre solo quando la trascrizione non parte.
     if (i < 0 || i >= select.options.length) { chiudi(); return; }
     select.selectedIndex = i;

@@ -48,7 +48,7 @@ def _checkpoint_key(meta: dict) -> str:
 
     Basata sul TITOLO (la stessa identità della cartella dei risultati), così
     coincide sia con i metadati originali sia con quelli RICOSTRUITI dal .json
-    salvato — dove l'id del video e il percorso file non sono disponibili. Questo
+    salvato, dove l'id del video e il percorso file non sono disponibili. Questo
     è essenziale perché lo stato scritto durante il run e quello aggiornato dalle
     fasi «solo traduzione/riassunto/riprendi» (che ricaricano da disco) puntino
     allo stesso file."""
@@ -210,7 +210,7 @@ def _local_resume_point(model_name: str, duration: float, resume_cp: dict | None
     Returns (start_offset_seconds, prior_segments, prior_detected). A non-zero
     offset means the passed checkpoint is valid (same model and ~same duration);
     the caller will trim the audio from that point. Returns (0, [], None) when no
-    checkpoint is passed or it does not match — the caller never auto-loads, so
+    checkpoint is passed or it does not match: the caller never auto-loads, so
     "start over" reliably means start over."""
     cp = resume_cp
     if not cp:

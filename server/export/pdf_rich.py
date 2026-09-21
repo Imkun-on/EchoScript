@@ -396,7 +396,7 @@ def build_pdf_rich(md_text: str, out_path: str) -> bool:
 def _save_pdf(meta: dict, sections: list[dict], out_path: str, with_timestamps: bool,
               engine_label: str = "", markdown: bool = False) -> bool:
     """Esporta un PDF: prima quello "ricco" (formule/mappe disegnate via browser
-    headless), poi ripiega su fpdf2. NON usa Groq — lavora su testo già prodotto,
+    headless), poi ripiega su fpdf2. NON usa Groq: lavora su testo già prodotto,
     quindi NESSUN credito speso. Restituisce True se il PDF è stato creato."""
     # «Salvato in:»: la cartella di output, ricavata dal percorso del PDF. Compare
     # tra i metadati in testa al documento (non più in fondo a ogni pagina).

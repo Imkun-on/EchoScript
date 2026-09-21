@@ -97,7 +97,7 @@ def get_playlist_info(url: str) -> dict | None:
     """Se l'URL è una PLAYLIST YouTube, restituisce nome/canale + elenco dei video.
 
     Usa yt-dlp in modalità "flat" (extract_flat="in_playlist"): NON risolve i
-    metadati di ogni singolo video, legge soltanto l'elenco — quindi è veloce
+    metadati di ogni singolo video, legge soltanto l'elenco, quindi è veloce
     anche con playlist lunghe. Restituisce None se l'URL non è una playlist
     (video singolo); solleva MediaError su errore di rete/lettura. La chiave
     'entries' è la lista degli URL dei video nell'ordine della playlist; 'title'

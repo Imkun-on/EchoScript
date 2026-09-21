@@ -10,8 +10,8 @@
  *
  * Cosa NON fa
  *     Non decide niente. Riceve un titolo, dei pezzi di contenuto e un elenco di
- *     bottoni, e li mette al loro posto. Il significato — cosa vuol dire
- *     «Riprendi», quando offrirlo — sta nelle sezioni, che e' dove si capisce
+ *     bottoni, e li mette al loro posto. Il significato (cosa vuol dire
+ *     «Riprendi», quando offrirlo) sta nelle sezioni, che e' dove si capisce
  *     leggendo.
  *
  * Le briciole di costruzione (el, paragrafo, riquadro…) stanno qui e non in
@@ -67,7 +67,7 @@ function righeDati(righe) {
 
 /* Una scelta cliccabile dentro la finestra: icona, titolo, spiegazione.
  * La finestra si chiude PRIMA di eseguire l'azione: se l'azione apre a sua
- * volta una finestra — succede — la vecchia deve essersene gia' andata. */
+ * volta una finestra, e succede, la vecchia deve essersene gia' andata. */
 function voceScelta(voce, azione) {
   const bottone = el('button', 'voce-scelta' + (voce.tono === 'attenzione' ? ' attenzione' : ''));
   const riquadro = el('span', 'riquadro-icona');
@@ -142,7 +142,8 @@ function finestraAperta() {
 }
 
 // Esc chiude, ed e' l'unico modo di uscire da una finestra senza scegliere:
-// cliccare fuori no, perche' su una domanda importante — «ritrascrivo tutto?» —
+// cliccare fuori no, perche' su una domanda importante, tipo «ritrascrivo
+// tutto?»,
 // un clic distratto a lato non deve valere come risposta.
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') chiudiFinestra();

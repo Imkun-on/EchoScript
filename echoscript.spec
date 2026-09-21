@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 # =============================================================================
-#  PyInstaller spec per EchoScript — interfaccia web dentro WebView2.
+#  PyInstaller spec per EchoScript: interfaccia web dentro WebView2.
 # =============================================================================
 #  Costruzione:  pyinstaller echoscript.spec --noconfirm
 #  Risultato:    dist/EchoScript/EchoScript.exe  (+ la cartella _internal/)
@@ -143,7 +143,7 @@ pyz = PYZ(a.pure)
 # Serve a togliere un difetto che si vedeva a occhio nudo. pywebview, quando
 # avvia la finestra, chiama SetProcessDPIAware(): da quel momento il programma
 # dichiara di sapersi disegnare da se' alla scala dello schermo. Finche' non lo
-# dichiara, e' Windows a stirargli le finestre — su uno schermo al 125% la
+# dichiara, e' Windows a stirargli le finestre: su uno schermo al 125% la
 # schermata di avvio da 440x260 veniva mostrata a 550x325, ingrandita e quindi
 # sfocata. Nell'istante della dichiarazione lo stiramento cessa e la finestra
 # SCATTA alla misura vera, ri-centrandosi: un ridimensionamento improvviso in
@@ -151,8 +151,8 @@ pyz = PYZ(a.pure)
 #
 # Dichiarandolo qui vale dal primo istante, prima ancora che esista un
 # interprete Python: la schermata di avvio nasce gia' della misura giusta e non
-# si muove piu'. Lo stato finale del programma non cambia di nulla — e' lo
-# stesso che pywebview imposta comunque — cambia solo QUANDO viene raggiunto.
+# si muove piu'. Lo stato finale del programma non cambia di nulla, e' lo
+# stesso che pywebview imposta comunque: cambia solo QUANDO viene raggiunto.
 #
 # longPathAware resta: senza, i percorsi oltre i 260 caratteri (titoli di video
 # lunghi) tornerebbero a fallire.

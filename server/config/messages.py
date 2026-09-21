@@ -33,10 +33,13 @@ I buchi nelle frasi
 from __future__ import annotations
 
 
-# Il motore e l'analisi visiva sono UI-agnostici ma devono mostrare i testi nella
-# lingua dell'interfaccia. Qui il catalogo unico it/en; la CLI è italiano-only e
-# non lo usa (i suoi pannelli rich restano in italiano). Le stringhe con {…} sono
-# formattate dai chiamanti con i valori (indici, nomi, errori).
+# Il catalogo. Le chiavi sono raggruppate per fase del lavoro, nello stesso
+# ordine in cui le fasi si susseguono: cercando il messaggio di un passaggio si
+# guarda dove quel passaggio avviene, invece di scorrere l'elenco intero.
+#
+# La riga di comando non passa di qui: ha i suoi pannelli colorati, scritti sul
+# posto, perche' un terminale puo' mostrare cose che una finestra non puo' e
+# viceversa.
 _RUNTIME_MSGS = {
     # download / lettura sorgente
     "dl_audio":       "Scarico audio",
@@ -65,7 +68,7 @@ _RUNTIME_MSGS = {
     "summarizing":    "Riassumo le sezioni",
     "section_sum":    "Sezione {i}/{n} riassunta",
     "sum_unavail":    "Riassunto non disponibile: {e}",
-    "sum_ratelimit":  "Crediti Groq esauriti: riassunto interrotto e salvato come parziale — riprendibile (anche in locale).",
+    "sum_ratelimit":  "Crediti Groq esauriti: riassunto interrotto e salvato come parziale, riprendibile (anche in locale).",
     "sum_fail":       "Riassunto fallito: {e}",
     "sum_pdf_fail":   "PDF del riassunto non creato: {e}",
     # salvataggio

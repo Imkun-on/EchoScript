@@ -209,11 +209,11 @@ def _vision_user_prompt(context: str = "") -> str:
     questo punto del video) è disponibile, lo antepone: dà al modello il CONTESTO
     di ciò di cui si sta parlando, così interpreta meglio sigle, nomi di variabili,
     simboli e formule ambigue a schermo. Vincolo esplicito: usare il contesto solo
-    per INTERPRETARE, mai per inventare — si trascrive solo ciò che è VISIBILE."""
+    per INTERPRETARE, mai per inventare: si trascrive solo ciò che è VISIBILE."""
     if not context:
         return _VISION_USER_PROMPT
     return (
-        "CONTESTO AUDIO — ciò che l'oratore sta dicendo intorno a questo punto del "
+        "CONTESTO AUDIO. Ciò che l'oratore sta dicendo intorno a questo punto del "
         f"video:\n«{context}»\n\n"
         "Usa questo contesto SOLO per interpretare correttamente ciò che vedi "
         "(sigle, nomi di variabili, simboli, formule, termini ambigui). NON "
@@ -435,7 +435,7 @@ def analyze_video_visuals(video_path: str, duration: float, workdir: str,
     _vision_user_prompt / _audio_context_near.
 
     Restituisce una lista di NOTE VISIVE {'start': sec, 'text': str, 'image': str},
-    una per fotogramma con informazione (i "vuoti" — volti, transizioni — vengono
+    una per fotogramma con informazione (i "vuoti", cioè volti e transizioni, vengono
     scartati). Se 'frames_out_dir' è dato, COPIA lì il fotogramma di ogni nota
     tenuta (il workdir temporaneo verrà cancellato) e ne salva il nome in 'image'.
 
@@ -587,7 +587,7 @@ def save_visual_notes(out_root: str, meta: dict, notes: list[dict],
                       quiet: bool = False) -> None:
     """Salva le NOTE VISIVE in results/<title>/analisi_visiva/.
 
-    Produce: il .json, un .md leggibile e — se l'export è attivo — un PDF "ricco"
+    Produce: il .json, un .md leggibile e, se l'export è attivo, un PDF "ricco"
     in cui OGNI nota mostra il suo FOTOGRAMMA accanto al contenuto estratto
     (codice/formula/grafico), così il frame fa da prova/riferimento visivo.
     'quiet' silenzia la console (per il motore/GUI, che riporta a modo suo)."""
@@ -623,7 +623,7 @@ def save_visual_notes(out_root: str, meta: dict, notes: list[dict],
         un pezzo di codice o una formula senza riaprire il video.
         """
         saved_line = [f"- **Salvato in:** {saved_in}"] if saved_in else []
-        out = [f"# {meta['title']} — Analisi visiva", "",
+        out = [f"# {meta['title']}: Analisi visiva", "",
                f"- **Estratto con:** {engine_label}",
                f"- **Fotogrammi con contenuto:** {len(notes)}",
                *saved_line, "", "---", ""]
@@ -784,7 +784,7 @@ def _merge_visual_into_sections(sections: list[dict], notes: list[dict]) -> list
 
     Ogni nota finisce nella sezione il cui intervallo [start, start_successiva)
     contiene il suo timestamp; se le sezioni non hanno start (testo continuo) le
-    note vanno in coda in ordine. Diventano annotazioni «[A SCHERMO — mm:ss] …»
+    note vanno in coda in ordine. Diventano annotazioni «[A SCHERMO · mm:ss] …»
     così il modello del riassunto le vede insieme al parlato. Non muta gli input."""
     if not notes:
         return sections
@@ -800,7 +800,7 @@ def _merge_visual_into_sections(sections: list[dict], notes: list[dict]) -> list
         venti righe di codice.
         """
         return "\n\n".join(
-            f"[A SCHERMO — {_format_timestamp(n['start'])}]\n{n['text']}" for n in items)
+            f"[A SCHERMO · {_format_timestamp(n['start'])}]\n{n['text']}" for n in items)
 
     if any(s.get("start") is not None for s in out):
         bounds = []

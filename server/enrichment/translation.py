@@ -37,7 +37,7 @@ from server.utils.text import _safe_filename
 
 # Riusa una trascrizione GIÀ salvata e ne produce una versione tradotta, senza
 # ri-trascrivere (quindi senza spendere crediti di trascrizione). Due motori,
-# scelti come per il riassunto — cioè dal BACKEND, non dalla presenza di una
+# scelti come per il riassunto, cioè dal BACKEND e non dalla presenza di una
 # chiave: col backend Groq si usa Google Translate (deep_translator, endpoint
 # gratuito, nessuna API key dedicata); col backend locale si traduce con Ollama,
 # così una lavorazione «sul mio computer» resta 100% offline anche quando una

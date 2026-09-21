@@ -27,7 +27,7 @@ from datetime import datetime, timedelta
 # Groq non espone un endpoint "saldo": il budget del piano free arriva SOLO
 # negli header x-ratelimit-* di ogni risposta, e sono PER MODELLO (whisper per
 # la trascrizione, gpt-oss per il riassunto, qwen per la visiva). Invece di
-# sprecare una chiamata vera — e quindi un credito — ad ogni clic sul pulsante
+# sprecare una chiamata vera, e quindi un credito, ad ogni clic sul pulsante
 # "crediti", registriamo qui gli header che le richieste REALI già producono:
 # il pulsante legge questa cache, a costo zero. La cache vive per la sessione.
 _RATE_LIMIT_UNITS = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}

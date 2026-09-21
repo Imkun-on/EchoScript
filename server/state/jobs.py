@@ -35,7 +35,7 @@ from server.utils.text import _lp, _safe_filename
 # Un unico file JSON per video che traccia l'avanzamento di TUTTE le fasi
 # (trascrizione, traduzione, riassunto). I checkpoint qui sopra riguardano solo
 # la trascrizione; questo stato è di livello più alto e permette di riprendere
-# esattamente dalla sezione in cui ci si è fermati — ad esempio quando i crediti
+# esattamente dalla sezione in cui ci si è fermati, per esempio quando i crediti
 # Groq finiscono a metà del riassunto. È il "database" del job: JSON atomico e
 # ispezionabile, accanto ai checkpoint in results/.checkpoints/.
 #
@@ -215,7 +215,7 @@ def resume_sections(meta: dict, stage: str, total: int, key: str, value):
     parziale servono sempre le stesse tre cautele:
 
     1. il parziale vale solo se l'IMPOSTAZIONE con cui era stato prodotto non è
-       cambiata — la lingua di destinazione per la traduzione ('target'), la
+       cambiata: la lingua di destinazione per la traduzione ('target'), la
        lingua del riassunto ('lang'). Se è cambiata, il testo già fatto è nella
        lingua sbagliata e va buttato;
     2. se le sezioni salvate sono PIÙ di quelle attuali (la trascrizione è stata
@@ -418,7 +418,7 @@ STAGE_LABELS_IT = {
 def resume_info_text(meta: dict) -> str:
     """Breve testo «da dove riprende» per il video, o "" se non c'è nulla.
 
-    Es. "riassunto — sezione 8/20". Usato nei menu CLI/GUI per spiegare all'utente
+    Es. "riassunto, sezione 8/20". Usato nei menu CLI/GUI per spiegare all'utente
     cosa farà «Riprendi da dove si è interrotto»."""
     plan = resume_plan(load_state(meta))
     stage = plan.get("stage")
@@ -429,5 +429,5 @@ def resume_info_text(meta: dict) -> str:
     done, total = plan.get("done", 0), plan.get("total", 0)
     if total and plan.get("status") == STAGE_PARTIAL:
         sec = "sezione"
-        return f"{name} — {sec} {done + 1}/{total}"
+        return f"{name}, {sec} {done + 1}/{total}"
     return name

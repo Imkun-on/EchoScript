@@ -1,5 +1,5 @@
 # =============================================================================
-#  EchoScript — fast transcription of YouTube videos with Groq (Whisper) or local
+#  EchoScript: fast transcription of YouTube videos with Groq (Whisper) or local
 # =============================================================================
 #  HOW IT WORKS, IN BRIEF (for first-time readers):
 #
@@ -25,8 +25,8 @@
 #        that in the end the timings are correct relative to the whole video.
 #
 #    OUTPUT:
-#        a .md file with the text, the per-sentence timing and — if the video
-#        has YouTube CHAPTERS — the text divided into sections.
+#        a .md file with the text, the per-sentence timing and, if the video
+#        has YouTube CHAPTERS, the text divided into sections.
 #
 #  PRIVACY: Groq is a CLOUD service. The audio is uploaded to their servers
 #  for transcription: it is NOT all local. For public videos this is perfectly
@@ -504,14 +504,14 @@ def choose_existing_action(title: str, can_resume: bool = False,
         key = str(i)
         mapping[key] = code
         if code == "resume" and resume_info:
-            desc = f"{desc} — [bright_cyan]{resume_info}[/bright_cyan]"
+            desc = f"{desc}: [bright_cyan]{resume_info}[/bright_cyan]"
         table.add_row(key, f"{icon} {name}", desc)
 
     console.print()
     console.print(Panel(
         table,
         title=f"[title]♻ «{title}» è già stato trascritto[/title]", title_align="left",
-        subtitle="[dim]è presente in results/ — scegli come procedere[/dim]",
+        subtitle="[dim]è presente in results/, scegli come procedere[/dim]",
         border_style="bright_yellow", box=ROUNDED, expand=False, padding=(1, 2),
     ))
 
@@ -722,7 +722,7 @@ def display_playlist_sources(pl: dict, metas: list[dict]) -> None:
     console.print()
     console.print(Panel(
         table,
-        title=f"[title]▶ Playlist «{pl.get('title') or '?'}» — {len(metas)} video[/title]",
+        title=f"[title]▶ Playlist «{pl.get('title') or '?'}»: {len(metas)} video[/title]",
         title_align="left", subtitle=sub,
         border_style="bright_magenta", box=ROUNDED, expand=False, padding=(1, 2),
     ))
@@ -1293,7 +1293,7 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
         if kind == "youtube":
             console.print()
             dl_label = "Download video" if do_visual else "Download audio"
-            console.rule(f"[phase]⬇ Fase {step['download']}/{n} — {dl_label}[/phase]", style="bright_blue")
+            console.rule(f"[phase]⬇ Fase {step['download']}/{n}: {dl_label}[/phase]", style="bright_blue")
             if do_visual:
                 # Un solo download: dal video estraiamo SIA i fotogrammi SIA l'audio.
                 media_path = _cli_download_video(ref, workdir)
@@ -1322,12 +1322,12 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
         # --- Transcription ---
         if backend == "groq":
             console.print()
-            console.rule(f"[phase]✂ Fase {step['prepare']}/{n} — Preparazione audio[/phase]", style="bright_blue")
+            console.rule(f"[phase]✂ Fase {step['prepare']}/{n}: Preparazione audio[/phase]", style="bright_blue")
             chunks = _cli_split_audio(audio_path, duration, workdir)
             console.print(f"  {SYM_OK} Audio diviso in [info]{len(chunks)}[/info] blocchi da ~{CHUNK_SECONDS // 60} min")
 
             console.print()
-            console.rule(f"[phase]✎ Fase {step['transcribe']}/{n} — Trascrizione · Groq (cloud)[/phase]", style="bright_green")
+            console.rule(f"[phase]✎ Fase {step['transcribe']}/{n}: Trascrizione · Groq (cloud)[/phase]", style="bright_green")
             # Ripresa: se il checkpoint combacia (stessi blocchi), riparti.
             start_index, prior, prior_lang = 0, None, None
             if resume_cp and resume_cp.get("total_chunks") == len(chunks):
@@ -1384,7 +1384,7 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
             dev, _ = _resolve_device()
             dev_label = "GPU" if dev == "cuda" else "CPU"
             console.print()
-            console.rule(f"[phase]✎ Fase {step['transcribe']}/{n} — Trascrizione · Locale {dev_label} ({local_model})[/phase]",
+            console.rule(f"[phase]✎ Fase {step['transcribe']}/{n}: Trascrizione · Locale {dev_label} ({local_model})[/phase]",
                          style="bright_green")
             if dev != "cuda":
                 console.print("  [warning]La trascrizione locale gira sulla CPU: può richiedere diversi minuti.[/warning]")
@@ -1401,7 +1401,7 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
         visual_notes: list[dict] = []
         if do_visual and media_path and not fermarsi():
             console.print()
-            console.rule(f"[phase]👁 Fase {step['visual']}/{n} — Analisi visiva (cosa si VEDE)[/phase]",
+            console.rule(f"[phase]👁 Fase {step['visual']}/{n}: Analisi visiva (cosa si VEDE)[/phase]",
                          style="bright_yellow")
             # Cartella DEFINITIVA dei fotogrammi (li copiamo qui prima che il
             # workdir temporaneo venga cancellato), così il documento li mostra.
@@ -1414,7 +1414,7 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
                                                  segments=segments)
 
     # (Here the temporary folder has already been deleted: the data we need
-    #  — segments and visual notes — is already in memory.)
+    #  (segments and visual notes) is already in memory.)
     if not segments:
         return None
     return segments, visual_notes
@@ -1509,8 +1509,8 @@ def translate_existing(out_root: str, title: str, target: str = "it",
     """Traduce una trascrizione GIÀ salvata (niente ri-trascrizione, nessun credito).
 
     Rilegge i file da out_root/<title>/, traduce le sezioni verso 'target'
-    (default italiano) con Google Translate — o in locale via Ollama se
-    'local=True' — e salva md/txt (+ pdf) sotto
+    (default italiano) con Google Translate, oppure in locale via Ollama se
+    'local=True', e salva md/txt (+ pdf) sotto
     out_root/<title>/traduzioni/ col suffisso della lingua.
     Restituisce la LISTA delle sezioni tradotte (così il
     riassunto può riusarle senza ricaricarle), oppure None se non c'era nulla da
@@ -1727,7 +1727,7 @@ def summarize_existing(out_root: str, title: str, client=None,
         # riassunto potrà riprendere da lì (anche in locale con Ollama).
         if _is_rate_limit(str(e)):
             console.print("[warning]Crediti Groq esauriti: riassunto interrotto e "
-                          "salvato come parziale — potrai riprendere (anche in "
+                          "salvato come parziale: potrai riprendere (anche in "
                           "locale).[/warning]")
         else:
             console.print(f"[error]Riassunto fallito: {e}[/error]")
@@ -1941,7 +1941,7 @@ def run() -> None:
         console.print()
         console.print("  [bold bright_yellow]👁  Analisi visiva del video (sperimentale)[/bold bright_yellow]")
         console.print("  [dim]Oltre all'audio, EchoScript può «guardare» i fotogrammi ed estrarre ciò che è[/dim]")
-        console.print("  [dim]scritto a schermo — codice, formule, grafici, diagrammi — per includerlo nel[/dim]")
+        console.print("  [dim]scritto a schermo (codice, formule, grafici, diagrammi) per includerlo nel[/dim]")
         console.print("  [dim]riassunto. È più lento e, con Groq, consuma crediti per ogni fotogramma.[/dim]")
         v_eng = "Groq cloud" if backend == "groq" else "Ollama locale"
         want_visual = _confirm(f"Attivo l'analisi visiva? (motore: {v_eng})", accent="bright_yellow")

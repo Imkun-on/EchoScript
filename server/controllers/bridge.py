@@ -63,7 +63,7 @@ def json_per_js(valore) -> str:
     JSON e JavaScript non coincidono del tutto: U+2028 e U+2029 sono caratteri
     legittimi dentro una stringa JSON ma terminano una riga in JavaScript, quindi
     finirebbero dentro ``window.funzione(...)`` spezzando l'istruzione a meta'.
-    Un titolo di video che li contiene farebbe fallire la chiamata in silenzio —
+    Un titolo di video che li contiene farebbe fallire la chiamata in silenzio:
     l'errore lo vedrebbe solo la console della pagina, che qui non si apre. Si
     riscrivono nella loro forma con la barra rovesciata, che JSON accetta e
     JavaScript legge come lo stesso carattere.

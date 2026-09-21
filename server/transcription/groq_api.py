@@ -83,7 +83,7 @@ def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
     config); when on, each segment also carries a 'words' list (start/end/word).
 
     'on_headers' (optional): if given, the call uses the raw response and passes
-    its HTTP headers to on_headers(headers) — so the engine can read the
+    its HTTP headers to on_headers(headers), so the engine can read the
     x-ratelimit-* budget. None (the CLI default) keeps the plain call unchanged.
 
     If return_language=True, returns (segments, language) where 'language' is the

@@ -143,8 +143,8 @@ _DLG_APRI = getattr(getattr(webview, 'FileDialog', None), 'OPEN',
 # numero di catalogo di transcriber.py ('om.text.2'): cosi' aggiungere un
 # modello e' una riga qui e una nel file dei testi, non una modifica al codice.
 #
-# Sono divisi in due gruppi che non si mescolano mai — quelli che girano sul
-# computer e quelli che girano sui server Groq — perche' e' cosi' che sono
+# Sono divisi in due gruppi che non si mescolano mai (quelli che girano sul
+# computer e quelli che girano sui server Groq), perche' e' cosi' che sono
 # divise le due sezioni dell'interfaccia: scegliere il motore sceglie il gruppo
 # intero, trascrizione e riassunto e analisi visiva insieme.
 
@@ -213,7 +213,7 @@ class Diario(io.TextIOBase):
         Rich sono i wrapper ``_cli_*``, che chiama soltanto la riga di comando.
 
         Quindi su questa strada il dirottamento di ``stdout`` cattura solo i
-        guasti — il traceback di ``_in_thread`` — e il diario lo riempie
+        guasti, cioe' il traceback di ``_in_thread``, e il diario lo riempie
         ``Avanzamento``, che racconta le fasi mentre la barra le mostra. Questa
         classe resta perche' il giorno in cui uno di quei moduli avesse
         qualcosa da dire, lo direbbe nel posto giusto senza modifiche.
@@ -292,14 +292,15 @@ class Avanzamento:
     blocchi, traduzione e riassunto ci sono solo se spuntati).
 
     Ogni fase occupa una fetta ``[i/n, (i+1)/n]`` del totale, e dentro la fetta
-    si interpola col progresso vero. Quando una fase non sa quanto manca — sta
-    caricando un modello — la barra resta all'inizio della sua fetta invece di
+    si interpola col progresso vero. Quando una fase non sa quanto manca, per
+    esempio mentre carica un modello, la barra resta all'inizio della sua
+    fetta invece di
     girare a vuoto: cosi' quando si muove vuol dire qualcosa.
 
     Scrive anche il diario, dagli stessi dati. Non e' una ripetizione: la barra
     dice dove siamo adesso e cancella cio' che c'era prima, il diario tiene
-    l'ordine e le ore. Su un lavoro lungo — novanta secondi fermi a caricare un
-    modello — o su una playlist di cinquanta video, quello che e' gia' successo
+    l'ordine e le ore. Su un lavoro lungo (novanta secondi fermi a caricare un
+    modello) o su una playlist di cinquanta video, quello che e' gia' successo
     conta quanto quello che sta succedendo.
     """
 
@@ -323,8 +324,8 @@ class Avanzamento:
     def _nome(self, fase: str) -> str:
         """Il nome leggibile della fase, con lo stesso ripiego della pagina.
 
-        Una chiave assente tornerebbe come chiave — 'phase.pippo' scritto in
-        chiaro nel diario — mentre qui serve una frase.
+        Una chiave assente tornerebbe come chiave, cioe' 'phase.pippo'
+        scritto in chiaro nel diario, mentre qui serve una frase.
         """
         chiave = 'phase.' + fase
         return i18n.t(chiave if chiave in i18n.catalogo() else 'phase.default')
@@ -381,7 +382,7 @@ def piano_fasi(motore: str, sorgente: str, opzioni: dict) -> list[str]:
     """Sequenza ordinata delle fasi di un lavoro.
 
     Dipende dal contesto: un file locale non si scarica, solo Groq divide
-    l'audio in blocchi, e le fasi facoltative si aggiungono solo se richieste —
+    l'audio in blocchi, e le fasi facoltative si aggiungono solo se richieste,
     nello stesso ordine in cui il motore le esegue (visiva, traduzione,
     riassunto), che e' dopo aver scritto la trascrizione.
     """
@@ -495,8 +496,8 @@ class Api:
         che sia arrivato, e nel frattempo il velo di caricamento resta davanti
         con la sua barra che avanza.
 
-        L'attesa ha un tetto. Se il motore non arrivasse mai — un import
-        fallito, un file di libreria corrotto — senza tetto questa risposta
+        L'attesa ha un tetto. Se il motore non arrivasse mai, per un import
+        fallito o un file di libreria corrotto, senza tetto questa risposta
         non tornerebbe indietro e la pagina resterebbe sotto il velo per
         sempre, senza dire niente a nessuno. Con il tetto, dopo un minuto si
         risponde lo stesso: la pagina si scopre, l'interfaccia e' a meta' e
@@ -530,8 +531,8 @@ class Api:
     def _applica_groq(self) -> None:
         """Porta in transcriber i modelli Groq scelti nella sezione «Motore».
 
-        Servono anche fuori da un lavoro — la sezione crediti li elenca per
-        chiedere quanto e' rimasto — quindi non basta passarli fra le opzioni al
+        Servono anche fuori da un lavoro, per esempio a chi chiede quanti
+        crediti restano, quindi non basta passarli fra le opzioni al
         momento di partire.
         """
         settings.GROQ_MODEL = self.scelte['groq']
@@ -560,7 +561,7 @@ class Api:
 
         # La memoria richiesta e' un inciso, non una voce a se': fra parentesi
         # attaccata al nome. Con un separatore la riga finiva con tre stacchi in
-        # fila — nome, memoria, descrizione — e non si capiva piu' dove
+        # fila (nome, memoria, descrizione) e non si capiva piu' dove
         # cominciasse il giudizio sul modello.
         ollama = [{'valore': n, 'nome': f'{n}{spunta(n)} ({ram})', 'chiave': k}
                   for n, ram, k in _OLLAMA_TESTO]
@@ -572,8 +573,9 @@ class Api:
         groq_testo = [{'valore': n, 'nome': n, 'chiave': k} for n, k in _GROQ_TESTO]
         groq_vista = [{'valore': n, 'nome': n, 'chiave': k} for n, k in _GROQ_VISTA]
 
-        # Un modello fuori catalogo — imposto da .env, o scelto quando il
-        # catalogo era diverso — va comunque offerto, o il valore selezionato non
+        # Un modello fuori catalogo, imposto da .env oppure scelto quando il
+        # catalogo era diverso, va comunque offerto: altrimenti il valore
+        # selezionato non
         # esisterebbe fra le voci e la pagina ripiegherebbe sulla prima,
         # cambiando di nascosto il modello scelto. Si guarda la scelta salvata,
         # non il valore del modulo: sono la stessa cosa solo al primo avvio.
@@ -690,7 +692,7 @@ class Api:
 
         Torna subito: il lavoro vero avviene in un thread, e la pagina viene
         avvisata a cose fatte. Cosi' la finestra non si congela nei secondi in
-        cui yt-dlp interroga YouTube — che su una playlist lunga sono parecchi,
+        cui yt-dlp interroga YouTube, che su una playlist lunga sono parecchi,
         perche' ogni video va letto uno per uno.
         """
         if self._occupato:
@@ -1091,7 +1093,8 @@ class Api:
         self._apri_lavoro(opzioni, piano)
         meta_iniziale = self._meta
         # Il crediti-esauriti non si intercetta qui: lo raccoglie _in_thread, che
-        # lo tratta per quello che e' — un'attesa, non un guasto — ed e' l'unico
+        # lo tratta per quello che e', cioe' un'attesa e non un guasto, ed e'
+        # l'unico
         # posto in cui la distinzione va fatta, invece che in ogni lavoro.
         meta, segmenti, etichetta, cliente = engine.transcribe_only(
             self._src, opzioni, on_progress=self._riferisci, resume=riprendi)
@@ -1214,7 +1217,7 @@ class Api:
         Tre regole, e sono quelle che rendono il batch sopportabile su una lista
         lunga: un video gia' presente si salta senza spendere nulla; uno che
         fallisce non ferma gli altri; se Groq esaurisce i crediti ci si ferma li'
-        — quelli fatti restano salvati e domani si riprende.
+        I blocchi gia' fatti restano salvati e domani si riprende.
         """
         playlist = self._playlist
         voci = playlist['items']

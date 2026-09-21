@@ -89,8 +89,8 @@ _SUMMARY_SYSTEM_PROMPT = (
     "del discorso e ne approfondisca i passaggi anziché comprimerli. Punta a un "
     "riassunto esteso e particolareggiato, non a una sintesi telegrafica. "
     "Per facilitare la lettura, evidenzia in grassetto Markdown (**testo**) "
-    "soltanto le parole o le brevissime locuzioni chiave — concetti centrali, "
-    "termini tecnici, nomi propri e cifre rilevanti — usando il grassetto con "
+    "soltanto le parole o le brevissime locuzioni chiave (concetti centrali, "
+    "termini tecnici, nomi propri e cifre rilevanti) usando il grassetto con "
     "parsimonia e mai su intere frasi (deve risaltare, non saturare il testo). "
     "Ricorri agli elenchi puntati solo quando indispensabili (ad esempio per "
     "enumerazioni di voci eterogenee presenti nell'originale) e mai come "
@@ -106,7 +106,7 @@ _SUMMARY_SYSTEM_PROMPT = (
 # VISIVA: istruisce il modello a integrare codice, formule e diagrammi visti a
 # schermo e ad aggiungere una mappa concettuale quando il contenuto è visuale.
 _SUMMARY_VISUAL_BASE = (
-    "\nIl testo può contenere annotazioni nel formato «[A SCHERMO — mm:ss] …» che "
+    "\nIl testo può contenere annotazioni nel formato «[A SCHERMO · mm:ss] …» che "
     "riportano ciò che era VISIBILE nel video in quel momento (codice, formule, "
     "grafici, diagrammi, slide). Trattale come fonte attendibile quanto il parlato "
     "e INTEGRALE nel riassunto in modo naturale, secondo queste regole aggiuntive:\n"
@@ -334,7 +334,7 @@ def summarize_sections(sections: list[dict], summarize_fn,
 
     Per il RESUME: 'done_sections' sono le sezioni già riassunte in precedenza
     (saltate); 'on_section(list)' è chiamato dopo OGNI nuova sezione con l'elenco
-    completo finora, per salvare il parziale — così se i crediti Groq finiscono a
+    completo finora, per salvare il parziale: così se i crediti Groq finiscono a
     metà riassunto si riprende esattamente dalla sezione ferma, senza rispendere
     crediti su quelle già fatte."""
     out: list[dict] = list(done_sections or [])

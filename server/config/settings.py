@@ -263,7 +263,7 @@ OLLAMA_NUM_CTX = _env_int("ECHOSCRIPT_OLLAMA_NUM_CTX", 8192)
 # i parziali vengono uniti (map-reduce), per non sforare il contesto del modello.
 SUMMARY_MAX_CHARS = _env_int("ECHOSCRIPT_SUMMARY_MAX_CHARS", 12000)
 
-# --- ANALISI VISIVA (vision) — trascrive ciò che si VEDE nel video ---
+# --- ANALISI VISIVA (vision): trascrive ciò che si VEDE nel video ---
 # Oltre all'audio, EchoScript può "guardare" i fotogrammi di un video (slide,
 # codice a schermo, formule, grafici, diagrammi) ed estrarne il contenuto con un
 # modello multimodale, per arricchire il riassunto. È OPZIONALE (chiesto a ogni
@@ -317,7 +317,7 @@ VISION_MAX_FRAMES = _env_int("ECHOSCRIPT_VISION_MAX_FRAMES", 60)
 VISION_FALLBACK_INTERVAL = _env_int("ECHOSCRIPT_VISION_INTERVAL", 45)
 # Distanza minima (secondi) tra due fotogrammi chiave. Il rilevamento scene di
 # ffmpeg spesso scatta DUE volte sulla stessa transizione (un frame a metà stacco
-# + uno assestato), generando coppie ravvicinate ridondanti — spesso una è lo
+# + uno assestato), generando coppie ravvicinate ridondanti: spesso una è lo
 # shot largo "dove non si vede nulla". Raggruppiamo i frame entro questa finestra
 # e teniamo l'ULTIMO del gruppo (lo stato assestato, più leggibile). 0 disattiva.
 VISION_MIN_GAP = _env_int("ECHOSCRIPT_VISION_MIN_GAP", 8)

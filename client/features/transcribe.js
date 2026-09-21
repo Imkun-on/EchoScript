@@ -3,12 +3,12 @@
  * Il filo del discorso, in ordine:
  *
  *   1. si dice cosa trascrivere (un link, o un file) e si preme «Guarda cos'e'»;
- *   2. Python legge i metadati e la pagina chiede conferma — con la copertina,
+ *   2. Python legge i metadati e la pagina chiede conferma, con la copertina,
  *      i dati e la stima davanti: e' l'unico momento in cui ci si accorge di
  *      aver incollato il link sbagliato PRIMA di spendere crediti;
  *   3. confermato, la scheda resta nella colonna di sinistra;
- *   4. «Trascrivi» chiede a Python se ci sono ostacoli — manca la chiave, il
- *      video c'e' gia', esiste un parziale — e a seconda della risposta parte o
+ *   4. «Trascrivi» chiede a Python se ci sono ostacoli (manca la chiave, il
+ *      video c'e' gia', esiste un parziale) e a seconda della risposta parte o
  *      apre una finestra di scelte;
  *   5. mentre lavora parlano l'avanzamento e il diario;
  *   6. alla fine una finestra dice cosa e' stato scritto e dove.
@@ -55,7 +55,7 @@ function initTrascrivi(dati) {
 }
 
 /* I due ingressi occupano lo stesso posto: si vede solo quello della sorgente
- * scelta, e il bottone «Guarda cos'e'» ha senso solo per un link — un file lo
+ * scelta, e il bottone «Guarda cos'e'» ha senso solo per un link: un file lo
  * si e' gia' visto scegliendolo. */
 function sincronizzaSorgente() {
   const youtube = scelte().sorgente === 'youtube';
@@ -177,7 +177,7 @@ window.erroreSorgente = (messaggio) => {
 };
 
 /* La conferma: copertina, dati, stima, e la domanda. Chiederla e' cio' che
- * evita di trascrivere il video sbagliato — che con Groq non e' solo tempo. */
+ * evita di trascrivere il video sbagliato, che con Groq non e' solo tempo. */
 window.chiediConferma = (scheda) => {
   finiscoLettura();
   const playlist = scheda.tipo === 'playlist';
@@ -215,7 +215,7 @@ async function scegliFile() {
 
 /* Un link trascinato dentro la finestra vale come un link incollato. Un file
  * trascinato no: il percorso che il browser espone non e' quello vero del
- * disco, e aprirlo fallirebbe in silenzio — meglio dire di usare «Sfoglia». */
+ * disco, e aprirlo fallirebbe in silenzio: meglio dire di usare «Sfoglia». */
 window.accettaTrascinato = (testo) => {
   if (!/^https?:/i.test(testo)) { avvisa(t('err.no_url'), 'fail'); return; }
   $('#sorgente').value = 'youtube';

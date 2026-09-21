@@ -195,7 +195,7 @@ def _set_engine_lang(options: dict) -> None:
     if vm:
         settings.OLLAMA_VISION_MODEL = vm
     # Modelli Groq (cloud) scelti in GUI: gli stessi due ruoli, ma sui server.
-    # Valgono solo quando il backend è Groq — con backend locale il cloud non
+    # Valgono solo quando il backend è Groq: con backend locale il cloud non
     # viene toccato affatto (vedi _resolve_summary_client).
     gs = options.get("groq_summary_model")
     if gs:
@@ -272,7 +272,7 @@ def make_groq_client(api_key: str | None = None):
 # only via the x-ratelimit-* HTTP headers attached to every API response. To
 # READ them without doing real work we send a ~1-second silent audio clip to the
 # transcription endpoint (the same one the app uses) and parse the headers from
-# the raw response. Costs ~1 second of the daily audio budget — negligible.
+# the raw response. Costs about 1 second of the daily audio budget, negligible.
 
 from datetime import datetime as _datetime, timedelta as _timedelta
 
@@ -378,7 +378,7 @@ def fetch_groq_limits(api_key: str | None = None) -> dict:
 
 def get_cached_credits() -> list[dict]:
     """Crediti Groq residui PER MODELLO, letti dalla cache che le richieste reali
-    (trascrizione/riassunto/analisi visiva) hanno già popolato — quindi a COSTO
+    (trascrizione/riassunto/analisi visiva) hanno già popolato, quindi a COSTO
     ZERO: questa funzione NON contatta Groq, non consuma alcun credito.
 
     Restituisce una lista (vuota finché non è stata fatta almeno una chiamata
@@ -592,7 +592,7 @@ def video_meta(source: str, options: dict, on_progress=_noop) -> dict:
 
 
 def transcribe_only(source: str, options: dict, on_progress=_noop, resume: bool = False):
-    """PHASE 1 — download/read + transcribe ONE source, returning data IN MEMORY.
+    """PHASE 1: download/read + transcribe ONE source, returning data IN MEMORY.
 
     'source' is a YouTube URL or, when options["source_kind"] == "local", the
     path of a local audio/video file. Local files skip the download phase.
@@ -659,8 +659,8 @@ def transcribe_only(source: str, options: dict, on_progress=_noop, resume: bool 
         # La cartella del video scaricato per l'analisi visiva NON è una
         # TemporaryDirectory: sopravvive al blocco 'with' perché i fotogrammi si
         # estraggono nella fase successiva, ed è save_results a cancellarla. Se
-        # però si esce di qui per un guasto — crediti esauriti, niente testo
-        # trascritto — save_results non viene mai chiamata e quel video (spesso
+        # però si esce di qui per un guasto (crediti esauriti, niente testo
+        # trascritto) save_results non viene mai chiamata e quel video (spesso
         # centinaia di MB) resterebbe nel temporaneo fino al riavvio.
         if meta.get("_video_tmpdir"):
             shutil.rmtree(meta["_video_tmpdir"], ignore_errors=True)
@@ -896,8 +896,8 @@ def _resolve_summary_client(options: dict, client):
     The backend is the whole decision, and deliberately so: choosing "on my
     computer" is a promise that nothing leaves the machine, so a Groq key loaded
     for other jobs must NOT silently route the summary through the cloud. The
-    two engines are two separate worlds — local models on one side, the key and
-    the cloud models on the other — and this is where that separation is
+    two engines are two separate worlds (local models on one side, the key and
+    the cloud models on the other) and this is where that separation is
     enforced. Anything else would make the panel lie."""
     if (options.get("backend") or "").lower() != "groq":
         return None
@@ -919,7 +919,7 @@ def _summarize_outputs(meta: dict, sections: list[dict], options: dict,
 
     'sections' should already be Italian (the translation when available, else
     the original). Uses Groq when a client/key is available, else Ollama. Any
-    failure becomes a warning — the transcription/translation stay saved.
+    failure becomes a warning: the transcription/translation stay saved.
 
     Se 'visual_notes' è dato (analisi visiva), le note vengono fuse nel testo per
     timestamp, si attiva il prompt «visivo» (codice/formule/mappe) e i FOTOGRAMMI
@@ -1039,7 +1039,7 @@ def _visual_failure_reason(stats: dict, is_groq: bool) -> str:
 
 def save_results(meta: dict, segments: list[dict], engine_label: str, options: dict,
                  out_root: str, client=None, on_progress=_noop) -> dict:
-    """PHASE 2 — write all outputs under 'out_root', creating the subfolders.
+    """PHASE 2: write all outputs under 'out_root', creating the subfolders.
 
     Layout: out_root/<title>/<trascrizioni>/ (md, txt, json, + pdf if exporting).
     The subfolder name follows the UI language passed in options["LINGUA_USCITA"]
@@ -1128,7 +1128,7 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
                     "dir": os.path.join(video_dir, jobs.visual_subdir()),
                 }
             else:
-                # Nessuna nota: spiega il MOTIVO (prima era silenzioso — cartella
+                # Nessuna nota: spiega il MOTIVO (prima era silenzioso, restava
                 # 'frames' vuota e basta) leggendo l'esito riportato in 'vstats'.
                 warnings.append(_visual_failure_reason(vstats, chat_client is not None))
         except Exception as e:

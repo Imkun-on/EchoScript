@@ -2,9 +2,9 @@
  *
  * Regola unica, valida anche per i tre file delle sezioni: qui non si decide
  * niente di importante. La pagina raccoglie cio' che si sceglie, lo passa a
- * Python, e mostra cio' che Python risponde. Ogni scelta vera — se un URL sia
+ * Python, e mostra cio' che Python risponde. Ogni scelta vera (se un URL sia
  * una playlist, se un video sia gia' stato trascritto, quanto costera' un
- * lavoro, in quante fasi si divide — sta gia' nel motore, ed e' li' che deve
+ * lavoro, in quante fasi si divide) sta gia' nel motore, ed e' li' che deve
  * restare: duplicarla qui significherebbe due risposte diverse alla stessa
  * domanda.
  */
@@ -178,7 +178,7 @@ window.cambiaStato = (stato) => {
   $('#stato').textContent = t('status.' + stato);
 
   // Mentre si lavora nulla si puo' cambiare: ne' il motore, ne' la sorgente,
-  // ne' gli interruttori. Non e' una precauzione formale — cambiare modello a
+  // ne' gli interruttori. Non e' una precauzione formale: cambiare modello a
   // meta' trascrizione darebbe un risultato che non corrisponde a niente di
   // quello che si vede scritto.
   const inCorso = stato === 'working';

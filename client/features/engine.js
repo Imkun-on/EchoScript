@@ -1,13 +1,13 @@
 /* I modelli delle due postazioni, «Locale» e «Cloud», e la chiave di Groq.
  *
- * E' la decisione piu' importante del programma — dove finisce l'audio, quanto
- * costa, quanto si aspetta — e non si prende con un interruttore: si prende
+ * E' la decisione piu' importante del programma (dove finisce l'audio, quanto
+ * costa, quanto si aspetta) e non si prende con un interruttore: si prende
  * entrando in una delle due sezioni e lavorando li' dentro. Quale sia in uso lo
  * decide ``cambiaSezione`` in app.js; qui si riempiono i menu di ciascuna e si
  * tiene la targhetta della barra allineata.
  *
- * Le due terne di modelli fanno gli stessi tre mestieri — trascrizione,
- * riassunto e traduzione, analisi visiva — e non si mescolano mai: sotto
+ * Le due terne di modelli fanno gli stessi tre mestieri (trascrizione,
+ * riassunto e traduzione, analisi visiva) e non si mescolano mai: sotto
  * «Locale» solo modelli che girano su questo computer, sotto «Cloud» solo
  * modelli che girano sui server Groq, piu' la chiave che li paga. Non li mescola
  * nemmeno il codice qui sotto: due elenchi di menu, due pannelli distinti.
@@ -18,8 +18,9 @@
  */
 
 /* Menu -> scelta, divisi per mondo. Sono la stessa cosa per il codice che li
- * riempie, ma tenerli in due elenchi e' cio' che rende visibile — leggendo, non
- * ricordando — che nessun modello locale finisce nella sezione Cloud. */
+ * riempie, ma tenerli in due elenchi e' cio' che rende visibile, leggendo
+ * invece che ricordando, che nessun modello locale finisce fra quelli in
+ * nuvola. */
 const MENU_LOCALI = [['#m-whisper', 'whisper'], ['#m-ollama', 'ollama'],
                      ['#m-vision', 'vision']];
 const MENU_GROQ = [['#m-groq', 'groq'], ['#m-groq-testo', 'groq_testo'],
@@ -78,8 +79,9 @@ function etichetta(voce) {
   return voce.nome || desc || voce.valore;
 }
 
-/* I ✓ dei modelli gia' scaricati arrivano in ritardo — Python interroga Ollama
- * in sottofondo e resta muto se e' spento — quindi i menu si riscrivono quando
+/* I ✓ dei modelli gia' scaricati arrivano in ritardo, perche' Python interroga
+ * Ollama in sottofondo e resta muto se e' spento, quindi i menu si riscrivono
+ * quando
  * arrivano, senza che nessuno debba aspettarli. */
 window.aggiornaModelli = (modelli) => {
   MODELLI = modelli || MODELLI;

@@ -13,7 +13,7 @@ Perche' non stanno nel catalogo di transcriber.py
 
 La forma
     ``'chiave': {'it': ..., 'en': ...}``. I segnaposto sono quelli di
-    ``str.format`` — ``{titolo}``, ``{n}`` — e la pagina li sostituisce con la
+    ``str.format`` (``{titolo}``, ``{n}``) e la pagina li sostituisce con la
     stessa convenzione, quindi la stessa frase funziona da tutt'e due i lati.
 """
 from __future__ import annotations
@@ -158,7 +158,7 @@ TESTI: dict[str, str] = {
     'groqm.whisper-large-v3': 'whisper-large-v3: $0.111/ora · più accurato',
 
     # Modelli Groq di testo (riassunto e traduzione) e di analisi visiva, per
-    # numero di catalogo — come per Ollama, cosi' aggiungerne uno resta una riga
+    # numero di catalogo, come per Ollama: cosi' aggiungerne uno resta una riga
     # in transcriber.py e una qui.
     'gm.text.1':        'qualità piena, consigliato',
     'gm.text.2':        'più economico e rapido',
