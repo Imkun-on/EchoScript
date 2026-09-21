@@ -121,6 +121,13 @@ def build_txt(title: str, meta: dict, sections: list[dict],
     Con 'markdown=True' (riassunto) il testo può contenere **grassetto**: viene
     ripulito dai marcatori per restare testo piano."""
     def _plain(s: str) -> str:
+        """Toglie gli asterischi del grassetto quando non servono.
+
+        Il riassunto arriva scritto in markdown, con i termini importanti fra
+        doppi asterischi. In un file markdown vanno bene; in un file di testo
+        semplice si vedrebbero come asterischi e basta, che e' peggio di non
+        averli.
+        """
         return _strip_md_bold(s) if (markdown and s) else s
     if _is_local(meta):
         lines = [

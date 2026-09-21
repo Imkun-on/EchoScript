@@ -43,8 +43,20 @@ def _coerce(obj, key):
         return obj.get(key)
     return getattr(obj, key, None)
 def _extract_words(result) -> list[dict]:
-    """Normalize Groq's per-word timestamps (when requested) to a flat list of
-    {word, start, end}. Returns [] if the response carries no word timings."""
+    """I tempi delle singole parole, messi in una forma sola.
+
+    Groq puo' dire l'ora esatta di ogni parola, non solo di ogni frase. Serve a
+    chi poi vuole saltare a un punto preciso del video, o cercare una parola e
+    arrivarci sopra.
+
+    Arrivano pero' in una forma che cambia a seconda della versione del client:
+    a volte sono dizionari, a volte oggetti. Qui vengono ridotte tutte a
+    dizionari con gli stessi tre campi, cosi' il resto del programma non deve
+    sapere niente di quella differenza.
+
+    Lista vuota se i tempi delle parole non erano stati chiesti, che e' il caso
+    normale: costano in dimensione della risposta e quasi sempre non servono.
+    """
     raw = getattr(result, "words", None) or []
     words = []
     for w in raw:
@@ -82,10 +94,23 @@ def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
     granularities = ["segment", "word"] if words_on else ["segment"]
 
     def _ret(segs, lang):
+        """Restituisce i pezzi, con o senza la lingua riconosciuta.
+
+        Questa funzione ha due modi di rispondere, e i punti da cui esce sono
+        parecchi. Scrivere il bivio in un posto solo evita di doverlo ripetere
+        identico a ogni uscita, che e' il modo in cui prima o poi una delle
+        uscite se lo dimentica.
+        """
         return (segs, lang) if return_language else segs
 
     def _attach_words(seg_start: float, seg_end: float, words: list[dict]) -> list[dict]:
-        """Pick the words whose start falls inside this segment's [start, end)."""
+        """Le parole che cadono dentro questo pezzo di trascrizione.
+
+    Il mezzo decimo di secondo di tolleranza ai due estremi non e'
+    approssimazione: i tempi delle frasi e quelli delle parole arrivano da due
+    conteggi diversi e non combaciano mai al millesimo. Senza quel margine, la
+    prima parola di ogni frase finirebbe regolarmente fuori.
+    """
         return [w for w in words if seg_start - 0.05 <= w["start"] < seg_end + 0.05]
 
     for attempt in range(1, MAX_RETRIES + 1):

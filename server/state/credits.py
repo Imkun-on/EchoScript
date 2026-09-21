@@ -35,7 +35,19 @@ _RATE_LIMIT_CACHE: dict[str, dict] = {}  # model -> {model, items, checked_at_is
 
 
 def _rate_limit_reset_seconds(value: str | None) -> float | None:
-    """Header di reset Groq ('2m59.56s', '986ms', '1h0m0s') -> secondi. None se vuoto."""
+    """Da «fra quanto torneranno i crediti» a un numero di secondi.
+
+    Groq lo dice a parole sue: ``2m59.56s``, ``986ms``, ``1h0m0s``. Sono forme
+    diverse della stessa informazione, e nessuna e' un numero.
+
+    Qui si cercano tutte le coppie numero-unita' presenti e si sommano. Il giro
+    largo invece di un formato solo serve perche' quelle forme cambiano fra un
+    tipo di limite e l'altro, e un lettore rigido si romperebbe alla prima
+    variante non prevista.
+
+    None se non c'e' niente di leggibile: chi chiama mostrera' «non lo so»
+    invece di «fra zero secondi», che sarebbe una bugia.
+    """
     if not value:
         return None
     total, found = 0.0, False
@@ -49,7 +61,17 @@ def _rate_limit_reset_seconds(value: str | None) -> float | None:
 
 
 def _rate_limit_num(value) -> float | None:
-    """float() tollerante di un valore header (int/float/None)."""
+    """Trasforma in numero quello che e' arrivato, senza far cadere niente.
+
+    I valori arrivano dalle intestazioni di una risposta, quindi sono testo, e
+    ogni tanto sono testo che non e' un numero: vuoto, assente, o qualcosa di
+    inatteso. Qui in quel caso si restituisce None invece di sollevare un
+    errore.
+
+    E' una scelta, non pigrizia: questi numeri servono a mostrare un conto
+    approssimativo a chi guarda. Far fallire una trascrizione perche'
+    un'intestazione era scritta male sarebbe sproporzionato.
+    """
     if value is None:
         return None
     try:
@@ -71,6 +93,13 @@ def ratelimit_groups(headers):
     la GUI li vuole come durata + orario (engine._parse_ratelimit_headers).
     Entrambe partono da qui, così la lettura degli header sta scritta una volta sola."""
     def get(name: str):
+        """Legge un'intestazione senza fidarsi di come e' fatto il contenitore.
+
+        Le intestazioni arrivano dal client di Groq, e a seconda della versione
+        possono essere un dizionario normale o un oggetto suo. Il try serve a
+        non dover sapere quale dei due: se il modo di chiedere non funziona,
+        vale come «quell'intestazione non c'era».
+        """
         try:
             return headers.get(name)
         except Exception:

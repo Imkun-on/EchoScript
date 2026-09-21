@@ -53,7 +53,21 @@ def _ollama_has_model(name: str, installed: set[str]) -> bool:
     return any(n.split(":")[0] == name for n in installed)
 
 def _check_ollama() -> None:
-    """Verifica che Ollama sia raggiungibile; altrimenti spiega come installarlo."""
+    """Ollama e' acceso? Se no, si ferma spiegando cosa fare.
+
+    Perche' si controlla prima invece di scoprirlo dopo
+        Ollama e' un programma a parte, che va installato e avviato da chi usa
+        il computer. Senza questo controllo il primo segnale che manca sarebbe
+        un errore di rete in mezzo a un riassunto gia' cominciato, dopo minuti
+        di lavoro: incomprensibile, e al momento peggiore.
+
+    Perche' il messaggio d'errore e' lungo
+        Perche' chi lo legge, quasi sempre, non sa nemmeno cos'e' Ollama: ha
+        solo scelto «in locale» in un menu. Un messaggio tipo «connessione
+        rifiutata» a quella persona non dice niente di utile. Qui invece c'e'
+        l'indirizzo dove si e' provato, il sito da cui scaricarlo e il comando
+        per prendersi un modello.
+    """
     import urllib.request
     try:
         with urllib.request.urlopen(OLLAMA_HOST + "/api/tags", timeout=5) as r:

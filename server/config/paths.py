@@ -48,12 +48,28 @@ _SORGENTI = os.path.dirname(_CARTELLA_SERVER)             # la radice
 
 
 def impacchettato() -> bool:
-    """True se stiamo girando dentro un eseguibile costruito con PyInstaller."""
+    """Stiamo girando dentro l'eseguibile, o si stanno lanciando i sorgenti?
+
+    E' la domanda da cui dipende tutto il resto di questo file, perche' nei due
+    casi le cose stanno in posti diversi.
+
+    La risposta non si indovina: quando PyInstaller costruisce un eseguibile,
+    ci infila dentro due segni che altrimenti non esistono. Se ci sono tutti e
+    due siamo dentro il pacchetto; se ne manca uno, no.
+    """
     return getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
 
 
 def cartella_risorse() -> str:
-    """Dove stanno i file impacchettati col programma (la pagina, le icone)."""
+    """Dove stanno le cose che sono state impacchettate insieme al programma.
+
+    La pagina dell'interfaccia, le icone: roba che non cambia mai e che nessuno
+    deve poter modificare. Dentro l'eseguibile finisce in una cartella
+    temporanea che Windows cancella alla chiusura, ed e' giusto cosi': tanto
+    alla riapertura viene rifatta identica.
+
+    Lanciando i sorgenti e' semplicemente la cartella del progetto.
+    """
     return sys._MEIPASS if impacchettato() else _SORGENTI
 
 
@@ -70,10 +86,23 @@ def cartella_dati() -> str:
 
 
 def dati(*parti: str) -> str:
-    """Percorso dentro la cartella dei dati."""
+    """Un percorso dentro la cartella di chi usa il programma.
+
+    ``dati("results", ".checkpoints")`` da' il percorso completo di quella
+    sottocartella, con le barre giuste per il sistema su cui si sta girando.
+
+    Si passa dai pezzi e non da una stringa gia' composta perche' le barre fra
+    Windows e il resto del mondo non sono le stesse, e scriverle a mano e' il
+    modo piu' rapido di fare un programma che funziona su un computer solo.
+    """
     return os.path.join(cartella_dati(), *parti)
 
 
 def risorsa(*parti: str) -> str:
-    """Percorso dentro la cartella delle risorse impacchettate."""
+    """Un percorso dentro le cose impacchettate col programma.
+
+    ``risorsa("client", "index.html")`` da' il percorso della pagina, che
+    dentro l'eseguibile e' in una cartella temporanea e fuori e' nel progetto.
+    Chi chiama non deve sapere in quale dei due casi si trova.
+    """
     return os.path.join(cartella_risorse(), *parti)

@@ -25,7 +25,16 @@ from server.utils.text import (
 
 
 def _section_heading(sec: dict, with_timestamps: bool) -> str:
-    """Build the visible title of a section (with or without timing)."""
+    """Il titolo di una sezione come si vede nel PDF.
+
+    Tre casi, e il primo e' quello che si dimentica sempre: una trascrizione
+    puo' non avere sezioni affatto, e allora il titolo non esiste e si scrive
+    semplicemente «Trascrizione».
+
+    Il minutaggio davanti al titolo si mette solo se e' stato chiesto e se
+    quella sezione ne ha uno. Serve a chi legge il PDF con il video aperto di
+    fianco e vuole saltare al punto giusto.
+    """
     if sec["title"] is None:
         return "Trascrizione"
     if with_timestamps and sec["start"] is not None:
@@ -61,6 +70,13 @@ def build_pdf(title: str, meta: dict, sections: list[dict], out_path: str,
     # Helper: writes a full-width paragraph and brings the cursor back to the left
     # margin (otherwise the next multi_cell would have no space).
     def cell(h: float, txt: str, md: bool = False) -> None:
+        """Scrive un blocco di testo e va a capo, a tutta larghezza.
+
+        Una scorciatoia con un nome corto perche' qui sotto viene chiamata una
+        trentina di volte, e ogni volta servirebbero gli stessi quattro
+        argomenti sempre uguali. Larghezza zero, per fpdf2, vuol dire «fino al
+        margine destro».
+        """
         pdf.multi_cell(0, h, txt, new_x=XPos.LMARGIN, new_y=YPos.NEXT, markdown=md)
 
     # Title

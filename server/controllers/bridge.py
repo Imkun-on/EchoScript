@@ -30,13 +30,30 @@ _finestra = None
 
 
 def imposta(finestra) -> None:
-    """Registra la finestra appena creata. La chiama il punto d'ingresso."""
+    """Registra la finestra appena creata.
+
+    La chiama il punto d'ingresso, una volta sola, subito dopo averla creata e
+    prima di avviare il giro degli eventi. Da quel momento chiunque debba
+    parlare alla pagina la trova chiedendola qui, senza che nessuno debba
+    passarsela di mano in mano attraverso mezzo programma.
+    """
     global _finestra
     _finestra = finestra
 
 
 def attuale():
-    """La finestra, o None se non e' ancora stata creata."""
+    """La finestra, oppure None se non esiste ancora.
+
+    Si chiede ogni volta invece di copiarsela in una variabile propria. Il
+    motivo e' lo stesso per cui le impostazioni si leggono come
+    ``settings.NOME``: chi se ne fa una copia si porta a casa una fotografia
+    del momento, e il giorno in cui quel valore cambia continua a usare quella
+    vecchia senza che nessun errore lo dica.
+
+    Il None non e' un caso strano da temere: nei primi istanti dell'avvio il
+    motore si sta gia' caricando e la finestra non c'e' ancora. Chi manda
+    qualcosa alla pagina in quel momento lo perde, ed e' giusto cosi'.
+    """
     return _finestra
 
 

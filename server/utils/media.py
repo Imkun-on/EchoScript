@@ -13,7 +13,16 @@ from __future__ import annotations
 
 
 def _is_local(meta: dict) -> bool:
-    """True if the metadata describes a LOCAL file (not a YouTube video)."""
+    """Questo materiale arriva da YouTube o da un file che c'era gia'?
+
+    Sembra una domanda da niente e invece cambia parecchie cose piu' avanti:
+    un file locale non si scarica, non ha una copertina da mostrare, non ha un
+    canale ne' una data di pubblicazione, e nel documento finale quei campi
+    vanno lasciati fuori invece che riempiti di vuoto.
+
+    La risposta e' scritta nei metadati fin dall'inizio, cosi' nessuno deve
+    dedurla guardando se c'e' un indirizzo web.
+    """
     return meta.get("source") == "local"
 
 def _lang_name(code: str | None) -> str | None:

@@ -72,13 +72,28 @@ _fermare = False
 
 
 def chiedi_di_fermarsi() -> None:
-    """Segna che si vuole smettere. Lo chiama chi intercetta il Ctrl+C."""
+    """Segna che si vuole smettere.
+
+    Non ferma niente da sola, e questo e' il punto: alza una bandierina e
+    basta. A guardarla sono le funzioni di lavoro, fra un pezzo e l'altro, nei
+    momenti in cui interrompersi non fa danni.
+
+    La chiama chi intercetta il Ctrl+C dalla riga di comando. Potrebbe
+    chiamarla anche un pulsante «annulla» dentro la finestra, il giorno in cui
+    lo si volesse: da qui non si vede nessuna differenza fra i due.
+    """
     global _fermare
     _fermare = True
 
 
 def fermarsi() -> bool:
-    """True se qualcuno ha chiesto di smettere."""
+    """True se qualcuno ha chiesto di smettere.
+
+    Va controllata nei punti in cui fermarsi e' sicuro: fra un blocco di audio
+    e il successivo, fra un fotogramma e l'altro. Non in mezzo a una scrittura
+    su disco, perche' li' interrompersi lascia un file a meta' che poi nessuno
+    capisce da dove sia uscito.
+    """
     return _fermare
 
 
@@ -98,8 +113,23 @@ class GroqRateLimit(Exception):
 
 
 class TranscriptionInterrupted(Exception):
-    """Trascrizione fermata a metà (rate limit): trasporta il parziale per il
-    checkpoint. 'done' = numero di blocchi completati su 'total'."""
+    """La trascrizione si e' fermata a meta', e si porta dietro quello che aveva.
+
+    E' l'unica eccezione di questo file che trasporta dei dati invece che solo
+    un messaggio, e il motivo e' tutto qui: quando Groq dice che i crediti sono
+    finiti al blocco trenta su quaranta, quei trenta blocchi sono lavoro gia'
+    fatto e gia' pagato. Buttarli via per poi rifarli domani sarebbe spendere
+    due volte la stessa cosa.
+
+    Chi la riceve salva i pezzi in un parziale, e «Riprendi» ripartira' dal
+    trentunesimo.
+
+    Attributi
+        ``segments``  i pezzi di trascrizione gia' ottenuti
+        ``done``      quanti blocchi erano stati completati
+        ``total``     quanti ne erano previsti in tutto
+        ``lang``      la lingua riconosciuta, che serve a riprendere coerenti
+    """
 
     def __init__(self, segments: list, done: int, total: int, lang):
         self.segments = segments
@@ -110,6 +140,17 @@ class TranscriptionInterrupted(Exception):
 
 
 def _is_rate_limit(msg: str) -> bool:
+    """Questo errore vuol dire «crediti finiti» o e' un guasto vero?
+
+    La distinzione conta piu' di quanto sembri, perche' porta a due azioni
+    opposte: «riprova fra poco» oppure «salva e torna domani».
+
+    Si guarda dentro il TESTO dell'errore invece che a un codice, perche' il
+    codice non c'e' sempre. La stessa condizione arriva a volte come un 429
+    pulito, a volte come una frase dentro un errore generico, e a volte da
+    Ollama che usa parole tutte sue. I sei pezzi di testo cercati qui sotto
+    sono quelli osservati davvero, non un elenco teorico.
+    """
     m = (msg or "").lower()
     return ("429" in m or "rate_limit" in m or "rate limit" in m
             or "tokens per" in m or "requests per" in m or "too many requests" in m)

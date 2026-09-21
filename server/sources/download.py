@@ -45,7 +45,16 @@ def download_audio(url: str, workdir: str, on_progress=_noop_progress,
     out_template = os.path.join(workdir, "audio.%(ext)s")  # %(ext)s = the actual extension chosen by yt-dlp
 
     def _hook(d: dict) -> None:
-        """Callback called by yt-dlp with the download status."""
+        """yt-dlp chiama questa mentre scarica, per dire a che punto e'.
+
+        Fa due cose. La prima e' inoltrare l'avanzamento a chi ha chiesto lo
+        scaricamento, che lo mostrera' come preferisce.
+
+        La seconda e' guardare se qualcuno ha chiesto di fermarsi, e in quel
+        caso sollevare un'eccezione. Sembra brusco, ed e' l'unico modo:
+        yt-dlp sta girando dentro il proprio ciclo e non ha nessun pulsante
+        per dirgli «smetti». L'eccezione lo attraversa e lo fa uscire.
+        """
         if should_stop():
             # Raising an exception here interrupts the yt-dlp download.
             raise KeyboardInterrupt
@@ -95,7 +104,16 @@ def download_audio(url: str, workdir: str, on_progress=_noop_progress,
 
 
 def _has_video_stream(path: str) -> bool:
-    """True se il file ha una traccia VIDEO (evita l'analisi su mp3/audio puri)."""
+    """Questo file ha delle immagini dentro, o e' solo audio?
+
+    Serve a non far partire l'analisi visiva su un mp3. Senza questo controllo
+    il programma estrarrebbe fotogrammi da qualcosa che non ne ha, si
+    ritroverebbe una cartella vuota e non saprebbe dire perche'.
+
+    Prima si guarda l'estensione, che costa niente ed e' giusta quasi sempre.
+    Solo se quella non basta si chiama ffprobe, che e' lento ma non sbaglia:
+    un file chiamato .mp4 puo' benissimo contenere solo audio.
+    """
     if os.path.splitext(path)[1].lower() in VIDEO_EXTENSIONS:
         return True
     try:
@@ -119,6 +137,13 @@ def download_video(url: str, workdir: str, on_progress=_noop_progress,
     out_template = os.path.join(workdir, "video.%(ext)s")
 
     def _hook(d: dict) -> None:
+        """Come il gemello dello scaricamento audio, ma per il video.
+
+        E' quasi identico e resta separato per una riga sola: il messaggio che
+        compare a schermo dice «scarico il video» invece di «scarico l'audio».
+        Unirli vorrebbe dire passarsi quel testo come argomento, che per due
+        righe non vale il giro.
+        """
         if should_stop():
             raise KeyboardInterrupt
         if d["status"] == "downloading":
