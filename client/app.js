@@ -309,33 +309,68 @@ async function salvaScelte(valori) {
 
 const T_AVVIO = performance.now();
 
-/* I passi dell'avvio, contati.
+/* La barra del velo, e perche' e' fatta di due pezzi.
  *
- * Sono i pezzi che vanno messi insieme prima che l'interfaccia sia usabile, ed
- * e' un elenco chiuso e noto: per questo la barra del velo puo' dire un numero
- * vero invece di scorrere avanti e indietro. Ogni chiamata a passoAvvio() e' un
- * pezzo davvero finito, non un'attesa a tempo. */
-const PASSI_AVVIO = 6;
+ * Il velo copre TUTTO l'avvio, dal primo istante in cui la finestra compare
+ * fino a quando l'interfaccia e' usabile. Ma in quell'intervallo succedono due
+ * cose diverse, e nessuna delle due sa niente dell'altra:
+ *
+ *   da 0 a 0.80   Python carica il motore. La pagina non ha modo di sapere a
+ *                 che punto sia, quindi e' Python a dirglielo chiamando
+ *                 avanzamentoAvvio() (vedi _carica_motore in EchoScriptApp.py);
+ *
+ *   da 0.80 a 1   la pagina si monta da se': chiede i testi, riempie le
+ *                 sezioni, apre la stanza giusta. Qui i passi sono un elenco
+ *                 chiuso e noto, quindi si contano.
+ *
+ * La barra e' una sola e non torna mai indietro, da qualunque delle due parti
+ * arrivi il numero. */
+const BASE_PAGINA = 0.80;
+const PASSI_AVVIO = 5;
 let passiFatti = 0;
 
-/* Ma i passi non cominciano qui. Prima che questa pagina esistesse, Python ha
- * gia' caricato il ponte con WebView2 e tutto il motore, e l'ha raccontato sulla
- * barra della schermata di avvio: quella che si vede dal doppio clic. Questo
- * velo ne e' la seconda meta', quindi la sua barra riparte da dove l'altra si e'
- * fermata invece che da zero — e' lo stesso valore di APERTURA in
- * EchoScriptApp.py. Ripartire da zero farebbe tornare indietro una barra che
- * l'utente sta guardando, che e' il modo piu' rapido di far sembrare rotto un
- * avvio che sta andando bene. */
-const BASE_AVVIO = 0.62;
+/* Le tre quote della barra, e perche' non bastava una.
+ *
+ * `mostrata`  dov'e' disegnata adesso, e cambia a ogni fotogramma;
+ * `vera`      l'ultimo traguardo raggiunto davvero;
+ * `tetto`     fin dove le si lascia strisciare mentre aspetta il prossimo.
+ *
+ * Il tetto e' l'unica cosa che rende la barra scorrevole invece che a scatti.
+ * Fra un traguardo e l'altro possono passare due o tre secondi, e in quei
+ * secondi una barra onesta resterebbe immobile: ma una barra immobile, a chi
+ * la guarda, non dice "sto lavorando", dice "mi sono piantato". Cosi' a ogni
+ * traguardo il tetto viene messo un quarto piu' avanti di dove si e' arrivati,
+ * e la barra ci scivola dentro rallentando.
+ *
+ * Il tetto non viene mai raggiunto, perche' l'avvicinamento e' proporzionale a
+ * quanto manca: piu' si avvicina, piu' va piano. Quindi la barra e' sempre in
+ * movimento e non supera mai un traguardo che non e' stato tagliato. */
+let quotaMostrata = 0;
+let quotaVera = 0;
+let quotaTetto = 0;
 
-function quotaAvvio() {
-  return BASE_AVVIO + (1 - BASE_AVVIO) * (passiFatti / PASSI_AVVIO);
+function traguardo(q) {
+  if (q <= quotaVera) return;         // mai indietro
+  quotaVera = Math.min(q, 1);
+  quotaTetto = quotaVera + (1 - quotaVera) * 0.25;
 }
+
+function animaBarra() {
+  quotaMostrata += (quotaTetto - quotaMostrata) * 0.035;
+  const b = document.querySelector('.avvio-barra span');
+  if (b) b.style.width = (quotaMostrata * 100).toFixed(2) + '%';
+  if (quotaMostrata < 0.999) requestAnimationFrame(animaBarra);
+}
+
+/* Python dice a che punto e' il caricamento del motore. Il numero arriva
+ * gia' nella scala di questa barra: la sua ultima tappa vale esattamente
+ * BASE_PAGINA, cioe' il punto in cui il racconto passa da Python alla
+ * pagina. Le due meta' si toccano li' senza salti. */
+window.avanzamentoAvvio = (quota) => traguardo(quota);
 
 function passoAvvio() {
   passiFatti = Math.min(passiFatti + 1, PASSI_AVVIO);
-  const b = document.querySelector('.avvio-barra span');
-  if (b) b.style.width = (quotaAvvio() * 100).toFixed(0) + '%';
+  traguardo(BASE_PAGINA + (1 - BASE_PAGINA) * (passiFatti / PASSI_AVVIO));
 }
 
 /* Toglie il velo di caricamento. Si puo' chiamare quante volte si vuole.
@@ -355,33 +390,30 @@ function togliVelo() {
 }
 
 function avvia() {
-  /* La barra parte gia' riempita di cio' che Python ha fatto prima che questa
-   * pagina esistesse. Si scrive subito, prima del primo disegno: cosi' il primo
-   * fotogramma del velo mostra gia' la barra al punto giusto, invece di farla
-   * scivolare da zero sotto gli occhi di chi la stava guardando ferma piu'
-   * avanti un istante prima. */
-  const b0 = document.querySelector('.avvio-barra span');
-  if (b0) b0.style.width = (BASE_AVVIO * 100).toFixed(0) + '%';
+  /* La barra comincia a muoversi subito, prima ancora che ci sia qualcosa da
+   * raccontare. Il primo traguardo e' piccolo di proposito: serve solo a dare
+   * al tetto un valore diverso da zero, perche' con tetto a zero la barra
+   * resterebbe ferma e il primo fotogramma del velo sarebbe immobile. */
+  traguardo(0.03);
+  requestAnimationFrame(animaBarra);
 
-  /* Se l'apertura si inceppa — un errore nel motore, una chiamata che non torna
-   * — il velo deve comunque andarsene: meglio un'interfaccia a meta', che si
-   * vede e si puo' chiudere, che una schermata di caricamento perpetua. */
-  setTimeout(togliVelo, 12000);
+  /* Se l'apertura si inceppa, per esempio un import fallito o una chiamata che
+   * non torna, il velo deve comunque andarsene: meglio un'interfaccia a meta',
+   * che si vede e si puo' chiudere, di una schermata di caricamento perpetua.
+   *
+   * Settantacinque secondi e non dodici come prima, perche' adesso sotto il
+   * velo c'e' anche il caricamento del motore: al primo avvio dopo
+   * l'installazione Windows deve leggere qualche centinaio di megabyte da
+   * disco, e su una macchina lenta dodici secondi non bastano. Questa e' una
+   * rete di sicurezza, non una scadenza: deve scattare solo quando qualcosa si
+   * e' rotto davvero. */
+  setTimeout(togliVelo, 75000);
   passoAvvio();                       // 1. la pagina e i suoi script ci sono
 
   window.addEventListener('pywebviewready', async () => {
     passoAvvio();                     // 2. il ponte con Python risponde
     const dati = await window.pywebview.api.avvio();
     passoAvvio();                     // 3. testi, scelte e modelli sono arrivati
-
-    // La finestra adesso e' sullo schermo, quindi i fotogrammi ripartono: al
-    // primo davvero composto si dice a Python di togliere l'immagine di
-    // caricamento. Due requestAnimationFrame annidati perche' il primo finisce
-    // il fotogramma in corso e il secondo comincia quello dopo, a disegno fatto.
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      try { window.pywebview.api.dipinta(); } catch (e) { /* la rete di
-        sicurezza in Python la toglie comunque */ }
-    }));
 
     TESTI = dati.testi;
     SCELTE = dati.scelte;

@@ -15,11 +15,7 @@ import sys
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-# Il binario della barra di avvio: dove va disegnato lo decide
-# che e' anche chi ci scrive sopra il riempimento a programma avviato. Le due
-# meta' della stessa barra, quindi le misure stanno in un posto solo.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from server.config.splash import BINARIO
 
 # --- I colori, gli stessi di :root in client/styles/style.css ----------------
 F0   = (0x04, 0x04, 0x0a)      # --f0   il nero di fondo
@@ -139,81 +135,6 @@ def _carattere(dimensione: int, grassetto: bool = True):
     return ImageFont.load_default(dimensione)
 
 
-def caricamento(larghezza: int = 440, altezza: int = 260) -> Image.Image:
-    """La schermata che PyInstaller mostra mentre scompatta l'eseguibile.
-
-    Stesso marchio, stesso viola, stesso nero del velo che le succede: chi
-    guarda deve vedere un programma che si apre, non due schermate diverse che
-    si passano il turno. Marchio e nome sono disposti come nel velo: segno
-    sopra, nome sotto, stessa distanza, cosi' nell'istante dello scambio non
-    si muove niente.
-
-    Nessuna frase sotto il nome, di proposito: questa immagine e' disegnata una
-    volta sola e non sa in che lingua girera' il programma, mentre il nome e'
-    lo stesso in tutte e due.
-
-    La barra invece c'e', ma qui se ne disegna solo il BINARIO vuoto: a
-    riempirlo e' il programma appena parte, scrivendoci sopra (vedi
-    server/config/splash.py). Il binario dev'essere gia' nell'immagine perche' nei primi
-    istanti dopo il doppio clic non esiste ancora un interprete Python che possa
-    disegnare alcunche': si vede una barra vuota, che e' la verita', invece del
-    nulla.
-    """
-    tela = Image.new('RGBA', (larghezza, altezza), F0 + (255,))
-
-    lato_segno = 116
-    tipo = _carattere(28)
-    misura = ImageDraw.Draw(tela).textbbox((0, 0), 'EchoScript', font=tipo)
-    alto_nome = misura[3] - misura[1]
-    stacco = 16                                  # --s4, lo stesso gap del velo
-
-    # Il blocco intero, un filo sopra la meta': centrato esatto sembra basso.
-    alto_blocco = lato_segno + stacco + alto_nome
-    cima = (altezza - alto_blocco) / 2 - altezza * 0.03
-    cx = larghezza / 2
-
-    # L'alone: lo stesso radial-gradient del velo, dietro il marchio.
-    fuoco_y = cima + lato_segno / 2
-    alone = Image.new('RGBA', (larghezza, altezza), (0, 0, 0, 0))
-    rx, ry = larghezza * 0.32, altezza * 0.30
-    ImageDraw.Draw(alone).ellipse((cx - rx, fuoco_y - ry, cx + rx, fuoco_y + ry),
-                                  fill=(0x2a, 0x1f, 0x6b, 89))
-    tela = Image.alpha_composite(tela, alone.filter(ImageFilter.GaussianBlur(40)))
-
-    tela.alpha_composite(marchio(lato_segno, semplice=False),
-                         (round(cx - lato_segno / 2), round(cima)))
-
-    ImageDraw.Draw(tela).text(
-        (round(cx - (misura[2] - misura[0]) / 2),
-         round(cima + lato_segno + stacco - misura[1])),
-        'EchoScript', font=tipo, fill=T0 + (255,))
-
-    # Il binario vuoto della barra. Su uno strato a parte per lo stesso motivo
-    # del bordo qui sotto: e' un viola quasi trasparente (--bordo, lo stesso
-    # fondo della barra nel velo) e ImageDraw non lo fonderebbe con cio' che
-    # trova sotto, scrivendolo a piena tinta.
-    x, y, largo, spesso = BINARIO
-    guida = Image.new('RGBA', (larghezza, altezza), (0, 0, 0, 0))
-    ImageDraw.Draw(guida).rounded_rectangle(
-        (x, y, x + largo - 1, y + spesso - 1), radius=spesso / 2,
-        fill=IRIS + (0x1f,))
-    tela = Image.alpha_composite(tela, guida)
-
-    # Il filo del bordo: la finestra dello splash non ha cornice, e senza
-    # questo su uno sfondo scuro non si capisce dove finisce. E' lo stesso
-    # --bordo dell'interfaccia (#8b7cff1f), non uno piu' acceso: deve dire dove
-    # finisce l'immagine, non farsi guardare.
-    #
-    # Su uno strato a parte, non direttamente sulla tela: ImageDraw scrive il
-    # colore cosi' com'e' invece di fonderlo con quello che trova sotto, quindi
-    # un bordo con alfa disegnato sul posto verrebbe fuori a piena tinta e la
-    # trasparenza sparirebbe del tutto nella conversione a RGB.
-    filo = Image.new('RGBA', (larghezza, altezza), (0, 0, 0, 0))
-    ImageDraw.Draw(filo).rectangle((0, 0, larghezza - 1, altezza - 1),
-                                   outline=(0x8b, 0x7c, 0xff, 0x1f))
-    return Image.alpha_composite(tela, filo).convert('RGB')
-
-
 def foglio_prova(percorso: str) -> None:
     """Le misure vere, affiancate, su due fondi: e' l'unico modo di giudicare."""
     misure = [16, 20, 24, 32, 48, 64, 128, 256]
@@ -249,5 +170,4 @@ if __name__ == '__main__':
                      sizes=[(m, m) for m in misure],
                      append_images=[strati[m] for m in misure if m != 256])
     piastrella(512).save(os.path.join(dove, 'EchoScript.png'))
-    caricamento().save(os.path.join(dove, 'caricamento.png'))
     print('fatti in', os.path.abspath(dove))

@@ -862,11 +862,15 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 }
 
 /* ── Il velo di caricamento ─────────────────────────────────────────────── */
-/* Copre la finestra dal momento in cui compare a quello in cui la pagina ha
- * ricevuto i testi e le scelte. E' lo stesso disegno della schermata che
- * PyInstaller mostra mentre scompatta l'eseguibile — stesso marchio, stesso
- * viola, stesso nero — cosi' i due momenti sembrano uno solo e non due
- * programmi diversi che si passano il turno. */
+/* Copre la finestra dal primo istante in cui compare fino a quando
+ * l'interfaccia e' pronta, caricamento del motore compreso.
+ *
+ * Prima quel tratto era diviso fra due schermate: un'immagine disegnata
+ * dall'avviatore di PyInstaller e poi questo velo, che ne riprendeva il
+ * disegno per far sembrare il passaggio uno solo. Adesso la schermata e' una
+ * e questa, il che risolve due cose che l'immagine non poteva fare: sta a
+ * schermo intero su qualunque risoluzione, e la sua barra scorre invece di
+ * saltare fra diciannove posizioni fisse. */
 
 .velo-avvio {
   position: fixed; inset: 0; z-index: 200;
@@ -924,14 +928,17 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
   width: 190px; height: 3px; border-radius: 2px;
   background: #8b7cff1f; overflow: hidden;
 }
-/* Si riempie per passi veri: ogni scatto e' un pezzo di avvio portato a
- * termine (la pagina, i testi, le sezioni, l'ultimo disegno). Non scorre avanti
- * e indietro, perche' andare avanti e indietro non e' una informazione. */
+/* La larghezza la scrive il codice della pagina a ogni fotogramma, quindi qui
+ * NON va messa nessuna transizione: sarebbero due animazioni sovrapposte, una
+ * che insegue l'altra, e il risultato sarebbe piu' molle e in ritardo invece
+ * che piu' fluido. Come si muove sta scritto in animaBarra(), dentro app.js.
+ *
+ * Non torna mai indietro e non scorre avanti e indietro a vuoto: ogni punto in
+ * cui arriva corrisponde a qualcosa che e' stato davvero caricato. */
 .avvio-barra span {
   display: block; width: 0; height: 100%; border-radius: 2px;
   background: linear-gradient(90deg, var(--iris), var(--onda));
   box-shadow: 0 0 10px #7c6cff73;
-  transition: width .28s var(--molla);
 }
 
 /* ── Costo di disegno e coerenza ────────────────────────────────────────── */

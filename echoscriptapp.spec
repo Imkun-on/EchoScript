@@ -11,8 +11,12 @@
 #  megabyte.
 #
 #  Cosa entra: l'host (EchoScriptApp.py), i moduli condivisi, il motore, la
-#  pagina web, l'icona e la schermata di avvio, e ffmpeg/ffprobe trovati nel
-#  PATH al momento della costruzione, cosi' l'eseguibile e' autosufficiente.
+#  pagina, l'icona, e ffmpeg/ffprobe trovati nel PATH al momento della
+#  costruzione, cosi' l'eseguibile e' autosufficiente.
+#
+#  Cosa NON entra piu': la schermata di avvio disegnata da PyInstaller, e con
+#  lei Tcl/Tk. Adesso l'attesa la copre la pagina stessa, che sta a schermo
+#  intero e ha una barra che scorre davvero.
 #  PyTorch resta FUORI di proposito: faster-whisper gira su ctranslate2 (CPU) e
 #  il riconoscimento della GPU, se non lo trova, degrada senza rompersi.
 #
@@ -21,18 +25,9 @@
 # =============================================================================
 import os
 import shutil
-import sys
 from PyInstaller.utils.hooks import collect_all
 
 ROOT = os.path.abspath(os.getcwd())
-
-# La barra della schermata di avvio: misure, carattere e colore stanno in
-# server/config/splash.py, che e' anche chi la riempie a programma partito.
-# Prenderle da
-# li' invece di ricopiarle qui e' l'unico modo perche' il riempimento cada
-# esattamente sul binario disegnato dentro caricamento.png.
-sys.path.insert(0, ROOT)
-from server.config import splash as _avvio
 
 # --- ffmpeg + ffprobe, risolti dal PATH al momento della costruzione ---------
 binaries = []
@@ -50,8 +45,7 @@ datas = [('client', 'client')]
 # chi tocca il disegno, non al programma che gira.
 ASSETS = os.path.join(ROOT, 'assets')
 ICONA = os.path.join(ASSETS, 'EchoScript.ico')
-AVVIO = os.path.join(ASSETS, 'caricamento.png')
-for _immagine in (ICONA, AVVIO, os.path.join(ASSETS, 'EchoScript.png')):
+for _immagine in (ICONA, os.path.join(ASSETS, 'EchoScript.png')):
     if os.path.isfile(_immagine):
         datas.append((_immagine, 'assets'))
 
@@ -100,12 +94,15 @@ a = Analysis(
     # onnxruntime, tokenizers e tqdm: nessuno di questi nomi compare fra i suoi
     # import, e infatti toglierli non cambia una riga di comportamento.
     #
-    # tkinter invece RESTA, anche se nessuna riga del programma lo importa: la
-    # schermata di avvio e' disegnata dal bootloader con Tcl/Tk, e le librerie le
-    # trova solo se l'analisi le ha raccolte. Una decina di megabyte pagati per
-    # non lasciare lo schermo vuoto per mezzo minuto dopo il doppio clic.
+    # tkinter c'era, e adesso se ne va. Stava dentro per un motivo solo: la
+    # schermata di avvio era disegnata dall'avviatore di PyInstaller con Tcl/Tk,
+    # e quelle librerie ci finivano solo se l'analisi le raccoglieva. Adesso la
+    # schermata di avvio e' la pagina stessa, quindi sono una decina di megabyte
+    # che non servono piu' a niente.
     excludes=[
         'torch', 'matplotlib', 'pandas',
+        # Tcl/Tk: serviva alla vecchia schermata di avvio, che non c'e' piu'
+        'tkinter', '_tkinter', 'Tkinter',
         # Qt, via pywebview
         'PySide6', 'shiboken6', 'PyQt5', 'PyQt6', 'qtpy',
         # integrazioni facoltative di huggingface_hub
@@ -116,36 +113,6 @@ a = Analysis(
     noarchive=False,
 )
 pyz = PYZ(a.pure)
-
-# --- La schermata di avvio ---------------------------------------------------
-# La mostra il bootloader appena parte, prima che esista un interprete Python:
-# e' l'unica cosa che copre i secondi fra il doppio clic e la comparsa della
-# finestra. A chiuderla e' EchoScriptApp.py, ma solo quando la pagina ha
-# davvero dipinto il primo fotogramma: vedi _chiudi_caricamento() la' dentro,
-# e il commento sull'ordine dell'avvio in cima a quel file.
-#
-# La riga di testo qui sotto NON e' un messaggio: e' il riempimento della barra.
-# L'immagine porta gia' disegnato il binario vuoto, e il programma ci scrive
-# sopra una fila di trattini che cresce a ogni pezzo caricato
-# (server/config/splash.py).
-# Di suo il bootloader ci stamperebbe i nomi dei file che sta estraendo, uno
-# dopo l'altro: informazione per chi costruisce il pacchetto, rumore per chi lo
-# usa. Il testo iniziale e' vuoto di proposito — finirebbe dentro il file Tcl,
-# che Tcl 8.6 rilegge con la codifica di sistema e non in UTF-8, e un trattino
-# scritto li' comparirebbe come scarabocchio; gli aggiornamenti successivi
-# passano invece da un canale dichiarato UTF-8 e sono sicuri.
-caricamento = Splash(
-    AVVIO,
-    binaries=a.binaries,
-    datas=a.datas,
-    text_pos=_avvio.POSIZIONE,
-    text_size=_avvio.CORPO,
-    text_font=_avvio.CARATTERE,
-    text_color=_avvio.COLORE,
-    text_default=_avvio.barra(0.0),
-    minify_script=True,
-    always_on_top=False,      # stare davanti a tutto e' da finestra di errore
-) if os.path.isfile(AVVIO) else None
 
 # --- Il manifest: la scala dello schermo dichiarata SUBITO -------------------
 # E' il manifest predefinito di PyInstaller con una riga in piu': <dpiAware>.
@@ -201,7 +168,6 @@ MANIFEST = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 exe = EXE(
     pyz,
     a.scripts,
-    *([caricamento] if caricamento else []),
     [],
     exclude_binaries=True,
     name='EchoScript',
@@ -222,9 +188,6 @@ coll = COLLECT(
     exe,
     a.binaries,
     a.datas,
-    # Tcl/Tk per la schermata di avvio. In modalita' a cartella vanno qui, non
-    # nell'EXE: nell'EXE ci va solo l'oggetto Splash.
-    *([caricamento.binaries] if caricamento else []),
     strip=False,
     upx=False,
     upx_exclude=[],

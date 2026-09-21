@@ -47,64 +47,93 @@ for _p in (os.path.join(_QUI, 'core'), _QUI):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-# ── La barra della schermata di avvio ────────────────────────────────────────
+# ── Cosa si importa subito, e cosa no ────────────────────────────────────────
 #
-# Questo blocco viene prima di ogni import pesante, e non e' un dettaglio di
-# stile: sono proprio quegli import l'attesa che la barra deve raccontare. Il
-# ponte con WebView2 e il motore — che si porta dietro Groq, yt-dlp e Rich —
-# prendono insieme la maggior parte dei secondi fra il doppio clic e la
-# finestra. Importandoli prima di poter disegnare, la barra resterebbe ferma
-# proprio mentre succede tutto.
+# Qui sotto ci sono soltanto cose leggere: i percorsi, i testi, il ponte con la
+# finestra. Messe insieme costano meno di mezzo secondo.
 #
-# Fuori dall'eseguibile il modulo non esiste e non c'e' nessuna schermata:
-# `_avanza` diventa un giro a vuoto e il programma parte come sempre.
-try:
-    import pyi_splash as _splash          # type: ignore[import-not-found]
-except ImportError:
-    _splash = None
-
-from server.config.splash import barra as _barra_avvio
-
-# Quanto vale ogni pezzo dell'avvio sulla barra. Non sono numeri decorativi: il
-# motore da solo pesa quanto tutto il resto messo insieme, ed e' giusto che la
-# barra ci stia sopra a lungo invece di correre e poi piantarsi.
+# Il motore no. transcriber si porta dietro Groq, yt-dlp e Rich, e da solo
+# prende cinque volte il tempo di tutto il resto: e' l'attesa vera, quella che
+# chi ha fatto doppio clic si trova davanti. Importarlo qui vorrebbe dire
+# restare senza niente sullo schermo per tutto quel tempo, perche' finche' un
+# import non finisce non gira nessuna riga di programma e quindi non c'e'
+# nessuno che possa disegnare un'attesa.
 #
-# APERTURA e' il punto in cui questa schermata passa la mano alla pagina: da li'
-# in poi a riempire e' il velo di caricamento dentro la finestra, che riparte
-# esattamente da questo valore (BASE_AVVIO in client/app.js) invece che da zero.
-# E' l'unica ragione per cui le due schermate sembrano una barra sola.
-APERTURA = 0.62
-
-
-def _avanza(quota: float) -> None:
-    """Porta la barra della schermata di avvio a ``quota`` (da 0 a 1)."""
-    if _splash is None:
-        return
-    try:
-        _splash.update_text(_barra_avvio(quota))
-    except Exception:
-        # La schermata puo' essere gia' stata chiusa: non e' un guasto, e non
-        # deve certo impedire al programma di finire di avviarsi.
-        pass
-
-
-_avanza(0.0)
+# Percio' si aspetta: la finestra si apre con quello che c'e', e il motore
+# arriva da dietro. Vedi _carica_motore() qui sotto.
 
 from server.config import i18n
 from server.config.paths import dati as _dati, risorsa as _risorsa, impacchettato
 from server.config.strings import TESTI
-_avanza(0.06)               # i testi: sono dizionari, e' immediato
 
 import webview
-_avanza(0.22)               # il ponte con WebView2
-
-import transcriber as tx     # gli helper puri condivisi con la riga di comando
-_avanza(0.50)               # il motore: Groq, yt-dlp, Rich — il tratto piu' lungo
-
-import engine                # core/engine.py
-_avanza(0.56)               # l'orchestrazione, che sopra il motore costa poco
 
 i18n.register(TESTI)
+
+# I due nomi del motore restano vuoti finche' non li riempie _carica_motore().
+tx = None                   # transcriber.py: gli aiutanti condivisi con la CLI
+engine = None               # il direttore d'orchestra
+RISULTATI = ''              # dove finiscono le trascrizioni: lo sa engine
+
+# Alzato quando il motore e' pronto. La pagina, al suo primo saluto, si mette
+# qui ad aspettare: e' il punto in cui i due tempi si incontrano senza che
+# nessuno dei due debba sapere quanto ha impiegato l'altro.
+_MOTORE_PRONTO = threading.Event()
+
+# Le tappe del caricamento, con quanto pesa ciascuna sulla barra.
+#
+# I numeri sono misurati, non scelti a occhio: importare transcriber costa
+# cinque volte quanto importare il ponte con la finestra, perche' si porta
+# dietro Groq, yt-dlp e Rich. Dando a ogni tappa la stessa fetta la barra
+# correrebbe fino a meta' e poi si pianterebbe, che e' esattamente il difetto
+# che si voleva togliere.
+_TAPPA_PARTENZA = 0.15
+_TAPPA_MOTORE = 0.55        # transcriber: il tratto lungo
+_TAPPA_ORCHESTRA = 0.70     # engine: sopra transcriber costa quasi niente
+_TAPPA_PRONTO = 0.80        # da qui in poi riempie la pagina
+
+
+def _carica_motore() -> None:
+    """Importa il motore mentre la finestra e' gia' sullo schermo.
+
+    Viene eseguita da pywebview appena il giro della finestra e' partito, cioe'
+    quando la pagina e il suo velo di caricamento sono gia' visibili. Da li' in
+    poi ogni pezzo caricato fa avanzare la barra del velo.
+
+    Perche' l'evento viene alzato nel finally
+        Perche' se un import fallisce, la pagina resterebbe ad aspettare per
+        sempre un segnale che non arriverebbe mai: barra ferma, nessun
+        messaggio, e l'unico modo di uscirne e' chiudere la finestra. Alzandolo
+        comunque la pagina prosegue, prova a chiedere quello che le serve, e
+        l'errore vero viene a galla invece di restare nascosto dietro
+        un'attesa infinita.
+    """
+    global tx, engine, RISULTATI
+    try:
+        _avanzamento(_TAPPA_PARTENZA)
+        import transcriber as _transcriber
+        tx = _transcriber
+        _riempi_cataloghi()
+        _avanzamento(_TAPPA_MOTORE)
+
+        import engine as _engine
+        engine = _engine
+        _avanzamento(_TAPPA_ORCHESTRA)
+
+        # Fuori dall'eseguibile e' la stessa cartella della riga di comando,
+        # cosi' le due interfacce vedono lo stesso archivio e il controllo
+        # "questo video c'e' gia'" funziona a prescindere da come lo si e'
+        # trascritto. Dentro l'eseguibile quella cartella sarebbe temporanea,
+        # quindi si va accanto all'.exe.
+        RISULTATI = _dati('results') if impacchettato() else engine.RESULTS_DIR
+        _avanzamento(_TAPPA_PRONTO)
+    finally:
+        _MOTORE_PRONTO.set()
+
+
+def _avanzamento(quota: float) -> None:
+    """Dice alla pagina a che punto e' il caricamento, da 0 a 1."""
+    _verso_pagina('avanzamentoAvvio', quota)
 
 # La finestra e' l'unica: la si tiene qui perche' i thread di lavoro devono
 # poterla raggiungere per spingere gli aggiornamenti alla pagina.
@@ -118,14 +147,6 @@ _DLG_APRI = getattr(getattr(webview, 'FileDialog', None), 'OPEN',
                     getattr(webview, 'OPEN_DIALOG', 10))
 
 
-# ── Dove finiscono le trascrizioni ───────────────────────────────────────────
-# Fuori dall'eseguibile e' la stessa cartella della riga di comando, cosi' le
-# due interfacce vedono lo stesso archivio e il controllo "questo video c'e'
-# gia'" funziona a prescindere da come lo si e' trascritto. Dentro l'eseguibile
-# quella cartella sarebbe temporanea, quindi si va accanto all'.exe.
-RISULTATI = _dati('results') if impacchettato() else engine.RESULTS_DIR
-
-
 # ── Cataloghi dei modelli ────────────────────────────────────────────────────
 # Le chiavi di descrizione seguono il nome del modello ('model.small') o il
 # numero di catalogo di transcriber.py ('om.text.2'): cosi' aggiungere un
@@ -136,15 +157,42 @@ RISULTATI = _dati('results') if impacchettato() else engine.RESULTS_DIR
 # divise le due sezioni dell'interfaccia: scegliere il motore sceglie il gruppo
 # intero, trascrizione e riassunto e analisi visiva insieme.
 
+# I modelli di trascrizione sono scritti qui perche' sono un elenco fisso e
+# corto, che non dipende da niente.
 _WHISPER = ('base', 'small', 'medium', 'large-v3', 'large-v3-turbo')
-_OLLAMA_TESTO = [(nome, ram, f'om.text.{k}')
-                 for k, (nome, ram, _d) in tx.OLLAMA_TEXT_MODELS.items()]
-_OLLAMA_VISTA = [(nome, ram, f'om.vis.{k}')
-                 for k, (nome, ram, _d) in tx.OLLAMA_VISION_MODELS.items()]
-
 _GROQ = ('whisper-large-v3-turbo', 'whisper-large-v3')
-_GROQ_TESTO = [(nome, f'gm.text.{k}') for k, (nome, _d) in tx.GROQ_TEXT_MODELS.items()]
-_GROQ_VISTA = [(nome, f'gm.vis.{k}') for k, (nome, _d) in tx.GROQ_VISION_MODELS.items()]
+
+# Gli altri quattro invece si costruiscono leggendo i cataloghi di
+# transcriber.py, che al momento in cui si legge questo file non e' ancora
+# stato importato: nascono vuoti e li riempie _riempi_cataloghi(), chiamata
+# da _carica_motore() appena il motore c'e'.
+#
+# Nessuno li legge prima di allora. Chi li usa sono i metodi che rispondono
+# alla pagina, e la pagina non puo' chiedere niente finche' non ha ricevuto
+# risposta da avvio(), che a sua volta aspetta il motore.
+_OLLAMA_TESTO: list = []
+_OLLAMA_VISTA: list = []
+_GROQ_TESTO: list = []
+_GROQ_VISTA: list = []
+
+
+def _riempi_cataloghi() -> None:
+    """Costruisce gli elenchi di modelli leggendoli da transcriber.py.
+
+    Ogni voce porta con se' la chiave del testo che la descrive
+    ('om.text.2', 'gm.vis.1'): cosi' aggiungere un modello resta una riga nel
+    catalogo di transcriber e una nel file dei testi, senza toccare il codice
+    che disegna i menu.
+    """
+    global _OLLAMA_TESTO, _OLLAMA_VISTA, _GROQ_TESTO, _GROQ_VISTA
+    _OLLAMA_TESTO = [(nome, ram, f'om.text.{k}')
+                     for k, (nome, ram, _d) in tx.OLLAMA_TEXT_MODELS.items()]
+    _OLLAMA_VISTA = [(nome, ram, f'om.vis.{k}')
+                     for k, (nome, ram, _d) in tx.OLLAMA_VISION_MODELS.items()]
+    _GROQ_TESTO = [(nome, f'gm.text.{k}')
+                   for k, (nome, _d) in tx.GROQ_TEXT_MODELS.items()]
+    _GROQ_VISTA = [(nome, f'gm.vis.{k}')
+                   for k, (nome, _d) in tx.GROQ_VISION_MODELS.items()]
 
 
 # ── L'avvio: cosa si vede, e in che ordine ───────────────────────────────────
@@ -155,76 +203,26 @@ _GROQ_VISTA = [(nome, f'gm.vis.{k}') for k, (nome, _d) in tx.GROQ_VISION_MODELS.
 # clic sembra non aver funzionato e se ne fa un altro, avviando due copie. La
 # sequenza e' questa:
 #
-#   1. il bootloader di PyInstaller mostra l'immagine di caricamento, che porta
-#      gia' disegnato il binario vuoto della barra;
-#   2. il programma parte e riempie quella barra a ogni pezzo caricato (vedi
-#      _avanza in cima al file), mentre prepara la finestra ma la tiene
-#      *nascosta*;
-#   3. la pagina si carica e chiama avvio(): li' la finestra compare, ma
-#      l'immagine resta ancora sopra;
-#   4. al primo fotogramma davvero disegnato la pagina chiama dipinta(), e
-#      l'immagine se ne va scoprendo il velo di caricamento — stesso marchio,
-#      stesso viola, e la barra del velo riparte da dove quella dell'immagine
-#      si era fermata, quindi non si vede nessuno scambio;
-#   5. la barra finisce di riempirsi per passi veri e sfuma sull'interfaccia.
+#   1. si importano solo le cose leggere: i percorsi, i testi, il ponte con
+#      la finestra. Meno di mezzo secondo in tutto;
+#   2. la finestra si apre SUBITO, a schermo intero, con dentro la pagina. Il
+#      velo di caricamento la copre: stesso marchio, stesso viola, stesso nero
+#      dell'icona del programma;
+#   3. da dietro il velo si carica il motore, e a ogni pezzo caricato la barra
+#      del velo avanza (vedi _carica_motore in cima al file);
+#   4. la pagina chiede a Python i testi e le scelte. Quella richiesta aspetta
+#      che il motore sia pronto, ed e' li' che i due tempi si incontrano;
+#   5. il velo sfuma e sotto c'e' l'interfaccia.
 #
-# E' una barra sola, disegnata due volte da due programmi diversi. Il punto 2 e'
-# quello che conta per la finestra: mostrandola subito, per un istante si
-# vedrebbe il bianco con cui WebView2 dipinge se stesso finche' non ha finito di
-# inizializzarsi: un lampo bianco in un programma tutto nero e viola e'
-# esattamente cio' che si nota di piu'.
-
-_gia_mostrata = False
-_gia_chiusa = False
-
-
-def _mostra_finestra() -> None:
-    """Fuori la finestra. Chiamarla piu' di una volta non fa danni."""
-    global _gia_mostrata
-    if _gia_mostrata or _finestra is None:
-        return
-    _gia_mostrata = True
-    try:
-        _finestra.show()
-    except Exception:
-        pass
-
-
-def _chiudi_caricamento() -> None:
-    """Via l'immagine di PyInstaller.
-
-    Va fatto dopo aver mostrato la finestra, non prima: finche' la finestra e'
-    nascosta WebView2 non disegna nulla, e nell'istante in cui compare le
-    servono ancora un paio di secondi per impaginare. Togliendo l'immagine
-    subito, quei secondi sarebbero un rettangolo nero e vuoto.
-    """
-    global _gia_chiusa
-    if _gia_chiusa or _splash is None:
-        return
-    _gia_chiusa = True
-    try:
-        _splash.close()
-    except Exception:
-        pass
-
-
-def _pronti() -> None:
-    """Tutt'e due, per la rete di sicurezza: meglio scoperti che invisibili."""
-    _mostra_finestra()
-    _chiudi_caricamento()
-
-
-def _scadenza_avvio(secondi: int = 25) -> None:
-    """Rete di sicurezza: la finestra deve comparire comunque.
-
-    Se qualcosa impedisce alla pagina di arrivare fino in fondo — un errore nel
-    motore grafico di Windows, un file che non si carica — senza questa il
-    programma resterebbe una schermata di caricamento immobile, con la finestra
-    nascosta e niente da chiudere se non il Gestione attivita'.
-    """
-    orologio = threading.Timer(secondi, _pronti)
-    orologio.daemon = True      # non deve trattenere il programma alla chiusura
-    orologio.start()
+# Il punto 2 e' quello che ha cambiato tutto. Prima la finestra restava
+# nascosta e l'attesa la copriva un'immagine disegnata dall'avviatore di
+# PyInstaller: misura fissa, mai riscalata, e come unica cosa animabile una
+# riga di testo lunga diciannove caratteri. Una barra che puo' stare solo in
+# diciannove punti si muove a scatti perche' non puo' fare altro, e un'immagine
+# che non si riscala non puo' stare a schermo intero.
+#
+# Adesso quella schermata e' la pagina stessa, disegnata dal CSS: scorre
+# davvero e si adatta a qualunque schermo.
 
 
 def _json_per_js(valore) -> str:
@@ -450,6 +448,24 @@ class Api:
         # spento: non deve rallentare l'avvio ne' fallire rumorosamente).
         self._ollama_presenti: set[str] | None = None
 
+        # Le scelte si riempiono dopo, in _leggi_scelte(). Non qui, perche'
+        # questo oggetto nasce insieme alla finestra e la finestra nasce prima
+        # del motore: i valori di ripiego dei modelli stanno dentro
+        # transcriber.py, che a quel punto non e' ancora stato importato.
+        self.scelte: dict = {}
+
+
+    def _leggi_scelte(self) -> None:
+        """Le scelte con cui l'interfaccia si presenta: le ultime usate.
+
+        Ognuna ha due possibili provenienze. La prima e' settings.json, cioe'
+        quello che si era scelto l'ultima volta. La seconda, quando li' non
+        c'e' niente perche' e' il primo avvio, e' il valore di ripiego preso da
+        transcriber.py, che a sua volta lo legge dal file .env se c'e'.
+
+        Va chiamata DOPO che il motore e' stato importato, perche' e' li' che
+        stanno quei valori di ripiego.
+        """
         prefs = i18n.load_prefs()
         self.scelte = {
             'motore':  prefs.get('motore', 'local'),
@@ -466,31 +482,30 @@ class Api:
             'summarize': bool(prefs.get('summarize', False)),
             'visual':    bool(prefs.get('visual', False)),
         }
-        # La sezione crediti elenca i modelli Groq leggendoli da transcriber:
-        # allinearli subito evita che mostri i default di .env finche' non parte
-        # il primo lavoro.
+        # Allinea subito i modelli Groq a quelli scelti, invece di lasciare
+        # quelli di .env finche' non parte il primo lavoro.
         self._applica_groq()
 
     # ── Avvio ────────────────────────────────────────────────────────────────
 
-    def dipinta(self) -> dict:
-        """La finestra ha disegnato il primo fotogramma: si puo' scoprire.
-
-        Ora che la finestra e' visibile i fotogrammi ricominciano, quindi questa
-        chiamata arriva davvero — a differenza di quando era ancora nascosta.
-        """
-        _chiudi_caricamento()
-        return {'ok': True}
-
     def avvio(self) -> dict:
         """Tutto cio' che serve alla pagina per disegnarsi la prima volta.
 
-        E' anche il primo segno di vita della pagina, e l'unico momento in cui
-        si possa mostrare la finestra: finche' resta nascosta WebView2 non
-        disegna un fotogramma — sospende perfino requestAnimationFrame — quindi
-        aspettare di sapere che ha dipinto sarebbe aspettare per sempre.
+        Qui i due tempi si incontrano. La pagina e' gia' a schermo da qualche
+        istante, perche' la finestra si apre prima che il motore esista; il
+        motore ci mette qualche secondo ad arrivare. Questa chiamata aspetta
+        che sia arrivato, e nel frattempo il velo di caricamento resta davanti
+        con la sua barra che avanza.
+
+        L'attesa ha un tetto. Se il motore non arrivasse mai — un import
+        fallito, un file di libreria corrotto — senza tetto questa risposta
+        non tornerebbe indietro e la pagina resterebbe sotto il velo per
+        sempre, senza dire niente a nessuno. Con il tetto, dopo un minuto si
+        risponde lo stesso: la pagina si scopre, l'interfaccia e' a meta' e
+        qualcosa non funzionera', ma almeno si VEDE che qualcosa non funziona.
         """
-        _mostra_finestra()
+        _MOTORE_PRONTO.wait(timeout=60)
+        self._leggi_scelte()
         threading.Thread(target=self._leggi_ollama, daemon=True).start()
         return {
             'ok': True,
@@ -1289,12 +1304,15 @@ class Api:
 
 def main() -> None:
     global _finestra
-    _scadenza_avvio()
 
     _finestra = webview.create_window(
         'EchoScript',
         _risorsa('client', 'index.html'),
         js_api=Api(),
+        # A schermo intero. Le misure restano come ripiego per i sistemi dove
+        # lo schermo intero non e' concesso, e perche' sono quelle che la
+        # finestra riprende se la si riduce.
+        fullscreen=True,
         width=1180,
         height=800,
         min_size=(940, 640),
@@ -1303,28 +1321,22 @@ def main() -> None:
         # avvio comincerebbe con un lampo di un tema che non esiste piu'.
         background_color='#0a0a16',
         text_select=False,
-        # Nascosta finche' la pagina non e' pronta: vedi il commento in cima al
-        # file. La mostra _pronti().
-        hidden=True,
+        # Visibile subito. Prima restava nascosta perche' l'attesa la copriva
+        # un'immagine disegnata da PyInstaller; adesso l'attesa e' dentro la
+        # pagina, quindi la pagina deve vedersi. Il lampo bianco con cui
+        # WebView2 dipinge se stesso prima di inizializzarsi non si vede lo
+        # stesso, perche' il fondo della finestra e' gia' il nero del tema.
     )
-
-    # La finestra c'e': da qui in poi l'attesa e' tutta di WebView2, che nessuno
-    # puo' misurare dall'esterno. La barra si ferma qui e riparte dentro la
-    # pagina, che sa raccontare i propri passi.
-    _avanza(APERTURA)
 
     # L'icona della finestra. Su Windows pywebview, se non gliela si passa, la
     # estrae dall'eseguibile: lanciando i sorgenti finirebbe quella di
     # python.exe, quindi gliela si indica sempre quando c'e'.
     icona = _risorsa('assets', 'EchoScript.ico')
-    # 'func' viene eseguito appena il giro della finestra e' partito, cioe' nel
-    # mezzo dell'unico tratto che nessuno puo' misurare: quello in cui WebView2
-    # si inizializza e carica la pagina. Non e' molto, ma e' un movimento vero in
-    # un momento in cui altrimenti la barra resterebbe immobile per qualche
-    # secondo — e una barra immobile e' esattamente cio' che fa pensare a un
-    # programma piantato. Resta sotto al primo passo del velo, cosi' quando le
-    # due schermate si scambiano la barra non torna mai indietro.
-    webview.start(lambda: _avanza(0.66),
+    # 'func' viene eseguito appena il giro della finestra e' partito, cioe'
+    # quando la pagina e il suo velo sono gia' sullo schermo. E' li' dentro che
+    # si carica il motore: e' l'unico posto da cui si possa farlo avendo gia'
+    # qualcosa da mostrare a chi aspetta.
+    webview.start(_carica_motore,
                   icon=icona if os.path.isfile(icona) else None)
 
 
