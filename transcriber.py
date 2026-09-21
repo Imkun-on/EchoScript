@@ -738,115 +738,12 @@ def _confirm(label: str, accent: str = "bright_blue") -> bool:
 
 # === PHASE 0: VIDEO METADATA ===
 
-def _best_thumbnail(info: dict) -> str | None:
-    """Pick the best still image (cover) for a video.
-
-    Prefers the single 'thumbnail' yt-dlp already resolves; otherwise takes the
-    highest-resolution entry from the 'thumbnails' list. Returns None if absent."""
-    if info.get("thumbnail"):
-        return info["thumbnail"]
-    thumbs = info.get("thumbnails") or []
-    if not thumbs:
-        return None
-    best = max(thumbs, key=lambda t: (t.get("width") or 0) * (t.get("height") or 0))
-    return best.get("url")
-
-
-def get_video_info(url: str) -> dict:
-    """Download ONLY the video metadata (without downloading the audio).
-
-    Uses yt-dlp with download=False: a lightweight call that returns a large
-    dictionary of information. We extract the fields we need and pack them into
-    our own, cleaner dictionary. Solleva MediaError su errore (URL non valido,
-    video privato, rete...). Versione SENZA interfaccia, condivisa da CLI e GUI:
-    per la CLI c'è il wrapper `_cli_get_video_info`."""
-    ydl_opts = {
-        "quiet": True,            # no yt-dlp output on screen (we handle it ourselves)
-        "no_warnings": True,
-        "skip_download": True,    # do NOT download the media, only the info
-    }
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-    except Exception as e:
-        raise MediaError(f"Impossibile leggere il video: {e}")
-
-    # Some URLs (playlists) return a list of 'entries': we take the first one.
-    if info.get("_type") == "playlist" and info.get("entries"):
-        info = info["entries"][0]
-
-    categories = info.get("categories") or []
-    return {
-        # Copertina: la usa la GUI nella card di conferma (la CLI la ignora).
-        "thumbnail": _best_thumbnail(info),
-        "id": info.get("id", ""),
-        "title": info.get("title", "Senza titolo"),
-        "channel": info.get("channel") or info.get("uploader") or "?",
-        "views": info.get("view_count"),
-        "upload_date": info.get("upload_date"),
-        "duration": info.get("duration"),
-        # 'chapters' is a list of {start_time, end_time, title} if the video has
-        # chapters; otherwise None. It will be the basis of our "sections".
-        "chapters": info.get("chapters") or [],
-        "webpage_url": info.get("webpage_url", url),
-        "source": "youtube",
-        # Metadati extra mostrati nella card info (mancanti -> None).
-        "likes": info.get("like_count"),
-        "subscribers": info.get("channel_follower_count"),
-        "category": categories[0] if categories else None,
-        # Lingua dichiarata da YouTube (spesso assente). Quella "vera" dall'audio
-        # viene rilevata da Whisper durante la trascrizione (detected_language).
-        "language": info.get("language"),
-    }
-
-
-def get_playlist_info(url: str) -> dict | None:
-    """Se l'URL è una PLAYLIST YouTube, restituisce nome/canale + elenco dei video.
-
-    Usa yt-dlp in modalità "flat" (extract_flat="in_playlist"): NON risolve i
-    metadati di ogni singolo video, legge soltanto l'elenco — quindi è veloce
-    anche con playlist lunghe. Restituisce None se l'URL non è una playlist
-    (video singolo); solleva MediaError su errore di rete/lettura. La chiave
-    'entries' è la lista degli URL dei video nell'ordine della playlist; 'title'
-    è il nome della playlist (con fallback al canale) usato per la sottocartella
-    in results/. Versione senza interfaccia: wrapper CLI in
-    `_cli_get_playlist_info`."""
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "extract_flat": "in_playlist",  # non scaricare i metadati di ogni video
-    }
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-    except Exception as e:
-        raise MediaError(f"Impossibile leggere la playlist: {e}")
-
-    if not info or info.get("_type") != "playlist":
-        return None  # non è una playlist: si prosegue come video singolo
-
-    entries: list[str] = []
-    for e in (info.get("entries") or []):
-        if not e:
-            continue
-        vid = e.get("id")
-        vurl = e.get("url") or e.get("webpage_url")
-        if vid:
-            entries.append(f"https://www.youtube.com/watch?v={vid}")
-        elif vurl:
-            entries.append(vurl)
-    if not entries:
-        return None
-
-    channel = info.get("channel") or info.get("uploader")
-    return {
-        "title": info.get("title") or channel,
-        "channel": channel,
-        "count": len(entries),
-        "entries": entries,
-    }
-
+# === I METADATI: stanno in server/sources/metadata.py ========================
+#
+# Cosa c'e' dietro un link o dentro un file, prima di scaricare niente.
+from server.sources.metadata import (
+    _best_thumbnail, get_playlist_info, get_video_info, local_file_meta,
+)
 
 # --- Wrapper CLI dei metadati ------------------------------------------------
 # Le funzioni core qui sopra sollevano MediaError; la CLI preferisce lavorare
@@ -868,29 +765,6 @@ def _cli_get_playlist_info(url: str) -> dict | None:
     except MediaError as e:
         console.print(f"[error]{e}[/error]")
         return None
-
-
-def local_file_meta(path: str) -> dict:
-    """Build a synthetic metadata dict for a LOCAL audio/video file.
-
-    A local file has no channel/views/upload date/chapters: we fill those with
-    None/[] so the rest of the pipeline (sections, MD/TXT/JSON/PDF, translation)
-    works unchanged. The title is the file name (without extension) and the
-    duration is probed with ffprobe. 'webpage_url' carries the absolute path so
-    it shows up as the source in the output files."""
-    path = os.path.abspath(path)
-    return {
-        "id": "",
-        "title": os.path.splitext(os.path.basename(path))[0] or "audio",
-        "channel": None,
-        "views": None,
-        "upload_date": None,
-        "duration": _probe_duration(path),
-        "chapters": [],
-        "webpage_url": path,
-        "source": "local",
-        "source_path": path,
-    }
 
 
 # === I MESSAGGI DI AVANZAMENTO: stanno in server/config/messages.py ==========
@@ -939,67 +813,12 @@ def display_video_info(meta: dict) -> None:
 
 # === PHASE 1: AUDIO DOWNLOAD ===
 
-def download_audio(url: str, workdir: str, on_progress=_noop_progress,
-                   should_stop=_never_stop) -> str:
-    """Download ONLY the video's audio into the temporary folder `workdir`.
-
-    Versione SENZA interfaccia, condivisa da CLI e GUI: l'avanzamento esce da
-    `on_progress(phase, current, total, detail)` invece di essere disegnato qui,
-    così chi chiama decide se mostrarlo con una barra rich, in una GUI o per
-    niente. `should_stop()` viene interrogata a ogni tick per poter annullare
-    (la CLI la aggancia a Ctrl+C). Restituisce il percorso del file audio;
-    solleva MediaError se qualcosa va storto. Wrapper CLI: `_cli_download_audio`."""
-    out_template = os.path.join(workdir, "audio.%(ext)s")  # %(ext)s = the actual extension chosen by yt-dlp
-
-    def _hook(d: dict) -> None:
-        """Callback called by yt-dlp with the download status."""
-        if should_stop():
-            # Raising an exception here interrupts the yt-dlp download.
-            raise KeyboardInterrupt
-        if d["status"] == "downloading":
-            total = d.get("total_bytes") or d.get("total_bytes_estimate")
-            done = d.get("downloaded_bytes", 0)
-            on_progress("download", done, total, msg("dl_audio"))
-        elif d["status"] == "finished":
-            # Download finished: but yt-dlp now EXTRACTS the audio with ffmpeg (a
-            # few seconds, without a percentage). We signal it so it does not look stuck.
-            on_progress("download", None, None, msg("extract_audio"))
-
-    def _pp_hook(d: dict) -> None:
-        """Post-processor callback (the audio conversion after the download).
-
-        It serves to NOT leave the screen frozen during the audio extraction: we
-        report it so the user sees that the work continues."""
-        if d.get("status") == "started":
-            on_progress("download", None, None, msg("convert_audio"))
-
-    ydl_opts = {
-        "format": "bestaudio/best",   # the best audio-only track available
-        "outtmpl": out_template,
-        "quiet": True,
-        "no_warnings": True,
-        "noprogress": True,           # suppress yt-dlp's internal bar (we draw our own)
-        "progress_hooks": [_hook],
-        "postprocessor_hooks": [_pp_hook],  # to show the progress of the conversion
-        # Extracts/normalizes the audio into m4a via ffmpeg (already present on the system).
-        "postprocessors": [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "m4a",
-        }],
-    }
-
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-    except Exception as e:
-        raise MediaError(f"Errore nel download audio: {e}")
-
-    # The postprocessor produces a .m4a: we look for it in the working folder.
-    for fname in os.listdir(workdir):
-        if fname.startswith("audio."):
-            return os.path.join(workdir, fname)
-    raise MediaError("File audio non trovato dopo il download.")
-
+# === LO SCARICAMENTO: sta in server/sources/download.py ======================
+#
+# Procurarsi l'audio. Solo l'audio: il video intero pesa dieci volte tanto.
+from server.sources.download import (
+    download_audio,
+)
 
 def _download_progress(description: str):
     """Barra rich per i download: spinner, %, byte, velocità e tempo stimato.
@@ -1050,59 +869,12 @@ def _cli_download_audio(url: str, workdir: str) -> str | None:
 
 # === PHASE 2: PREPARATION / SPLITTING ===
 
-def split_audio(audio_path: str, duration: float, workdir: str,
-                on_progress=_noop_progress, should_stop=_never_stop) -> list[tuple[float, str]]:
-    """Split the audio into chunks of CHUNK_SECONDS, re-encoding them to 16 kHz mono.
-
-    For each chunk it launches ffmpeg with:
-      -ss <start>     -> skip to the chunk's start second
-      -t  <duration>  -> take only CHUNK_SECONDS seconds
-      -ac 1           -> 1 channel (mono)
-      -ar 16000       -> 16 kHz (format Whisper likes)
-    Returns a list of pairs (offset_in_seconds, mp3_file_path).
-    The offset is used later to correct each chunk's timestamps.
-    Versione senza interfaccia: l'avanzamento esce da `on_progress` e
-    `should_stop()` permette di annullare a metà. Wrapper CLI:
-    `_cli_split_audio`."""
-    chunks: list[tuple[float, str]] = []
-    # Senza durata il ciclo qui sotto non entrerebbe nemmeno una volta e la
-    # trascrizione uscirebbe vuota con un «Nessun testo trascritto» che non
-    # spiega niente. Si riprova a misurarla dal file e, se non si riesce, lo si
-    # dice: il guasto è ffprobe/file illeggibile, non l'audio senza parole.
-    if not duration:
-        duration = _probe_duration(audio_path)
-    if not duration:
-        raise MediaError(
-            "Impossibile determinare la durata dell'audio: il file potrebbe "
-            "essere danneggiato o ffprobe non è raggiungibile.")
-    # Number of chunks computed in advance (rounded up) to give the bar a total.
-    # max(1, ...) avoids 0 chunks on very short audio.
-    n_chunks = max(1, int((duration + CHUNK_SECONDS - 1) // CHUNK_SECONDS))
-
-    start = 0.0
-    idx = 0
-    while start < duration:
-        if should_stop():
-            break
-        out_path = os.path.join(workdir, f"chunk_{idx:03d}.mp3")
-        cmd = [
-            "ffmpeg", "-y",                 # -y = overwrite without asking
-            "-ss", str(start),              # start point
-            "-t", str(CHUNK_SECONDS),       # how many seconds to take
-            "-i", audio_path,               # input file
-            "-ac", "1",                     # mono
-            "-ar", str(AUDIO_SAMPLE_RATE),  # 16 kHz
-            "-b:a", AUDIO_BITRATE,          # audio bitrate
-            out_path,
-        ]
-        # stdout/stderr discarded: we only care that the file gets created.
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-        chunks.append((start, out_path))
-        start += CHUNK_SECONDS
-        idx += 1
-        on_progress("prepare", idx, n_chunks, msg("chunk_prep", i=idx, n=n_chunks))
-    return chunks
-
+# === LA PREPARAZIONE DELL'AUDIO: sta in server/transcription/audio.py ========
+#
+# Riportare l'audio a un formato leggero e tagliarlo in blocchi trascrivibili.
+from server.transcription.audio import (
+    split_audio,
+)
 
 def _cli_split_audio(audio_path: str, duration: float, workdir: str) -> list[tuple[float, str]]:
     """split_audio per la CLI: barra rich che cresce a ogni blocco creato."""
@@ -3682,22 +3454,12 @@ def run() -> None:
                                                   do_export=do_export)
 
 
-def _probe_duration(audio_path: str) -> float:
-    """Ask ffprobe for the duration of an audio file (in seconds).
-
-    Used only as a fallback if the duration was not present in the YouTube
-    metadata. If ffprobe also fails, it returns 0 (the splitting into chunks
-    will produce nothing and the user will be warned)."""
-    try:
-        out = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-             "-of", "default=noprint_wrappers=1:nokey=1", audio_path],
-            capture_output=True, text=True, check=True,
-        )
-        return float(out.stdout.strip())
-    except Exception:
-        return 0.0
-
+# === LE DOMANDE A FFMPEG: stanno in server/utils/ffmpeg.py ===================
+#
+# Quanto dura questo file. Una domanda sola, ma la fanno in tre.
+from server.utils.ffmpeg import (
+    _probe_duration,
+)
 
 # === MAIN ===
 # Entry point: executed only if you run "python transcriber.py"
