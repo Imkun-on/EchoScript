@@ -61,7 +61,8 @@ hiddenimports = ['transcriber',
                  'server.enrichment', 'server.enrichment.summary',
                  'server.state', 'server.state.checkpoints',
                  'server.state.credits', 'server.state.jobs',
-                 'server.utils', 'server.utils.text']
+                 'server.utils', 'server.utils.contract',
+                 'server.utils.text']
 
 for _pacchetto in ('webview', 'faster_whisper', 'av', 'ctranslate2',
                    'onnxruntime', 'tokenizers', 'huggingface_hub', 'yt_dlp',
