@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import json
 
-from Shared.percorsi import dati as _dati
+from server.config.paths import dati as _dati
 
 # Lingue disponibili, nell'ordine in cui compaiono nel menu.
 LANGUAGES = (('it', 'Italiano'), ('en', 'English'))

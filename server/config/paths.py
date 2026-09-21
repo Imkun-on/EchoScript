@@ -29,9 +29,22 @@ from __future__ import annotations
 import os
 import sys
 
-# La radice del progetto quando si lavora sui sorgenti: la cartella che
-# contiene Shared/, cioe' quella sopra questo file.
-_SORGENTI = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# La radice del progetto quando si lavora sui sorgenti.
+#
+# Questo file sta in  server/config/paths.py,  quindi per arrivare alla radice
+# bisogna risalire di TRE cartelle: config, poi server, poi si e' arrivati.
+# Il numero di risalite non e' decorativo e non va tirato a indovinare: e'
+# esattamente la profondita' a cui sta questo file. Se un giorno paths.py si
+# sposta, questa riga si sposta con lui, altrimenti il programma comincia a
+# cercare la pagina e le icone in una cartella che non esiste.
+#
+# Il calcolo e' scritto per pezzi invece che con tre dirname incastrati uno
+# dentro l'altro, cosi' chi legge conta le risalite invece di doverle dedurre
+# dalle parentesi.
+_QUESTO_FILE = os.path.abspath(__file__)
+_CARTELLA_CONFIG = os.path.dirname(_QUESTO_FILE)          # server/config
+_CARTELLA_SERVER = os.path.dirname(_CARTELLA_CONFIG)      # server
+_SORGENTI = os.path.dirname(_CARTELLA_SERVER)             # la radice
 
 
 def impacchettato() -> bool:

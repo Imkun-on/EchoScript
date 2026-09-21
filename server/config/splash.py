@@ -37,7 +37,7 @@ Le due meta' della barra
 
 Perche' misura 190x3
     Perche' e' esattamente la barra del velo di caricamento che le succede
-    dentro la pagina (``.avvio-barra`` in ``web/style.css``). Le due schermate
+    dentro la pagina (``.avvio-barra`` in ``client/styles/style.css``). Le due schermate
     si passano il turno a meta' avvio, e nell'istante dello scambio la barra
     deve restare dov'era: stessa larghezza, stesso spessore, stesso viola.
 """

@@ -7,7 +7,7 @@
 #
 #  Qui non c'e' nessun motore grafico da impacchettare: WebView2 e' gia'
 #  installato su Windows 10 e 11, quindi l'interfaccia sono sette file di testo
-#  dentro web/, qualche decina di kilobyte al posto di qualche decina di
+#  dentro client/, qualche decina di kilobyte al posto di qualche decina
 #  megabyte.
 #
 #  Cosa entra: l'host (EchoScriptApp.py), i moduli condivisi, il motore, la
@@ -27,11 +27,12 @@ from PyInstaller.utils.hooks import collect_all
 ROOT = os.path.abspath(os.getcwd())
 
 # La barra della schermata di avvio: misure, carattere e colore stanno in
-# Shared/avvio.py, che e' anche chi la riempie a programma partito. Prenderle da
+# server/config/splash.py, che e' anche chi la riempie a programma partito.
+# Prenderle da
 # li' invece di ricopiarle qui e' l'unico modo perche' il riempimento cada
 # esattamente sul binario disegnato dentro caricamento.png.
 sys.path.insert(0, ROOT)
-from Shared import avvio as _avvio
+from server.config import splash as _avvio
 
 # --- ffmpeg + ffprobe, risolti dal PATH al momento della costruzione ---------
 binaries = []
@@ -41,7 +42,7 @@ for _strumento in ('ffmpeg', 'ffprobe'):
         binaries.append((_percorso, '.'))   # nella radice del pacchetto (sul PATH a runtime)
 
 # --- La pagina: e' l'interfaccia, quindi senza non si parte ------------------
-datas = [('web', 'web')]
+datas = [('client', 'client')]
 
 # --- Le immagini: icona della finestra e schermata di avvio ------------------
 # Si elencano una per una invece di prendere tutta la cartella, perche' dentro
@@ -54,8 +55,10 @@ for _immagine in (ICONA, AVVIO, os.path.join(ASSETS, 'EchoScript.png')):
     if os.path.isfile(_immagine):
         datas.append((_immagine, 'assets'))
 
-hiddenimports = ['transcriber', 'engine', 'Shared', 'Shared.i18n',
-                 'Shared.percorsi', 'Shared.strings_app', 'Shared.avvio']
+hiddenimports = ['transcriber', 'engine',
+                 'server', 'server.config', 'server.config.i18n',
+                 'server.config.paths', 'server.config.strings',
+                 'server.config.splash']
 
 for _pacchetto in ('webview', 'faster_whisper', 'av', 'ctranslate2',
                    'onnxruntime', 'tokenizers', 'huggingface_hub', 'yt_dlp',
@@ -123,7 +126,8 @@ pyz = PYZ(a.pure)
 #
 # La riga di testo qui sotto NON e' un messaggio: e' il riempimento della barra.
 # L'immagine porta gia' disegnato il binario vuoto, e il programma ci scrive
-# sopra una fila di trattini che cresce a ogni pezzo caricato (Shared/avvio.py).
+# sopra una fila di trattini che cresce a ogni pezzo caricato
+# (server/config/splash.py).
 # Di suo il bootloader ci stamperebbe i nomi dei file che sta estraendo, uno
 # dopo l'altro: informazione per chi costruisce il pacchetto, rumore per chi lo
 # usa. Il testo iniziale e' vuoto di proposito — finirebbe dentro il file Tcl,

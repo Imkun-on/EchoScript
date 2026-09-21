@@ -63,7 +63,7 @@ try:
 except ImportError:
     _splash = None
 
-from Shared.avvio import barra as _barra_avvio
+from server.config.splash import barra as _barra_avvio
 
 # Quanto vale ogni pezzo dell'avvio sulla barra. Non sono numeri decorativi: il
 # motore da solo pesa quanto tutto il resto messo insieme, ed e' giusto che la
@@ -71,7 +71,7 @@ from Shared.avvio import barra as _barra_avvio
 #
 # APERTURA e' il punto in cui questa schermata passa la mano alla pagina: da li'
 # in poi a riempire e' il velo di caricamento dentro la finestra, che riparte
-# esattamente da questo valore (BASE_AVVIO in web/app.js) invece che da zero.
+# esattamente da questo valore (BASE_AVVIO in client/app.js) invece che da zero.
 # E' l'unica ragione per cui le due schermate sembrano una barra sola.
 APERTURA = 0.62
 
@@ -90,9 +90,9 @@ def _avanza(quota: float) -> None:
 
 _avanza(0.0)
 
-from Shared import i18n
-from Shared.percorsi import dati as _dati, risorsa as _risorsa, impacchettato
-from Shared.strings_app import TESTI
+from server.config import i18n
+from server.config.paths import dati as _dati, risorsa as _risorsa, impacchettato
+from server.config.strings import TESTI
 _avanza(0.06)               # i testi: sono dizionari, e' immediato
 
 import webview
@@ -1397,7 +1397,7 @@ def main() -> None:
 
     _finestra = webview.create_window(
         'EchoScript',
-        _risorsa('web', 'index.html'),
+        _risorsa('client', 'index.html'),
         js_api=Api(),
         width=1180,
         height=800,

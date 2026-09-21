@@ -788,7 +788,7 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 /* ── Menu a tendina della pagina ────────────────────────────────────────── */
 /* Il <select> vero resta nel documento, invisibile: continua a essere la fonte
  * della verita' per tutto il resto del programma. Quello che si vede e si
- * clicca e' costruito da tendine.js. */
+ * clicca e' costruito da components/dropdown.js. */
 
 .tendina { position: relative; width: 100%; }
 .tendina > select {

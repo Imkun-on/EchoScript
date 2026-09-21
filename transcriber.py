@@ -686,8 +686,8 @@ def _data_root() -> str:
     una cartella temporanea cancellata alla chiusura). Con l'installatore quella
     distinzione conta il doppio, perché `_internal` viene rifatta da zero a ogni
     aggiornamento: quello che sta lì dentro è materiale del programma, e sparisce
-    con lui. È la stessa cartella dati che usa Shared/percorsi.py, ricalcolata
-    qui perché transcriber non dipende da Shared."""
+    con lui. È la stessa cartella dati che usa server/config/paths.py,
+    ricalcolata qui perché transcriber non dipende dai moduli del server."""
     if getattr(sys, "frozen", False):
         return os.path.dirname(os.path.abspath(sys.executable))
     return os.path.dirname(os.path.abspath(__file__))

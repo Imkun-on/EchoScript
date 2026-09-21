@@ -15,13 +15,13 @@ import sys
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-# Il binario della barra di avvio: dove va disegnato lo decide Shared/avvio.py,
+# Il binario della barra di avvio: dove va disegnato lo decide
 # che e' anche chi ci scrive sopra il riempimento a programma avviato. Le due
 # meta' della stessa barra, quindi le misure stanno in un posto solo.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from Shared.avvio import BINARIO
+from server.config.splash import BINARIO
 
-# --- I colori, gli stessi di :root in web/style.css --------------------------
+# --- I colori, gli stessi di :root in client/styles/style.css ----------------
 F0   = (0x04, 0x04, 0x0a)      # --f0   il nero di fondo
 F2   = (0x12, 0x12, 0x2a)      # --f2   il fondo alto della piastrella
 IRIS = (0x7c, 0x6c, 0xff)      # --iris il viola d'identita'
@@ -154,7 +154,7 @@ def caricamento(larghezza: int = 440, altezza: int = 260) -> Image.Image:
 
     La barra invece c'e', ma qui se ne disegna solo il BINARIO vuoto: a
     riempirlo e' il programma appena parte, scrivendoci sopra (vedi
-    Shared/avvio.py). Il binario dev'essere gia' nell'immagine perche' nei primi
+    server/config/splash.py). Il binario dev'essere gia' nell'immagine perche' nei primi
     istanti dopo il doppio clic non esiste ancora un interprete Python che possa
     disegnare alcunche': si vede una barra vuota, che e' la verita', invece del
     nulla.
