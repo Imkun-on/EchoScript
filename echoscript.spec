@@ -52,7 +52,8 @@ for _immagine in (ICONA, os.path.join(ASSETS, 'EchoScript.png')):
 hiddenimports = ['transcriber',
                  'server',
                  'server.config', 'server.config.i18n',
-                 'server.config.paths', 'server.config.strings',
+                 'server.config.paths', 'server.config.settings',
+                 'server.config.strings',
                  'server.controllers', 'server.controllers.api',
                  'server.controllers.bridge',
                  'server.services', 'server.services.pipeline']

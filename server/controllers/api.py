@@ -38,7 +38,7 @@ import traceback
 
 import webview
 
-from server.config import i18n
+from server.config import i18n, settings
 from server.controllers import bridge
 from server.controllers.bridge import verso_pagina as _verso_pagina
 
@@ -385,12 +385,12 @@ class Api:
             'sorgente': prefs.get('sorgente', 'youtube'),
             # I tre modelli locali...
             'whisper': prefs.get('whisper', 'small'),
-            'ollama':  prefs.get('ollama', tx.OLLAMA_MODEL),
-            'vision':  prefs.get('vision', tx.OLLAMA_VISION_MODEL),
+            'ollama':  prefs.get('ollama', settings.OLLAMA_MODEL),
+            'vision':  prefs.get('vision', settings.OLLAMA_VISION_MODEL),
             # ...e i tre di Groq, che fanno gli stessi tre mestieri sui server.
             'groq':    prefs.get('groq', _GROQ[0]),
-            'groq_testo': prefs.get('groq_testo', tx.GROQ_SUMMARY_MODEL),
-            'groq_vista': prefs.get('groq_vista', tx.GROQ_VISION_MODEL),
+            'groq_testo': prefs.get('groq_testo', settings.GROQ_SUMMARY_MODEL),
+            'groq_vista': prefs.get('groq_vista', settings.GROQ_VISION_MODEL),
             'translate': bool(prefs.get('translate', False)),
             'summarize': bool(prefs.get('summarize', False)),
             'visual':    bool(prefs.get('visual', False)),
@@ -449,9 +449,9 @@ class Api:
         chiedere quanto e' rimasto — quindi non basta passarli fra le opzioni al
         momento di partire.
         """
-        tx.GROQ_MODEL = self.scelte['groq']
-        tx.GROQ_SUMMARY_MODEL = self.scelte['groq_testo']
-        tx.GROQ_VISION_MODEL = self.scelte['groq_vista']
+        settings.GROQ_MODEL = self.scelte['groq']
+        settings.GROQ_SUMMARY_MODEL = self.scelte['groq_testo']
+        settings.GROQ_VISION_MODEL = self.scelte['groq_vista']
 
     def _modelli(self) -> dict:
         """I sei cataloghi di modelli, gia' con etichetta e descrizione.

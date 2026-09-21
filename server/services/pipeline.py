@@ -35,7 +35,7 @@ import shutil
 import subprocess
 import tempfile
 
-from server.config import paths
+from server.config import paths, settings
 
 # La radice del progetto deve essere raggiungibile, altrimenti `import
 # transcriber` qui sotto non trova niente.
@@ -142,22 +142,22 @@ def _set_engine_lang(options: dict) -> None:
     # transcriber per riassunto/traduzione e analisi visiva.
     m = options.get("ollama_model")
     if m:
-        tx.OLLAMA_MODEL = m
+        settings.OLLAMA_MODEL = m
         # La traduzione riusa il modello del riassunto, salvo .env esplicito.
         if not os.environ.get("ECHOSCRIPT_OLLAMA_TRANSLATE_MODEL", "").strip():
-            tx.OLLAMA_TRANSLATE_MODEL = m
+            settings.OLLAMA_TRANSLATE_MODEL = m
     vm = options.get("ollama_vision_model")
     if vm:
-        tx.OLLAMA_VISION_MODEL = vm
+        settings.OLLAMA_VISION_MODEL = vm
     # Modelli Groq (cloud) scelti in GUI: gli stessi due ruoli, ma sui server.
     # Valgono solo quando il backend è Groq — con backend locale il cloud non
     # viene toccato affatto (vedi _resolve_summary_client).
     gs = options.get("groq_summary_model")
     if gs:
-        tx.GROQ_SUMMARY_MODEL = gs
+        settings.GROQ_SUMMARY_MODEL = gs
     gv = options.get("groq_vision_model")
     if gv:
-        tx.GROQ_VISION_MODEL = gv
+        settings.GROQ_VISION_MODEL = gv
 
 
 def _L(key: str, **fmt) -> str:
@@ -277,7 +277,7 @@ def fetch_groq_limits(api_key: str | None = None) -> dict:
             with open(probe, "rb") as f:
                 raw = client.audio.transcriptions.with_raw_response.create(
                     file=(os.path.basename(probe), f.read()),
-                    model=tx.GROQ_MODEL,
+                    model=settings.GROQ_MODEL,
                     response_format="json",
                     temperature=0.0,
                 )
@@ -320,9 +320,9 @@ def get_cached_credits() -> list[dict]:
     # chiamati in questa sessione): così il pannello crediti mostra tutti i modelli
     # e non solo quelli già interrogati. 'used' distingue i due casi per la GUI.
     known = [
-        (tx.GROQ_MODEL, "transcription", 0),
-        (tx.GROQ_SUMMARY_MODEL, "summary", 1),
-        (tx.GROQ_VISION_MODEL, "vision", 2),
+        (settings.GROQ_MODEL, "transcription", 0),
+        (settings.GROQ_SUMMARY_MODEL, "summary", 1),
+        (settings.GROQ_VISION_MODEL, "vision", 2),
     ]
     known_models = {m for m, _, _ in known}
     cache_by_model = {snap.get("model", ""): snap for snap in tx.cached_rate_limits()}
@@ -520,12 +520,12 @@ def transcribe_only(source: str, options: dict, on_progress=_noop, resume: bool 
     # Modello di trascrizione Groq scelto dall'utente (GUI): diventa quello attivo
     # per l'intera lavorazione, così API call, etichette e checkpoint lo usano.
     if options.get("groq_model"):
-        tx.GROQ_MODEL = options["groq_model"]
+        settings.GROQ_MODEL = options["groq_model"]
     backend = options.get("backend", "groq")
     model = options.get("model")
     source_kind = options.get("source_kind", "youtube")
     # Forced audio language (None = auto-detect); explicit option wins over .env.
-    audio_lang = options.get("audio_lang") or tx.LANGUAGE
+    audio_lang = options.get("audio_lang") or settings.LANGUAGE
 
     # A Groq client is needed only for cloud transcription.
     client = None
@@ -543,7 +543,7 @@ def transcribe_only(source: str, options: dict, on_progress=_noop, resume: bool 
         meta = get_video_info(source)
 
     engine_label = (f"Locale / faster-whisper {model}" if backend == "local"
-                    else f"Groq / {tx.GROQ_MODEL}")
+                    else f"Groq / {settings.GROQ_MODEL}")
 
     # Checkpoint da cui riprendere (Groq a blocchi, oppure locale a tempo).
     cp = None
@@ -629,7 +629,7 @@ def _transcribe_body(source, options, on_progress, meta, client, backend, model,
                     "source": meta.get("source", source_kind),
                     "source_path": meta.get("source_path"),
                     "webpage_url": meta.get("webpage_url"),
-                    "model": tx.GROQ_MODEL, "chunk_seconds": tx.CHUNK_SECONDS,
+                    "model": settings.GROQ_MODEL, "chunk_seconds": tx.CHUNK_SECONDS,
                     "total_chunks": ti.total, "done_chunks": ti.done,
                     "detected_language": ti.lang, "segments": ti.segments,
                     "duration": duration,
@@ -674,7 +674,7 @@ def continue_local_from_groq(source: str, options: dict, on_progress=_noop):
     _set_engine_lang(options)
     source_kind = options.get("source_kind", "youtube")
     model = options.get("model") or "small"
-    audio_lang = options.get("audio_lang") or tx.LANGUAGE
+    audio_lang = options.get("audio_lang") or settings.LANGUAGE
 
     # Metadati: servono a ritrovare il checkpoint (chiave) e a conoscere la durata.
     if source_kind == "local":
@@ -1015,8 +1015,8 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
     elif options.get("visual") and meta.get("_video_path"):
         vstats: dict = {}
         try:
-            vis_label = (f"Groq · {tx.GROQ_VISION_MODEL}" if chat_client is not None
-                         else f"Ollama · {tx.OLLAMA_VISION_MODEL}")
+            vis_label = (f"Groq · {settings.GROQ_VISION_MODEL}" if chat_client is not None
+                         else f"Ollama · {settings.OLLAMA_VISION_MODEL}")
             frames_out = os.path.join(video_dir, tx.visual_subdir(options.get("ui_lang", "it")), "frames")
             with tempfile.TemporaryDirectory(prefix="echoscript_vis_", ignore_cleanup_errors=True) as vwork:
                 visual_notes = tx.analyze_video_visuals(

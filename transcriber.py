@@ -108,250 +108,35 @@ console = Console(theme=_theme)
 SYM_OK, SYM_FAIL, SYM_ARROW, SYM_DOT = "✓", "✗", "→", "•"
 
 
-# === .env LOADING + CONFIG HELPERS ===========================================
-# Load the .env into os.environ at IMPORT time, so the configuration constants
-# further down can be overridden WITHOUT editing the code. Values already
-# present in the real environment win over the .env file.
-def _env_candidates() -> list[str]:
-    """Dove cercare il .env, nell'ordine in cui vince chi arriva prima.
-
-    Da sorgenti c'è un posto solo: accanto a questo file. Dentro l'eseguibile
-    ce ne sono due, e non sono equivalenti.
-
-    Il primo è la cartella dell'.exe, cioè, dopo l'installazione, quella che
-    l'installatore apre da «Programs/EchoScript» dentro %LOCALAPPDATA%. È
-    l'unico che una persona sappia trovare («apri la cartella del programma»),
-    ed è l'unico che sopravvive a un aggiornamento: l'installazione rifà
-    `_internal` da zero ogni volta.
-
-    Il secondo è accanto a questo file, che da impacchettati sta dentro
-    `_internal`. Resta solo per non rompere chi ci aveva già messo il suo .env
-    quando quello era l'unico posto in cui il programma guardava."""
-    accanto_al_file = os.path.dirname(os.path.abspath(__file__))
-    if getattr(sys, "frozen", False):
-        accanto_all_exe = os.path.dirname(os.path.abspath(sys.executable))
-        return [os.path.join(accanto_all_exe, ".env"),
-                os.path.join(accanto_al_file, ".env")]
-    return [os.path.join(accanto_al_file, ".env")]
-
-
-def _load_env_file() -> None:
-    """Read KEY=value lines from a sibling .env into os.environ (no overwrite)."""
-    for env_path in _env_candidates():
-        try:
-            with open(env_path, "r", encoding="utf-8") as f:
-                for raw in f:
-                    line = raw.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    if line.startswith("export "):
-                        line = line[len("export "):]
-                    if "=" not in line:
-                        continue
-                    key, _, value = line.partition("=")
-                    key = key.strip()
-                    value = value.strip().strip('"').strip("'")
-                    if key and key not in os.environ:
-                        os.environ[key] = value
-        except OSError:
-            continue
-
-
-def _env_str(key: str, default: str) -> str:
-    """Read a string env var; blank/absent -> the default."""
-    v = os.environ.get(key, "").strip()
-    return v if v else default
-
-
-def _env_int(key: str, default: int) -> int:
-    """Read an integer env var; invalid/absent -> the default."""
-    try:
-        return int(os.environ.get(key, "").strip())
-    except (ValueError, TypeError):
-        return default
-
-
-def _env_opt(key: str) -> str | None:
-    """Read an OPTIONAL string env var; blank/absent -> None."""
-    v = os.environ.get(key, "").strip()
-    return v or None
-
-
-def _env_bool(key: str, default: bool) -> bool:
-    """Read a boolean env var ('1/true/yes/on'); blank/absent -> the default."""
-    v = os.environ.get(key, "").strip().lower()
-    if not v:
-        return default
-    return v in ("1", "true", "yes", "on", "si", "sì")
-
-
-# === CONFIGURATION (every value overridable from .env) =======================
-# The program's "knobs". Each has a sensible default but can be tuned from a .env
-# entry / environment variable, so users never need to edit this file.
-_load_env_file()
-
-# Whisper model on Groq: "turbo" is very fast and cheap. Alternatives:
-# "whisper-large-v3" (more accurate/slower), "distil-whisper-large-v3-en" (EN only).
-GROQ_MODEL = _env_str("ECHOSCRIPT_GROQ_MODEL", "whisper-large-v3-turbo")
-
-# Modelli di trascrizione Groq SELEZIONABILI dall'utente (GUI e CLI): entrambi
-# multilingua. 'turbo' = miglior rapporto prezzo/velocità (default); 'large-v3' =
-# più accurato ma ~2,8× più costoso. Il primo è il default. (Il distil, solo
-# inglese, resta impostabile via ECHOSCRIPT_GROQ_MODEL ma non è nel selettore.)
-GROQ_TRANSCRIBE_MODELS = ("whisper-large-v3-turbo", "whisper-large-v3")
-
-# Audio/video extensions accepted as LOCAL sources (phone recordings, PC files,
-# video files from which ffmpeg extracts the audio track). ffmpeg reads all of
-# these; anything not listed is still attempted but with a gentle warning.
-AUDIO_EXTENSIONS = {
-    ".mp3", ".m4a", ".m4b", ".wav", ".ogg", ".oga", ".opus", ".aac", ".flac",
-    ".wma", ".aiff", ".aif", ".amr", ".3gp", ".caf",          # audio
-    ".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v",          # video (audio extracted)
-}
-
-CHUNK_SECONDS = _env_int("ECHOSCRIPT_CHUNK_SECONDS", 600)      # seconds per audio chunk (10 min)
-AUDIO_SAMPLE_RATE = _env_int("ECHOSCRIPT_SAMPLE_RATE", 16000)  # 16 kHz: recommended for Whisper
-AUDIO_BITRATE = _env_str("ECHOSCRIPT_BITRATE", "64k")          # chunk bitrate (low is fine for speech)
-MAX_RETRIES = _env_int("ECHOSCRIPT_MAX_RETRIES", 3)            # attempts per chunk before giving up
-# Audio language: None = auto-detect (Whisper). Force with e.g. "it"/"en" via the
-# ECHOSCRIPT_AUDIO_LANG env var or, per-run, the GUI/CLI selector.
-LANGUAGE = _env_opt("ECHOSCRIPT_AUDIO_LANG")
-# Word-level timestamps: ask Groq/faster-whisper for per-WORD timings (enables
-# precise subtitles later). On by default; disable with ECHOSCRIPT_WORD_TIMESTAMPS=0.
-WORD_TIMESTAMPS = _env_bool("ECHOSCRIPT_WORD_TIMESTAMPS", True)
-
-# --- LOCAL backend (faster-whisper) ---
-# Device: "auto" picks CUDA (GPU) when available, else CPU. compute_type "" means
-# "auto" (float16 on GPU, int8 on CPU); both can be forced via .env.
-LOCAL_DEVICE = _env_str("ECHOSCRIPT_DEVICE", "auto")
-LOCAL_COMPUTE_TYPE = _env_str("ECHOSCRIPT_COMPUTE_TYPE", "")
-# Local models selectable in the panel (number -> (model_name, description)).
-# Bigger = more accurate but slower on CPU. The time estimates are for a video
-# of ~2 hours without a GPU and are indicative (they depend on your processor).
-LOCAL_MODELS = {
-    "1": ("base",           "veloce (~5-12 min/2h), meno accurato"),
-    "2": ("small",          "equilibrio consigliato (~10-25 min/2h)"),
-    "3": ("medium",         "piu' accurato ma lento (~30-60 min/2h)"),
-    "4": ("large-v3",       "massima accuratezza, MOLTO lento (1-2h+/2h)"),
-    "5": ("large-v3-turbo", "quasi 'large', piu' veloce: buon compromesso CPU"),
-}
-
-# --- SUMMARY (riassunto via LLM) ---
-# Dopo la traduzione si genera un riassunto pulito del testo italiano (toglie
-# intercalari "ehm/uhm", ripetizioni, autocorrezioni). Due motori:
-#   • Groq (cloud): usato quando il backend è Groq (chiave già disponibile),
-#     tramite un modello di CHAT (non Whisper). Velocissimo.
-#   • Ollama (locale): usato quando il backend è locale, per restare 100%
-#     offline. Richiede Ollama installato e avviato (https://ollama.com) con un
-#     modello scaricato (es. `ollama pull llama3.1:8b`).
-# Default: gpt-oss-120b (Production; sostituto del deprecato llama-3.3-70b-versatile,
-# spento da Groq il 16 ago 2026 per i tier free/developer). Più economico e stabile.
-GROQ_SUMMARY_MODEL = _env_str("ECHOSCRIPT_GROQ_SUMMARY_MODEL", "openai/gpt-oss-120b")
-# Modelli di CHAT Groq selezionabili (riassunto + traduzione lato cloud). Sono
-# l'equivalente in nuvola di OLLAMA_TEXT_MODELS: catalogo corto e curato, perché
-# è la scelta di chi ha detto "fai tutto sui server" e vuole solo decidere quanto
-# spendere. Qualunque altro modello resta imponibile da .env.
-GROQ_TEXT_MODELS = {
-    "1": ("openai/gpt-oss-120b", "qualità piena (default)"),
-    "2": ("openai/gpt-oss-20b",  "più economico e rapido"),
-}
-OLLAMA_MODEL = _env_str("ECHOSCRIPT_OLLAMA_MODEL", "qwen2.5:7b")
-# Modello Ollama per la TRADUZIONE locale (vedi più sotto). Di default riusa lo
-# stesso del riassunto, così basta scaricarne uno solo per restare 100% offline.
-OLLAMA_TRANSLATE_MODEL = _env_str("ECHOSCRIPT_OLLAMA_TRANSLATE_MODEL", OLLAMA_MODEL)
-OLLAMA_HOST = _env_str("ECHOSCRIPT_OLLAMA_HOST", "http://localhost:11434")
-# Finestra di contesto per Ollama. ATTENZIONE: di default Ollama usa solo 2048
-# token e TRONCA in silenzio gli input più lunghi (rovinando i riassunti dei
-# video lunghi). Lo alziamo per far entrare un blocco intero (~SUMMARY_MAX_CHARS)
-# + prompt + risposta. 8192 è un buon compromisso qualità/RAM su 7-8B.
-OLLAMA_NUM_CTX = _env_int("ECHOSCRIPT_OLLAMA_NUM_CTX", 8192)
-# Oltre questa lunghezza (caratteri) una sezione viene riassunta a blocchi e poi
-# i parziali vengono uniti (map-reduce), per non sforare il contesto del modello.
-SUMMARY_MAX_CHARS = _env_int("ECHOSCRIPT_SUMMARY_MAX_CHARS", 12000)
-
-# --- ANALISI VISIVA (vision) — trascrive ciò che si VEDE nel video ---
-# Oltre all'audio, EchoScript può "guardare" i fotogrammi di un video (slide,
-# codice a schermo, formule, grafici, diagrammi) ed estrarne il contenuto con un
-# modello multimodale, per arricchire il riassunto. È OPZIONALE (chiesto a ogni
-# run su sorgenti video) e usa gli stessi due motori del resto del programma:
-#   • Groq (cloud): modello vision di GroqCloud (veloce; consuma crediti/frame).
-#   • Ollama (locale): modello vision via Ollama (100% offline; richiede
-#     `ollama pull <modello-vision>`, es. llama3.2-vision).
-# Estensioni con traccia VIDEO (da cui ha senso estrarre i fotogrammi).
-VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
-# Modello vision su Groq. Default: qwen3.6-27b (multimodale; sostituto del
-# deprecato llama-4-scout). Cambiabile da .env.
-GROQ_VISION_MODEL = _env_str("ECHOSCRIPT_GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
-# Modelli vision Groq selezionabili, come sopra per il testo.
-GROQ_VISION_MODELS = {
-    "1": ("qwen/qwen3.6-27b", "multimodale, buon OCR (default)"),
-}
-# Modello vision su Ollama (locale). Scaricalo con: ollama pull llama3.2-vision
-OLLAMA_VISION_MODEL = _env_str("ECHOSCRIPT_OLLAMA_VISION_MODEL", "llama3.2-vision")
-
-# --- Modelli Ollama proposti nei pannelli di scelta (CLI e GUI) ---
-# Numero -> (nome modello, RAM indicativa richiesta, descrizione). Il pannello
-# segna quelli GIÀ scaricati (letti da /api/tags) e accetta anche un nome
-# digitato a mano; .env resta la via per forzare un modello qualunque.
-# TESTO = riassunto + traduzione in locale (backend locale, niente chiave Groq).
-OLLAMA_TEXT_MODELS = {
-    "1": ("qwen3:4b",    "~4 GB",  "leggero e moderno: ideale con 8 GB di RAM"),
-    "2": ("qwen2.5:7b",  "~6 GB",  "equilibrio qualità/peso (default)"),
-    "3": ("qwen3:8b",    "~7 GB",  "più accurato (12-16 GB di RAM)"),
-    "4": ("gemma3:12b",  "~10 GB", "ottimo multilingua (16 GB di RAM)"),
-    "5": ("gpt-oss:20b", "~16 GB", "qualità vicina al cloud (24 GB+ o GPU)"),
-}
-# VISION = analisi visiva dei fotogrammi in locale.
-OLLAMA_VISION_MODELS = {
-    "1": ("qwen2.5vl:3b",    "~4 GB",  "leggero, ottimo OCR: ideale con 8 GB di RAM"),
-    "2": ("gemma3:4b",       "~4 GB",  "multimodale leggero, buon multilingua"),
-    "3": ("qwen2.5vl:7b",    "~7 GB",  "buon equilibrio (12-16 GB di RAM)"),
-    "4": ("llama3.2-vision", "~9 GB",  "default storico (16 GB di RAM)"),
-    "5": ("qwen2.5vl:32b",   "~24 GB", "qualità vicina al cloud (32 GB+ o GPU)"),
-}
-# Soglia di "cambio scena" (0..1) per scegliere i fotogrammi: più è bassa, più
-# fotogrammi (e più analisi/costo). 0.4 cattura bene i cambi di slide/codice.
-VISION_SCENE_THRESHOLD = float(_env_str("ECHOSCRIPT_VISION_SCENE", "0.4"))
-# Larghezza (px) a cui ridimensionare i fotogrammi prima dell'analisi (riduce
-# token/banda; l'altezza resta proporzionale).
-VISION_FRAME_WIDTH = _env_int("ECHOSCRIPT_VISION_WIDTH", 1280)
-# Tetto massimo di fotogrammi analizzati per video (controlla costo/tempo): se il
-# rilevamento scene ne trova di più, vengono campionati uniformemente.
-VISION_MAX_FRAMES = _env_int("ECHOSCRIPT_VISION_MAX_FRAMES", 60)
-# Se il rilevamento scene trova troppi pochi fotogrammi (video con un'unica
-# inquadratura fissa), si campiona a intervalli regolari ogni N secondi.
-VISION_FALLBACK_INTERVAL = _env_int("ECHOSCRIPT_VISION_INTERVAL", 45)
-# Distanza minima (secondi) tra due fotogrammi chiave. Il rilevamento scene di
-# ffmpeg spesso scatta DUE volte sulla stessa transizione (un frame a metà stacco
-# + uno assestato), generando coppie ravvicinate ridondanti — spesso una è lo
-# shot largo "dove non si vede nulla". Raggruppiamo i frame entro questa finestra
-# e teniamo l'ULTIMO del gruppo (lo stato assestato, più leggibile). 0 disattiva.
-VISION_MIN_GAP = _env_int("ECHOSCRIPT_VISION_MIN_GAP", 8)
-# Risoluzione massima del video scaricato da YouTube per l'analisi visiva (più
-# bassa = download più leggero). Usata solo quando l'analisi è attiva.
-VISION_YT_MAX_HEIGHT = _env_int("ECHOSCRIPT_VISION_YT_HEIGHT", 720)
-
-# --- PDF "ricco" (formule LaTeX + mappe Mermaid DISEGNATE) ---
-# Il PDF base (fpdf2) è testo semplice: mostra le formule come `$...$` grezzo e i
-# blocchi mermaid come testo. Per un PDF in cui formule e mappe sono davvero
-# renderizzate, generiamo un HTML (MathJax + Mermaid) e lo stampiamo con un
-# browser Chromium GIÀ presente sul sistema (Edge su Windows): nessun LaTeX da
-# installare. Se manca il browser o la rete (serve solo la prima volta, per
-# scaricare le due librerie JS in cache locale), si ripiega in automatico sul PDF
-# fpdf2. Disattivabile con ECHOSCRIPT_RICH_PDF=0.
-RICH_PDF = _env_bool("ECHOSCRIPT_RICH_PDF", True)
-# Percorso a un browser Chromium specifico (altrimenti rilevato in automatico).
-BROWSER_PATH = _env_opt("ECHOSCRIPT_BROWSER")
-
-# Mappa concettuale (diagramma Mermaid) nel riassunto dei video con analisi
-# visiva. Disattivata di default: spesso è banale/ridondante rispetto al testo e
-# i diagrammi generati da un LLM sono la parte meno affidabile. Codice e formule
-# restano comunque (sono il vero valore). Attivala con ECHOSCRIPT_CONCEPT_MAP=1.
-CONCEPT_MAP = _env_bool("ECHOSCRIPT_CONCEPT_MAP", False)
-# Mostra i FOTOGRAMMI anche dentro il riassunto (oltre che nel documento di
-# analisi visiva), accanto al testo, raggruppati per sezione/timestamp. Costo
-# Groq aggiuntivo: ZERO (i frame esistono già). Disattiva con ECHOSCRIPT_SUMMARY_FRAMES=0.
-SUMMARY_FRAMES = _env_bool("ECHOSCRIPT_SUMMARY_FRAMES", True)
+# === LE MANOPOLE: stanno in server/config/settings.py ========================
+#
+# Erano duecentoquarantacinque righe qui dentro, e adesso sono un file a parte.
+# Il motivo non e' la lunghezza: e' che quei valori servono a mezzo programma,
+# e tenerli dentro il file che fa le trascrizioni obbligava chiunque volesse
+# leggerne uno a importare anche tutto il resto.
+#
+# ATTENZIONE alle due righe qui sotto, che non sono intercambiabili.
+#
+# La prima importa il MODULO. Serve per i sette valori che cambiano mentre il
+# programma gira (quale modello Groq, quale modello Ollama, in che lingua), che
+# vanno letti come `settings.GROQ_MODEL` ogni volta che servono. Importandoli
+# per nome ci si porterebbe a casa una fotografia del valore al momento
+# dell'import, e da li' in poi si userebbe sempre quella: nessun errore,
+# nessun avviso, e il programma che usa il modello sbagliato.
+#
+# La seconda importa per nome tutto il resto, che dopo l'avvio non cambia mai.
+from server.config import settings
+from server.config.settings import (
+    AUDIO_BITRATE, AUDIO_EXTENSIONS, AUDIO_SAMPLE_RATE, BROWSER_PATH,
+    CHUNK_SECONDS, CONCEPT_MAP, GROQ_TEXT_MODELS, GROQ_TRANSCRIBE_MODELS,
+    GROQ_VISION_MODELS, LOCAL_COMPUTE_TYPE, LOCAL_DEVICE, LOCAL_MODELS,
+    MAX_RETRIES, OLLAMA_HOST, OLLAMA_NUM_CTX, OLLAMA_TEXT_MODELS,
+    OLLAMA_VISION_MODELS, RICH_PDF, SUMMARY_FRAMES, SUMMARY_MAX_CHARS,
+    VIDEO_EXTENSIONS, VISION_FALLBACK_INTERVAL, VISION_FRAME_WIDTH,
+    VISION_MAX_FRAMES, VISION_MIN_GAP, VISION_SCENE_THRESHOLD,
+    VISION_YT_MAX_HEIGHT, WORD_TIMESTAMPS, _env_bool, _env_candidates,
+    _env_int, _env_opt, _env_str, _load_env_file,
+)
 
 # === GRACEFUL SHUTDOWN ===
 # A flag that becomes True on the first Ctrl+C: the loops check it to stop in an
@@ -1270,7 +1055,7 @@ def choose_ollama_model(kind: str) -> str | None:
     Invio = modello attuale (da .env o default). None se si annulla."""
     is_text = kind == "text"
     catalog = OLLAMA_TEXT_MODELS if is_text else OLLAMA_VISION_MODELS
-    current = OLLAMA_MODEL if is_text else OLLAMA_VISION_MODEL
+    current = settings.OLLAMA_MODEL if is_text else settings.OLLAMA_VISION_MODEL
     installed = _ollama_installed_models()
 
     table = Table(show_header=True, box=None, expand=False, padding=(0, 2),
@@ -2147,7 +1932,7 @@ def _cli_split_audio(audio_path: str, duration: float, workdir: str) -> list[tup
 
 # === PHASE 3: TRANSCRIPTION WITH GROQ ===
 
-# Sentinel telling a function to fall back to the module-level LANGUAGE config
+# Sentinel telling a function to fall back to the module-level settings.LANGUAGE config
 # (we cannot use None for that, since None is itself a valid value = "auto-detect").
 _USE_CONFIG = object()
 
@@ -2187,7 +1972,7 @@ def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
     Retries up to MAX_RETRIES times in case of a network/API error.
 
     'language' forces the audio language (e.g. 'it'/'en'); the _USE_CONFIG
-    sentinel means "use the LANGUAGE config" (None there = auto-detect).
+    sentinel means "use the settings.LANGUAGE config" (None there = auto-detect).
     'want_words' requests per-word timestamps (defaults to the WORD_TIMESTAMPS
     config); when on, each segment also carries a 'words' list (start/end/word).
 
@@ -2198,7 +1983,7 @@ def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
     If return_language=True, returns (segments, language) where 'language' is the
     ISO code Whisper auto-detected (e.g. 'en'/'it'), otherwise just the segments
     (backward-compatible default for the CLI)."""
-    lang_opt = LANGUAGE if language is _USE_CONFIG else language
+    lang_opt = settings.LANGUAGE if language is _USE_CONFIG else language
     words_on = WORD_TIMESTAMPS if want_words is None else want_words
     granularities = ["segment", "word"] if words_on else ["segment"]
 
@@ -2214,7 +1999,7 @@ def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
             with open(chunk_path, "rb") as f:
                 params = dict(
                     file=(os.path.basename(chunk_path), f.read()),
-                    model=GROQ_MODEL,
+                    model=settings.GROQ_MODEL,
                     response_format="verbose_json",
                     timestamp_granularities=granularities,
                     language=lang_opt,            # None = auto-detection
@@ -2241,7 +2026,7 @@ def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
                             pass
                         # Crediti: registra i limiti del modello di trascrizione
                         # (a costo zero, dalla risposta che stiamo già leggendo).
-                        record_rate_limits(GROQ_MODEL, raw.headers)
+                        record_rate_limits(settings.GROQ_MODEL, raw.headers)
                         result = raw.parse()
                 else:
                     result = client.audio.transcriptions.create(**params)
@@ -2385,7 +2170,7 @@ def transcribe_local(model_name: str, audio_path: str, duration: float,
     totale della durata.
 
     'language' forza la lingua dell'audio; il default `_USE_CONFIG` significa
-    "usa LANGUAGE dalla configurazione" (None sarebbe ambiguo: vale già
+    "usa settings.LANGUAGE dalla configurazione" (None sarebbe ambiguo: vale già
     "autorileva"). `should_stop()` interrompe il ciclo a fine segmento.
 
     RESUME: if 'meta' is given, the partial result is checkpointed every
@@ -2411,7 +2196,7 @@ def transcribe_local(model_name: str, audio_path: str, duration: float,
         raise MediaError("faster-whisper non installato. Esegui: pip install faster-whisper")
 
     if language is _USE_CONFIG:
-        language = LANGUAGE
+        language = settings.LANGUAGE
 
     # Device/precision: GPU (CUDA) when available, else CPU (see _resolve_device).
     device, compute_type = _resolve_device()
@@ -2784,7 +2569,7 @@ def _translate_ollama(text: str, target: str) -> str:
         f"omettere nulla. Rispondi esclusivamente con la traduzione, senza "
         f"preamboli, note, virgolette o commenti.")
     payload = {
-        "model": OLLAMA_TRANSLATE_MODEL,
+        "model": settings.OLLAMA_TRANSLATE_MODEL,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": text},
@@ -2805,7 +2590,7 @@ def _translate_engine_label(target: str = "it", local: bool = False) -> str:
     """Etichetta del motore di traduzione, mostrata in testa ai file salvati."""
     lang = _lang_name(target) or target
     if local:
-        return f"Traduzione automatica (locale · Ollama {OLLAMA_TRANSLATE_MODEL}) → {lang}"
+        return f"Traduzione automatica (locale · Ollama {settings.OLLAMA_TRANSLATE_MODEL}) → {lang}"
     return f"Traduzione automatica (Google Translate) → {lang}"
 
 
@@ -3400,14 +3185,14 @@ def _vision_groq(client, b64: str, context: str = "") -> str:
     ]
     try:
         resp = _groq_chat_capture(
-            client, GROQ_VISION_MODEL, messages=messages, temperature=0.2,
+            client, settings.GROQ_VISION_MODEL, messages=messages, temperature=0.2,
             reasoning_effort="none")
     except Exception as e:
         if _is_rate_limit(str(e)):
             raise
         # Il modello non accetta 'reasoning_effort': riprova senza il parametro.
         resp = _groq_chat_capture(
-            client, GROQ_VISION_MODEL, messages=messages, temperature=0.2)
+            client, settings.GROQ_VISION_MODEL, messages=messages, temperature=0.2)
     return _strip_think(resp.choices[0].message.content or "")
 
 
@@ -3418,7 +3203,7 @@ def _vision_ollama(b64: str, context: str = "") -> str:
     modello a interpretare ciò che vede (vedi _vision_user_prompt)."""
     import urllib.request
     payload = {
-        "model": OLLAMA_VISION_MODEL,
+        "model": settings.OLLAMA_VISION_MODEL,
         "messages": [
             {"role": "system", "content": _VISION_SYSTEM_PROMPT},
             {"role": "user", "content": _vision_user_prompt(context), "images": [b64]},
@@ -3465,11 +3250,11 @@ def _check_ollama_vision() -> None:
         raise RuntimeError(
             f"Ollama non raggiungibile su {OLLAMA_HOST}. Per l'analisi visiva in "
             "locale installa Ollama (https://ollama.com), avvialo e scarica un "
-            f"modello vision, es:  ollama pull {OLLAMA_VISION_MODEL}")
-    if not _ollama_has_model(OLLAMA_VISION_MODEL, installed):
+            f"modello vision, es:  ollama pull {settings.OLLAMA_VISION_MODEL}")
+    if not _ollama_has_model(settings.OLLAMA_VISION_MODEL, installed):
         raise RuntimeError(
-            f"Modello vision '{OLLAMA_VISION_MODEL}' non presente in Ollama. "
-            f"Scaricalo con:  ollama pull {OLLAMA_VISION_MODEL}")
+            f"Modello vision '{settings.OLLAMA_VISION_MODEL}' non presente in Ollama. "
+            f"Scaricalo con:  ollama pull {settings.OLLAMA_VISION_MODEL}")
 
 
 def _make_vision_analyzer(client=None):
@@ -3479,9 +3264,9 @@ def _make_vision_analyzer(client=None):
     (100% offline). RuntimeError se nessuno è utilizzabile (il chiamante può così
     saltare l'analisi senza bloccare il resto)."""
     if client is not None:
-        return (lambda b64, ctx="": _vision_groq(client, b64, ctx)), f"Groq · {GROQ_VISION_MODEL}"
+        return (lambda b64, ctx="": _vision_groq(client, b64, ctx)), f"Groq · {settings.GROQ_VISION_MODEL}"
     _check_ollama_vision()
-    return (lambda b64, ctx="": _vision_ollama(b64, ctx)), f"locale · Ollama {OLLAMA_VISION_MODEL}"
+    return (lambda b64, ctx="": _vision_ollama(b64, ctx)), f"locale · Ollama {settings.OLLAMA_VISION_MODEL}"
 
 
 def _is_empty_visual(text: str) -> bool:
@@ -3934,7 +3719,7 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
                     "source": meta.get("source", kind),
                     "source_path": meta.get("source_path"),
                     "webpage_url": meta.get("webpage_url"),
-                    "model": GROQ_MODEL, "chunk_seconds": CHUNK_SECONDS,
+                    "model": settings.GROQ_MODEL, "chunk_seconds": CHUNK_SECONDS,
                     "total_chunks": ti.total, "done_chunks": ti.done,
                     "detected_language": ti.lang, "segments": ti.segments,
                     "duration": duration,
@@ -4708,7 +4493,7 @@ def _groq_chat_capture(client, model: str, **kwargs):
 def _summarize_groq(client, text: str, section_title: str | None) -> str:
     """Riassume un testo con un modello di CHAT di Groq (non Whisper)."""
     resp = _groq_chat_capture(
-        client, GROQ_SUMMARY_MODEL,
+        client, settings.GROQ_SUMMARY_MODEL,
         messages=[
             {"role": "system", "content": _active_summary_prompt()},
             {"role": "user", "content": _summary_user_prompt(text, section_title)},
@@ -4728,14 +4513,14 @@ def _check_ollama() -> None:
         raise RuntimeError(
             f"Ollama non raggiungibile su {OLLAMA_HOST}. Per il riassunto in locale "
             "installa Ollama (https://ollama.com), avvialo e scarica un modello, "
-            f"es:  ollama pull {OLLAMA_MODEL}")
+            f"es:  ollama pull {settings.OLLAMA_MODEL}")
 
 
 def _summarize_ollama(text: str, section_title: str | None) -> str:
     """Riassume un testo con un modello locale via Ollama (HTTP, niente pip)."""
     import urllib.request
     payload = {
-        "model": OLLAMA_MODEL,
+        "model": settings.OLLAMA_MODEL,
         "messages": [
             {"role": "system", "content": _active_summary_prompt()},
             {"role": "user", "content": _summary_user_prompt(text, section_title)},
@@ -4761,10 +4546,10 @@ def _make_summarizer(client=None):
     Preferisce Groq se è disponibile un client (backend cloud); altrimenti usa
     Ollama in locale (100% offline). Solleva RuntimeError se nessuno è utilizzabile."""
     if client is not None:
-        label = f"Riassunto automatico (Groq · {GROQ_SUMMARY_MODEL})"
+        label = f"Riassunto automatico (Groq · {settings.GROQ_SUMMARY_MODEL})"
         return (lambda text, title: _summarize_groq(client, text, title)), label
     _check_ollama()
-    label = f"Riassunto automatico (locale · Ollama {OLLAMA_MODEL})"
+    label = f"Riassunto automatico (locale · Ollama {settings.OLLAMA_MODEL})"
     return (lambda text, title: _summarize_ollama(text, title)), label
 
 
@@ -4997,7 +4782,7 @@ def estimate_job(meta: dict, backend: str, model: str | None = None) -> dict:
     if backend == "groq":
         # 'model' (se passato) è il modello Groq scelto dall'utente; altrimenti il
         # default corrente. Il prezzo/ora dipende dal modello selezionato.
-        gm = model or GROQ_MODEL
+        gm = model or settings.GROQ_MODEL
         price = GROQ_PRICE_PER_HOUR.get(gm, 0.04)
         cost = hours * price
         return {"backend": "groq", "duration": duration, "cost_usd": cost,
@@ -5044,17 +4829,15 @@ def run() -> None:
         om = choose_ollama_model("text")
         if not om:
             return
-        global OLLAMA_MODEL, OLLAMA_TRANSLATE_MODEL
-        OLLAMA_MODEL = om
+        settings.OLLAMA_MODEL = om
         # La traduzione riusa il modello del riassunto, salvo .env esplicito.
         if not _env_str("ECHOSCRIPT_OLLAMA_TRANSLATE_MODEL", ""):
-            OLLAMA_TRANSLATE_MODEL = om
+            settings.OLLAMA_TRANSLATE_MODEL = om
     else:  # groq: scelta del modello di trascrizione cloud (costo associato)
         gm = choose_groq_model()
         if not gm:
             return
-        global GROQ_MODEL
-        GROQ_MODEL = gm
+        settings.GROQ_MODEL = gm
 
     # --- Source selection: YouTube URL or local file/folder ---
     source_kind = choose_source()
@@ -5139,11 +4922,10 @@ def run() -> None:
 
     # Optional: force the audio language (otherwise Whisper auto-detects it).
     # Helps on noisy/multilingual audio where auto-detection can pick wrong.
-    global LANGUAGE
     al = _prompt("Lingua dell'audio", "(invio = autorileva · es. it, en, es, fr, de)",
                  accent="bright_blue").strip().lower()
     if al:
-        LANGUAGE = al
+        settings.LANGUAGE = al
 
     # --- Analisi visiva opzionale (solo se la sorgente ha dei fotogrammi) ---
     has_video_source = (source_kind == "youtube") or any(
@@ -5166,8 +4948,7 @@ def run() -> None:
                 want_visual = False
                 console.print("  [dim]Analisi visiva disattivata.[/dim]")
             else:
-                global OLLAMA_VISION_MODEL
-                OLLAMA_VISION_MODEL = vm
+                settings.OLLAMA_VISION_MODEL = vm
 
     # We initialize the Groq client only if it is really needed (cloud backend),
     # and only after the user's confirmation.
@@ -5179,7 +4960,7 @@ def run() -> None:
 
     # Engine label, shown in the file header and in the summary.
     engine_label = (f"Locale / faster-whisper {local_model}" if backend == "local"
-                    else f"Groq / {GROQ_MODEL}")
+                    else f"Groq / {settings.GROQ_MODEL}")
 
     # Il PDF viene SEMPRE generato (come nella GUI): niente più domanda.
     do_export = True
@@ -5302,8 +5083,8 @@ def run() -> None:
         # Analisi visiva: salva le note (json + md) accanto alla trascrizione, così
         # il riassunto (anche se rigenerato in seguito) le ritrova e le integra.
         if visual_notes:
-            v_label = (f"Groq · {GROQ_VISION_MODEL}" if client is not None
-                       else f"Ollama · {OLLAMA_VISION_MODEL}")
+            v_label = (f"Groq · {settings.GROQ_VISION_MODEL}" if client is not None
+                       else f"Ollama · {settings.OLLAMA_VISION_MODEL}")
             save_visual_notes(out_root, meta, visual_notes, v_label, do_export)
         # Traduzione automatica dopo una trascrizione COMPLETATA (rilegge il .json
         # appena scritto). Si arriva qui solo se _run_pipeline ha restituito i
