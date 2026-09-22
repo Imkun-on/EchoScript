@@ -29,7 +29,7 @@ import os
 from datetime import datetime
 
 from server.state.checkpoints import _checkpoint_key, _checkpoints_dir
-from server.utils.text import _lp, _safe_filename
+from server.utils.text import _lp, _safe_filename, cartella_video
 
 # --- Pipeline state store (the job "database") ------------------------------
 # Un unico file JSON per video che traccia l'avanzamento di TUTTE le fasi
@@ -346,8 +346,11 @@ def transcription_exists(out_root: str, title: str) -> bool:
 
     Controlla TUTTI i possibili nomi cartella (italiano e inglese), così il
     rilevamento funziona anche se il video era stato trascritto con l'interfaccia
-    in un'altra lingua."""
-    base = os.path.join(out_root, _safe_filename(title))
+    in un'altra lingua. La cartella del video la trova `cartella_video`, che sa
+    riconoscerla anche quando ha davanti il numero della playlist: senza, un
+    video già fatto verrebbe rifatto da capo, spendendo crediti per riscrivere
+    le stesse identiche cose."""
+    base = cartella_video(out_root, title)
     for sub in (TRANS_SUBDIR, NOMI_VECCHI[TRANS_SUBDIR]):
         d = os.path.join(base, sub)
         if os.path.isdir(_lp(d)) and any(
@@ -365,7 +368,7 @@ def load_existing_transcript(out_root: str, title: str):
     safe = _safe_filename(title)
     p = None
     for sub in (TRANS_SUBDIR, NOMI_VECCHI[TRANS_SUBDIR]):
-        cand = os.path.join(out_root, safe, sub, safe + ".json")
+        cand = os.path.join(cartella_video(out_root, title), sub, safe + ".json")
         if os.path.isfile(_lp(cand)):
             p = cand
             break
@@ -398,7 +401,7 @@ def load_existing_translation(out_root: str, title: str, target: str = "it"):
     (italiano/inglese). Restituisce la lista di sezioni {start,title,text}."""
     safe = _safe_filename(title)
     for sub in (TRANSL_SUBDIR, NOMI_VECCHI[TRANSL_SUBDIR]):
-        p = os.path.join(out_root, safe, sub, f"{safe}_{target}.json")
+        p = os.path.join(cartella_video(out_root, title), sub, f"{safe}_{target}.json")
         if os.path.isfile(_lp(p)):
             try:
                 with open(_lp(p), "r", encoding="utf-8") as f:

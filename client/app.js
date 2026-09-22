@@ -1,4 +1,4 @@
-/* Nucleo della pagina: testi, cambio sezione, diario, avvisi, avanzamento.
+/* Nucleo della pagina: testi, cambio sezione, avvisi, avanzamento, errori.
  *
  * Regola unica, valida anche per i tre file delle sezioni: qui non si decide
  * niente di importante. La pagina raccoglie cio' che si sceglie, lo passa a
@@ -43,12 +43,11 @@ function t(chiave, valori) {
 function riempiTesti() {
   $$('[data-t]').forEach((e) => { e.textContent = t(e.dataset.t); });
   // Due postazioni, quindi due volte tutto quello che riguarda il lavoro: due
-  // spie, due diari, due riepiloghi. Il ciclo e' la forma piu' onesta di
-  // dirlo, e aggiungere una terza stanza un giorno non richiederebbe di
-  // tornare qui a scrivere una terza riga.
+  // spie, due riepiloghi. Il ciclo e' la forma piu' onesta di dirlo, e
+  // aggiungere una terza stanza un giorno non richiederebbe di tornare qui a
+  // scrivere una terza riga.
   Object.values(POSTI).forEach((p) => {
     p.q('stato').textContent = t('status.' + (p.stato || 'idle'));
-    if (!p.q('diario').dataset.pieno) svuotaDiario(p);
     if (window.riempiMotore) window.riempiMotore(p);
     if (window.riempiTrascrivi) window.riempiTrascrivi(p);
     if (window.aggiornaCarte) window.aggiornaCarte(p);
@@ -105,42 +104,8 @@ function cambiaSezione(nome, immediato) {
   }
 }
 
-/* ── Il diario ────────────────────────────────────────────────────────────── */
-
-/* Ogni postazione ha il suo diario, e le righe che arrivano portano scritto di
- * quale lavoro parlano: ci pensa __instrada a consegnarle qui con la postazione
- * giusta davanti. Mescolarli in uno solo, con due lavori insieme, avrebbe
- * prodotto una cronologia in cui nessuna riga si sa piu' a chi appartiene. */
-ascolta('aggiungiRiga', (p, testo) => {
-  const diario = p.q('diario');
-  if (!diario.dataset.pieno) { diario.innerHTML = ''; diario.dataset.pieno = '1'; }
-  const riga = el('div', 'riga-log ' + classeRiga(testo), testo);
-  diario.appendChild(riga);
-  // Si tiene solo la coda: una playlist di cinquanta video produce migliaia di
-  // righe, e tenerle tutte nel documento rallenta lo scorrimento.
-  while (diario.childElementCount > 400) diario.removeChild(diario.firstChild);
-  diario.scrollTop = diario.scrollHeight;
-});
-
-function classeRiga(testo) {
-  // Le intestazioni di fase si riconoscono dal segno e non passano di qui: dicono
-  // dove siamo, non com'e' andata. Verdi sarebbero una promessa che la fase non ha
-  // ancora mantenuto: «Esportazione / salvataggio» contiene «salvat», e basterebbe
-  // quello a farla sembrare riuscita mentre sta ancora cominciando.
-  if (testo.includes('▸')) return 'fase';
-  const b = testo.toLowerCase();
-  if (b.includes('error') || b.includes('errore') || b.includes('✗') || b.includes('fallit')) return 'err';
-  if (b.includes('✓') || b.includes('completat') || b.includes('salvat') || b.includes('fatto')) return 'ok';
-  if (b.includes('warning') || b.includes('attenzione') || b.includes('⚠')) return 'warn';
-  return '';
-}
-
-function svuotaDiario(p) {
-  const d = p.q('diario');
-  d.dataset.pieno = ''; d.innerHTML = '';
-  d.appendChild(statoVuoto(t('log.empty')));
-}
-
+/* Il riquadro vuoto: un'icona e una frase, quando non c'e' ancora niente da
+ * mostrare. Lo usa la scheda della sorgente prima che si scelga un video. */
 function statoVuoto(testo) {
   const box = el('div', 'vuoto');
   box.appendChild(icona('i-vuoto'));
@@ -165,10 +130,22 @@ function errore(messaggio) {
   avvisa(messaggio, 'fail');
 }
 
-/* Un errore che appartiene a un lavoro: oltre all'avviso a comparsa, che passa,
- * finisce nel diario di quella postazione, che resta. */
+/* Un errore che appartiene a una postazione.
+ *
+ * Sono i rifiuti immediati, quelli che arrivano prima che il lavoro cominci:
+ * un link vuoto, un file che non esiste, una chiave mancante. Un avviso a
+ * comparsa basta e avanza, perche' chi legge ha ancora le mani sul modulo che
+ * ha appena compilato e capisce al volo che cosa correggere.
+ *
+ * Diverso e' il lavoro che cade DOPO essere partito: quello apre una finestra
+ * (vedi `erroreLavoro`), che dice su quale video, di che cosa si tratta e qual
+ * era il testo tecnico. Un avviso che passa da solo dopo sette secondi, li',
+ * sarebbe sparito prima di essere letto.
+ *
+ * La postazione non serve piu' a niente qui dentro da quando il diario non
+ * c'e': si tiene perche' chi chiama ce l'ha e passarla resta il modo in cui
+ * questa pagina dice «questo errore e' di quella stanza». */
 function erroreDi(p, messaggio) {
-  window.__instrada(p.dove, 'aggiungiRiga', [messaggio]);
   avvisa(messaggio, 'fail');
 }
 
@@ -290,12 +267,27 @@ ascolta('lavoroBatch', (p, conteggio, titolo) => {
   badge.textContent = conteggio + '  ·  ' + titolo;
 });
 
-ascolta('erroreLavoro', (p, messaggio) => {
+/* Il lavoro si e' fermato. La finestra deve rispondere a tre domande, in
+ * quest'ordine: su QUALE video, CHE COSA e' successo, e qual era il testo
+ * originale dell'errore.
+ *
+ * L'ordine non e' casuale. Il testo originale e' l'unica cosa che c'era prima,
+ * ed era anche l'unica inservibile: «HTTP Error 403: Forbidden» e' esatto e non
+ * dice a nessuno se convenga riprovare. Adesso sta in fondo, sotto la sua
+ * etichetta, per chi lo vuole cercare in rete; sopra c'e' la frase che spiega
+ * di che cosa si tratta, che e' quello che serve a decidere.
+ *
+ * Il titolo del video compare solo se c'e': su un file locale scelto a mano non
+ * aggiungerebbe niente che non si sappia gia'. */
+ascolta('erroreLavoro', (p, e) => {
   window.__instrada(p.dove, 'cambiaStato', ['error']);
-  window.__instrada(p.dove, 'aggiungiRiga', [messaggio]);
+  const corpo = [];
+  if (e.video) corpo.push(riquadroPercorso(e.et_video, e.video));
+  corpo.push(paragrafo(e.causa || t('err.unknown')));
+  if (e.dettaglio) corpo.push(riquadroDettaglio(e.et_dettaglio, e.dettaglio));
   finestraDi(p, {
-    icona: 'errore', tono: 'errore', titolo: t('err.title'),
-    corpo: [messaggio || t('err.unknown')],
+    icona: 'errore', tono: 'errore', titolo: e.titolo || t('err.title'),
+    corpo,
     azioni: [{ testo: t('comune.chiudi'), tono: 'pieno', icona: 'spunta' }],
   });
 });
@@ -468,7 +460,6 @@ function avvia() {
     cambiaSezione(SCELTE.motore === 'groq' ? 'cloud' : 'locale', true);
     Object.values(POSTI).forEach((p) => {
       window.__instrada(p.dove, 'cambiaStato', ['idle']);
-      p.q('svuota').addEventListener('click', () => svuotaDiario(p));
     });
 
     $$('.voce[data-va]').forEach((v) =>

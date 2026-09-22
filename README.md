@@ -12,7 +12,6 @@
   <img src="https://img.shields.io/badge/fpdf2-PDF-EC1C24?logo=adobeacrobatreader&logoColor=white" alt="fpdf2">
   <img src="https://img.shields.io/badge/Ollama-riassunto_locale-000000?logo=ollama&logoColor=white" alt="Ollama">
   <img src="https://img.shields.io/badge/Llama_3.3_·_Qwen_2.5-LLM-7C3AED" alt="LLM">
-  <img src="https://img.shields.io/badge/Analisi_visiva-con_LLM-C026D3" alt="Analisi visiva con LLM">
 </p>
 
 <p align="center">
@@ -359,10 +358,3 @@ Rilasciato sotto **[PolyForm Noncommercial License 1.0.0](LICENSE)**. In breve, 
 - ❌ **Non puoi** venderlo, offrirlo come servizio a pagamento o usarlo nell'attività di un'azienda.
 - 📎 Se lo ridistribuisci devi allegare la licenza e mantenere la riga `Required Notice:`.
 
-> Serve un uso commerciale? Scrivimi: una licenza separata è negoziabile.
-
----
-
-## Feedback
-
-Problemi e proposte: **[Issues](https://github.com/Imkun-on/EchoScript/issues)**.

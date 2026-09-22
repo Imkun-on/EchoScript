@@ -1052,7 +1052,11 @@ def save_results(meta: dict, segments: list[dict], engine_label: str, options: d
     do_export = bool(options.get("export"))
 
     safe_title = text._safe_filename(meta["title"])
-    video_dir = os.path.join(out_root, safe_title)
+    # La cartella del video porta davanti il numero della playlist, quando il
+    # video viene da una playlist. Il NOME DEI FILE dentro resta il titolo nudo:
+    # il numero serve a ritrovare l'ordine aprendo la cartella della playlist,
+    # mentre dentro a un file aperto da solo non direbbe niente a nessuno.
+    video_dir = text.cartella_video(out_root, meta["title"], meta.get("_num_playlist"))
     trans_dir = os.path.join(video_dir, jobs.trans_subdir())
     base_orig = os.path.join(trans_dir, safe_title)
 
@@ -1236,7 +1240,7 @@ def translate_only(meta: dict, options: dict, out_root: str, on_progress=_noop) 
     trascrizione; la traduzione usa Google Translate (o Ollama se offline)."""
     _set_engine_lang(options)
     disk_meta, segments, engine_label = _load_saved_transcript(meta, out_root)
-    video_dir = os.path.join(out_root, text._safe_filename(disk_meta["title"]))
+    video_dir = text.cartella_video(out_root, disk_meta["title"])
     sections = document._build_sections(disk_meta, segments)
     created, warnings = [], []
     chat_client = _resolve_summary_client(options, None)
@@ -1254,7 +1258,7 @@ def summary_only(meta: dict, options: dict, out_root: str, on_progress=_noop) ->
     concluderlo in locale)."""
     _set_engine_lang(options)
     disk_meta, segments, engine_label = _load_saved_transcript(meta, out_root)
-    video_dir = os.path.join(out_root, text._safe_filename(disk_meta["title"]))
+    video_dir = text.cartella_video(out_root, disk_meta["title"])
     # La traduzione è salvata col suffisso della lingua di destinazione, che è
     # quella dell'interfaccia: cercarla sempre come "_it" significava, con la UI
     # in inglese, non trovarla mai e riassumere l'originale di nascosto.
@@ -1279,7 +1283,7 @@ def resume(meta: dict, options: dict, out_root: str, on_progress=_noop) -> dict:
     offrire di finirlo in locale."""
     _set_engine_lang(options)
     disk_meta, segments, engine_label = _load_saved_transcript(meta, out_root)
-    video_dir = os.path.join(out_root, text._safe_filename(disk_meta["title"]))
+    video_dir = text.cartella_video(out_root, disk_meta["title"])
     created, warnings = [], []
     chat_client = _resolve_summary_client(options, None)
     sections = document._build_sections(disk_meta, segments)

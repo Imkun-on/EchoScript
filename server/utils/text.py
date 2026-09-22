@@ -85,6 +85,83 @@ def _safe_filename(name: str) -> str:
     return name.strip()[:120] or "trascrizione"
 
 
+def numero_playlist(posizione: int, quanti: int) -> str:
+    """Il numero da mettere davanti alla cartella di un video di una playlist.
+
+    Gli zeri davanti non sono un vezzo. Windows ordina i nomi come parole, non
+    come numeri: senza zeri, dopo «1» verrebbe «10», e una playlist di trenta
+    lezioni si presenterebbe nell'ordine 1, 10, 11, 12, ... 2, 20, che e'
+    esattamente il disordine che il numero doveva togliere.
+
+    Quanti zeri servono lo dice la lunghezza della playlist e non un numero
+    deciso qui: tre cifre su una playlist di otto video sarebbero brutte, due
+    cifre su una di duecento riporterebbero il problema di prima fra il
+    novantanove e il cento.
+    """
+    larghezza = max(2, len(str(max(quanti, 1))))
+    return f"{posizione:0{larghezza}d}"
+
+
+def nome_cartella_video(title: str, numero: str | None = None) -> str:
+    """Il nome della cartella di un video, col numero davanti se ne ha uno.
+
+    Il numero ce l'hanno solo i video presi da una playlist, e arriva gia'
+    scritto (con i suoi zeri davanti) da ``numero_playlist``, perche' quanti
+    zeri servano lo sa soltanto chi conosce la lunghezza della playlist, e qui
+    dentro quella cosa non si sa.
+
+    Il titolo viene accorciato PRIMA di ricevere il numero, cosi' il numero non
+    rischia di essere lui la parte che sparisce quando il titolo e' lunghissimo.
+    """
+    safe = _safe_filename(title)
+    return f"{numero} - {safe}" if numero else safe
+
+
+# Una cartella di video che comincia col numero della playlist. Da una a quattro
+# cifre, che copre qualunque playlist esista, e poi il titolo cosi' com'e'.
+_CARTELLA_NUMERATA = re.compile(r"^\d{1,4} - (.+)$")
+
+
+def cartella_video(out_root: str, title: str, numero: str | None = None) -> str:
+    """Dove stanno (o dove andranno) i file di questo video dentro out_root.
+
+    Perche' non basta incollare il titolo dopo la cartella
+        Perche' la stessa cartella viene chiesta in due momenti molto diversi.
+        Quando si SCRIVE, il numero della playlist lo si conosce, ed e' quello
+        che decide il nome. Quando si RILEGGE, invece, il numero non lo si sa
+        piu': «solo riassunto» fatto tre giorni dopo parte da un titolo e
+        basta, e «l'ho gia' trascritto?» pure.
+
+        Per questo in lettura la cartella non si calcola, si CERCA: prima come
+        si chiamerebbe senza numero, e se non c'e' si guarda se ce n'e' una col
+        numero davanti e lo stesso titolo dietro.
+
+    Il vantaggio che viene da solo
+        Le cartelle scritte prima che i numeri esistessero continuano a essere
+        trovate, perche' il primo posto in cui si guarda e' proprio quello
+        senza numero. Nessuno deve rinominare niente a mano.
+
+    Se non si trova nulla si risponde col nome senza numero, che e' la risposta
+    giusta per chi sta per creare la cartella adesso.
+    """
+    safe = _safe_filename(title)
+    if numero:
+        return os.path.join(out_root, nome_cartella_video(title, numero))
+    diretta = os.path.join(out_root, safe)
+    if os.path.isdir(_lp(diretta)):
+        return diretta
+    try:
+        for nome in os.listdir(_lp(out_root)):
+            trovato = _CARTELLA_NUMERATA.match(nome)
+            if trovato and trovato.group(1) == safe:
+                candidata = os.path.join(out_root, nome)
+                if os.path.isdir(_lp(candidata)):
+                    return candidata
+    except OSError:
+        pass
+    return diretta
+
+
 def _lp(path: str) -> str:
     """Restituisce il percorso in forma 'extended-length' (prefisso \\\\?\\) su
     Windows, così le operazioni su file non incappano nel vecchio limite di 260

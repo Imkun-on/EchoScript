@@ -211,7 +211,7 @@ def _print_banner() -> None:
 # cambia sotto i piedi a nessuno.
 from server.utils.text import (
     _format_duration, _format_timestamp, _format_upload_date, _format_views,
-    _lp, _safe_filename, write_text_file,
+    _lp, _safe_filename, cartella_video, numero_playlist, write_text_file,
 )
 
 # === IL PATTO CON CHI CHIAMA: sta in server/utils/contract.py ================
@@ -1407,8 +1407,9 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
             # workdir temporaneo venga cancellato), così il documento li mostra.
             frames_out_dir = None
             if out_root:
-                frames_out_dir = os.path.join(out_root, _safe_filename(meta["title"]),
-                                              visual_subdir(), "frames")
+                frames_out_dir = os.path.join(
+                    cartella_video(out_root, meta["title"], meta.get("_num_playlist")),
+                    visual_subdir(), "frames")
             visual_notes = analyze_video_visuals(media_path, duration, workdir, client,
                                                  frames_out_dir=frames_out_dir,
                                                  segments=segments)
@@ -1431,7 +1432,10 @@ def _save_outputs(meta: dict, segments: list[dict], engine_label: str,
     #   results/<title>/
     #       trascrizioni/  -> md, txt, json (+ pdf if exported)
     safe_title = _safe_filename(meta["title"])
-    video_dir = os.path.join(out_root, safe_title)
+    # Col numero della playlist davanti, quando il video viene da una playlist.
+    # I file dentro restano intitolati al video e basta: il numero serve a
+    # ritrovare l'ordine aprendo la cartella, non dentro a un file aperto da solo.
+    video_dir = cartella_video(out_root, meta["title"], meta.get("_num_playlist"))
     trans_dir = os.path.join(video_dir, trans_subdir())
     os.makedirs(_lp(trans_dir), exist_ok=True)
     base_orig = os.path.join(trans_dir, safe_title)  # base path (without extension) of the originals
@@ -1529,7 +1533,7 @@ def translate_existing(out_root: str, title: str, target: str = "it",
         meta, "translation", len(sections), "target", target)
 
     safe_title = _safe_filename(meta["title"])
-    video_dir = os.path.join(out_root, safe_title)
+    video_dir = cartella_video(out_root, meta["title"])
     trad_dir = os.path.join(video_dir, transl_subdir())
     os.makedirs(_lp(trad_dir), exist_ok=True)
     base = os.path.join(trad_dir, f"{safe_title}_{target}")
@@ -1693,7 +1697,7 @@ def summarize_existing(out_root: str, title: str, client=None,
         return False
 
     safe_title = _safe_filename(meta["title"])
-    video_dir = os.path.join(out_root, safe_title)
+    video_dir = cartella_video(out_root, meta["title"])
     sum_dir = os.path.join(video_dir, summary_subdir())
     os.makedirs(_lp(sum_dir), exist_ok=True)
     suffix = SUMMARY_SUFFIX
@@ -1986,6 +1990,13 @@ def run() -> None:
     for idx, (meta, source) in enumerate(jobs, 1):
         if fermarsi():
             break
+        # Video di una playlist: la sua cartella porta davanti il numero
+        # d'ordine, che e' l'ordine in cui compaiono su YouTube. Aperta la
+        # cartella del corso, si vede subito da dove si comincia. Un file
+        # locale o un video singolo non hanno nessun ordine da rispettare e
+        # restano senza numero.
+        if playlist_subdir:
+            meta["_num_playlist"] = numero_playlist(idx, total)
         if total > 1:
             console.print()
             console.rule(f"[bold bright_green]🎙 File {idx}/{total}: {meta['title']}[/bold bright_green]",

@@ -54,13 +54,12 @@ TESTI: dict[str, str] = {
     'fin.fatto':        'Fatto',
     'res.ancora':       'Trascrivi un altro video',
 
-    # ── Diario e stato ───────────────────────────────────────────────────────
-    'log.title':        'Diario',
-    'log.clear':        'Svuota',
-    'log.empty':        'Qui compare quello che sta succedendo.',
-    # L'ultima riga del diario. Il simbolo non e' decorazione: la pagina colora
-    # le righe leggendole, e la spunta e' cio' che le fa venire verdi.
-    'log.done':         '✓ Fatto',
+    # ── Stato della postazione ───────────────────────────────────────────────
+    #
+    # Qui sopra c'erano anche i testi del diario, il riquadro con le righe di
+    # servizio accanto alla sorgente. Il riquadro non c'e' piu' e i suoi testi
+    # sono usciti con lui; la spia e la parola di stato restano, e si sono
+    # spostate nell'intestazione della sorgente.
     'status.idle':      'In attesa',
     'status.working':   'In corso',
     'status.done':      'Fatto',
@@ -314,4 +313,52 @@ TESTI: dict[str, str] = {
     'err.no_url':       'Incolla prima il link del video.',
     'err.no_file':      'Scegli prima un file audio.',
     'err.unexpected':   'Errore imprevisto: {e}',
+
+    # Il video su cui il lavoro si e' fermato, e l'etichetta del testo tecnico.
+    'err.video':        'Video:',
+    'err.dettaglio':    'Dettaglio tecnico',
+
+    # ── Di cosa si tratta ────────────────────────────────────────────────────
+    #
+    # Una frase per ogni famiglia riconosciuta da `classifica_errore`. La chiave
+    # e' 'err.causa.' piu' il nome della famiglia, quindi aggiungere una
+    # famiglia la' dentro vuol dire aggiungere una riga qui, e nient'altro.
+    #
+    # Ognuna dice due cose: che cosa e' successo, e se ci sia qualcosa da fare.
+    # La seconda parte e' quella che serve davvero: sapere che un video non e'
+    # scaricabile senza sapere se valga la pena riprovare lascia fermi.
+    'err.causa.rifiutato':
+        'YouTube ha rifiutato il download di questo video. Di solito vuol dire '
+        'che il link al file audio è scaduto, oppure che yt-dlp è indietro '
+        'rispetto a un cambiamento di YouTube. Riprova, e se continua aggiorna '
+        'yt-dlp con «pip install -U yt-dlp».',
+    'err.causa.nonDisponibile':
+        'Questo video non è scaricabile: può essere privato, riservato agli '
+        'iscritti, rimosso, con limite di età oppure non disponibile in Italia. '
+        'Non c\'è niente da riprovare: è una scelta di chi lo ha pubblicato.',
+    'err.causa.rete':
+        'La connessione non ha risposto in tempo. Controlla di essere online e '
+        'riprova: se la rete era solo lenta, al secondo tentativo funziona.',
+    'err.causa.crediti':
+        'I crediti del servizio sono esauriti. Quello che era già stato fatto '
+        'è salvato: si riprende quando tornano disponibili, oppure si finisce '
+        'sul proprio computer.',
+    'err.causa.chiave':
+        'La chiave Groq non è stata accettata. Controllala nelle impostazioni: '
+        'se è stata rigenerata sul sito, quella vecchia non vale più.',
+    'err.causa.ffmpeg':
+        'ffmpeg non ha funzionato. È il programma che estrae e converte '
+        'l\'audio, e senza di lui non si va avanti: va installato, o rimesso fra '
+        'i programmi che il sistema trova da solo.',
+    'err.causa.disco':
+        'Non è stato possibile scrivere il file. O lo spazio sul disco è '
+        'finito, o la cartella di destinazione non è scrivibile. Se è dentro '
+        'OneDrive può anche essere una sincronizzazione in corso: riprova fra '
+        'un minuto.',
+    'err.causa.modelloLocale':
+        'Il modello sul tuo computer non è partito. Controlla che Ollama sia '
+        'in esecuzione e che il modello scelto sia già stato scaricato.',
+    'err.causa.sconosciuto':
+        'Il lavoro si è fermato per un motivo che il programma non sa '
+        'riconoscere. Il testo qui sotto è quello originale dell\'errore.',
 }

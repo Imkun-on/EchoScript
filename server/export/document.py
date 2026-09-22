@@ -52,14 +52,18 @@ def _build_sections(meta: dict, segments: list[dict]) -> list[dict]:
     return sections
 
 
-def _md_header(title: str, meta: dict, engine_label: str,
-               saved_in: str | None = None) -> list[str]:
+def _md_header(title: str, meta: dict, engine_label: str) -> list[str]:
     """Markdown header lines (metadata) shared between original and translated.
 
     Local files have no channel/views/date, so we show the source path instead.
-    'saved_in' (se passato) aggiunge la riga «Salvato in:» col percorso della
-    cartella di output, subito dopo «Trascritto con:» (usata nei PDF)."""
-    saved_line = [f"- **Salvato in:** {saved_in}"] if saved_in else []
+
+    Qui dentro c'era anche una riga «Salvato in:» col percorso della cartella,
+    stampata solo nei PDF. E' stata tolta: in un documento che si legge, o che
+    si manda a qualcun altro, il percorso di una cartella sul computer di chi
+    l'ha prodotto non serve a niente e occupa due righe in cima alla prima
+    pagina. Dove sia salvato il file lo dice gia' la finestra dei risultati, a
+    chi in quel momento la cosa interessa davvero.
+    """
     if _is_local(meta):
         return [
             f"# {title}", "",
@@ -67,7 +71,6 @@ def _md_header(title: str, meta: dict, engine_label: str,
             f"- **File:** {meta['webpage_url']}",
             f"- **Durata:** {_format_duration(meta['duration'])}",
             f"- **Trascritto con:** {engine_label}",
-            *saved_line,
             "", "---", "",
         ]
     return [
@@ -78,20 +81,18 @@ def _md_header(title: str, meta: dict, engine_label: str,
         f"- **Durata:** {_format_duration(meta['duration'])}",
         f"- **URL:** {meta['webpage_url']}",
         f"- **Trascritto con:** {engine_label}",
-        *saved_line,
         "", "---", "",
     ]
 
 
 def build_md(title: str, meta: dict, engine_label: str, sections: list[dict],
-             with_timestamps: bool = True, saved_in: str | None = None) -> str:
+             with_timestamps: bool = True) -> str:
     """Markdown document: header + sections.
 
     The timings (if with_timestamps) appear ONLY in the section titles
     (## [HH:MM:SS] Title); the body is flowing prose, tidier. The translated
-    version passes with_timestamps=False (no timings). 'saved_in' (usato dai PDF)
-    aggiunge la riga «Salvato in:» col percorso di output nell'intestazione."""
-    lines = _md_header(title, meta, engine_label, saved_in=saved_in)
+    version passes with_timestamps=False (no timings)."""
+    lines = _md_header(title, meta, engine_label)
     for sec in sections:
         if sec["title"] is None:
             lines.append("## Trascrizione")
@@ -107,11 +108,53 @@ def build_md(title: str, meta: dict, engine_label: str, sections: list[dict],
 
 
 def _strip_md_bold(text: str) -> str:
-    """Toglie i marcatori **grassetto** del Markdown, lasciando il testo nudo.
+    """Toglie i marcatori **grassetto** e *corsivo* del Markdown, lasciando il
+    testo nudo.
 
     Serve al .txt del riassunto: il grassetto è utile a video/PDF, ma nel testo
-    semplice gli asterischi sarebbero solo rumore."""
-    return re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    semplice gli asterischi sarebbero solo rumore. Il corsivo va tolto DOPO, e
+    non prima, perché si scrive con un asterisco solo e il grassetto con due:
+    cercandolo per primo si mangerebbe metà di ogni grassetto."""
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    return re.sub(r"(?<![\w*])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![\w*])", r"\1", text)
+
+
+def appiattisci_markdown(text: str, grassetto: bool = False) -> str:
+    """Toglie dal riassunto i segni di markdown che chi legge non deve vedere.
+
+    A che cosa serve
+        Il riassunto arriva scritto in markdown, perche' e' quello che il PDF
+        «ricco» sa disegnare: i cancelletti diventano titoli, i tre apici
+        diventano il riquadro grigio del codice. Ma gli altri due formati, il
+        file di testo e il PDF di ripiego, disegnano testo e basta: li' quei
+        segni restano a vista, e si legge «#### Elettroliti forti e deboli»
+        con i cancelletti davanti, che e' esattamente il difetto che questa
+        funzione esiste per togliere.
+
+    Che cosa fa, in concreto
+        Il titolo perde i cancelletti e resta il suo testo, che e' l'unica cosa
+        che interessa a chi legge. Le righe dei tre apici spariscono e il
+        codice in mezzo resta dov'e': senza il riquadro grigio non si perde
+        niente di importante, mentre una riga di soli apici in mezzo al testo
+        non vuol dire proprio nulla.
+
+    Il grassetto, che e' l'unica differenza fra i due usi
+        Il file di testo lo vuole via, perche' gli asterischi sono rumore. Il
+        PDF di ripiego lo vuole tenere, perche' la libreria che lo disegna il
+        grassetto lo sa fare e sarebbe un peccato buttarlo. Da qui l'unico
+        interruttore di questa funzione.
+    """
+    if not text:
+        return text
+    righe = []
+    for riga in text.split("\n"):
+        nuda = riga.strip()
+        if nuda.startswith("```"):        # apertura o chiusura di un blocco
+            continue
+        m = re.match(r"^(#{1,6})\s+(.+)$", nuda)
+        righe.append(m.group(2) if m else riga)
+    fuori = "\n".join(righe)
+    return fuori if grassetto else _strip_md_bold(fuori)
 
 
 def build_txt(title: str, meta: dict, sections: list[dict],
@@ -121,14 +164,14 @@ def build_txt(title: str, meta: dict, sections: list[dict],
     Con 'markdown=True' (riassunto) il testo può contenere **grassetto**: viene
     ripulito dai marcatori per restare testo piano."""
     def _plain(s: str) -> str:
-        """Toglie gli asterischi del grassetto quando non servono.
+        """Toglie i segni del markdown, che in un file di testo sono rumore.
 
-        Il riassunto arriva scritto in markdown, con i termini importanti fra
-        doppi asterischi. In un file markdown vanno bene; in un file di testo
-        semplice si vedrebbero come asterischi e basta, che e' peggio di non
-        averli.
+        Il riassunto arriva scritto in markdown: i termini importanti fra doppi
+        asterischi, i sottotitoli dietro ai cancelletti, il codice fra tre
+        apici. In un file markdown vanno bene; in un file di testo semplice si
+        vedrebbero tali e quali, che e' peggio di non averli.
         """
-        return _strip_md_bold(s) if (markdown and s) else s
+        return appiattisci_markdown(s) if (markdown and s) else s
     if _is_local(meta):
         lines = [
             title,

@@ -84,9 +84,11 @@ _PDF_HTML_TEMPLATE = """<!doctype html>
   h2 { color: #0b6b3a; font-size: 15pt; margin: 22px 0 8px;
        border-bottom: 2px solid #d8efe2; padding-bottom: 3px; }
   h3 { color: #128a4b; font-size: 13pt; margin: 16px 0 6px; }
+  h4 { color: #128a4b; font-size: 12pt; margin: 13px 0 5px; }
   strong { color: #0b3b22; }
   p { margin: 0 0 10px; text-align: justify; }
-  ul { margin: 0 0 10px; padding-left: 22px; }
+  ul, ol { margin: 0 0 10px; padding-left: 22px; }
+  li { margin: 0 0 3px; }
   hr { border: none; border-top: 1px solid #e2e2e2; margin: 14px 0; }
   code { font-family: Consolas, 'Courier New', monospace; font-size: 10.5pt;
          background: #f3f4f6; padding: 1px 4px; border-radius: 4px; }
@@ -117,20 +119,27 @@ __BODY__
 def _md_inline_to_html(text: str) -> str:
     """Una riga di markdown diventa una riga di HTML.
 
-    L'ordine dei due passaggi non e' scambiabile, ed e' tutta la sostanza di
+    L'ordine dei tre passaggi non e' scambiabile, ed e' tutta la sostanza di
     questa funzione. Prima si neutralizzano i caratteri che in HTML hanno un
-    significato, POI si mette il grassetto.
+    significato, POI si mette il grassetto, e solo alla fine il corsivo.
 
     Al contrario, il grassetto appena inserito verrebbe neutralizzato insieme
     al resto e comparirebbe a schermo come testo invece che come formato. E
     soprattutto: un riassunto che parla di HTML, e contiene per esempio del
     codice con delle parentesi angolari, finirebbe per essere interpretato
     come struttura della pagina invece che mostrato.
+
+    Il corsivo viene per ultimo perche' si scrive con un asterisco solo, e il
+    grassetto con due: cercandolo prima si mangerebbe meta' di ogni grassetto.
+    Ed e' qui perche' altrimenti un *cosi'* scritto dal modello finiva nel
+    documento con gli asterischi in bella vista, che e' peggio che non avere
+    il corsivo del tutto.
     """
     import re
     import html as _html
     text = _html.escape(text, quote=False)
-    return re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
+    text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
+    return re.sub(r"(?<![\w*])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![\w*])", r"<em>\1</em>", text)
 def _md_to_html(md: str) -> str:
     """Converte il markdown del riassunto in HTML per il PDF "ricco".
 
@@ -223,7 +232,21 @@ def _md_to_html(md: str) -> str:
     # --generate-pdf-document-outline usato in build_pdf_rich.
     out: list[str] = []
     para: list[str] = []
-    in_list = False
+    # Che elenco e' aperto in questo momento: None nessuno, "ul" puntato,
+    # "ol" numerato. Prima era un vero o falso, e bastava finche' esisteva un
+    # tipo solo di elenco.
+    in_list: str | None = None
+    # Una riga che comincia con «1. » oppure «2) » e' una voce di elenco
+    # numerato. Le cifre sono al massimo due apposta: cosi' un anno come 2021
+    # a inizio frase resta una frase e non diventa una voce di elenco.
+    voce_numerata = re.compile(r"^(\d{1,2})[.)]\s+(.+)$")
+    # Un titolo, da uno a sei cancelletti. Prima se ne riconoscevano tre soltanto,
+    # e un «#### Sottoparagrafo» finiva nel documento con i cancelletti in bella
+    # vista E attaccato alla frase seguente, perche' per il convertitore era una
+    # riga di prosa come un'altra. Lo spazio dopo i cancelletti e' obbligatorio
+    # apposta: senza, una riga di commento tipo «#calcolo del pH» dentro un pezzo
+    # di codice rimasto fuori dai tre apici diventerebbe un titolo.
+    titolo = re.compile(r"^(#{1,6})\s+(.+)$")
 
     def _flush_para():
         """Chiude il paragrafo che si stava accumulando, se ce n'era uno.
@@ -237,8 +260,23 @@ def _md_to_html(md: str) -> str:
             out.append("<p>" + _md_inline_to_html(" ".join(para)) + "</p>")
             para.clear()
 
+    def _open_list(kind: str):
+        """Apre un elenco del tipo chiesto, se non era gia' quello aperto.
+
+        Serve perche' gli elenchi sono diventati due, quello puntato e quello
+        numerato, e passare dall'uno all'altro senza chiudere il primo darebbe
+        una pagina con le voci annidate una dentro l'altra invece che una
+        sotto l'altra.
+        """
+        nonlocal in_list
+        _flush_para()
+        if in_list != kind:
+            _close_list()
+            out.append(f"<{kind}>")
+            in_list = kind
+
     def _close_list():
-        """Chiude l'elenco puntato aperto, se ce n'era uno.
+        """Chiude l'elenco aperto, se ce n'era uno.
 
         Stessa logica del paragrafo: un elenco comincia alla prima riga che
         sembra una voce e finisce alla prima che non lo sembra piu'. Nessuno
@@ -251,8 +289,8 @@ def _md_to_html(md: str) -> str:
         """
         nonlocal in_list
         if in_list:
-            out.append("</ul>")
-            in_list = False
+            out.append(f"</{in_list}>")
+            in_list = None
 
     for line in md.split("\n"):
         s = line.strip()
@@ -260,19 +298,22 @@ def _md_to_html(md: str) -> str:
             _flush_para(); _close_list(); continue
         if s in block_keys:  # blocco codice/mermaid: elemento a sé, niente <p>
             _flush_para(); _close_list(); out.append(s); continue
-        if s.startswith("### "):
-            _flush_para(); _close_list(); out.append("<h3>" + _md_inline_to_html(s[4:]) + "</h3>")
-        elif s.startswith("## "):
-            _flush_para(); _close_list(); out.append("<h2>" + _md_inline_to_html(s[3:]) + "</h2>")
-        elif s.startswith("# "):
-            _flush_para(); _close_list(); out.append("<h1>" + _md_inline_to_html(s[2:]) + "</h1>")
+        if titolo.match(s):
+            m = titolo.match(s)
+            # Oltre il quarto livello si smette di rimpicciolire: un h5 e un h6
+            # sarebbero piu' piccoli del testo normale, che e' il contrario di
+            # quello che deve fare un titolo.
+            livello = min(len(m.group(1)), 4)
+            _flush_para(); _close_list()
+            out.append(f"<h{livello}>" + _md_inline_to_html(m.group(2)) + f"</h{livello}>")
         elif s in ("---", "***", "___"):
             _flush_para(); _close_list(); out.append("<hr>")
         elif s.startswith("- ") or s.startswith("* "):
-            _flush_para()
-            if not in_list:
-                out.append("<ul>"); in_list = True
+            _open_list("ul")
             out.append("<li>" + _md_inline_to_html(s[2:]) + "</li>")
+        elif voce_numerata.match(s):
+            _open_list("ol")
+            out.append("<li>" + _md_inline_to_html(voce_numerata.match(s).group(2)) + "</li>")
         else:
             _close_list(); para.append(s)
     _flush_para(); _close_list()
@@ -398,13 +439,10 @@ def _save_pdf(meta: dict, sections: list[dict], out_path: str, with_timestamps: 
     """Esporta un PDF: prima quello "ricco" (formule/mappe disegnate via browser
     headless), poi ripiega su fpdf2. NON usa Groq: lavora su testo già prodotto,
     quindi NESSUN credito speso. Restituisce True se il PDF è stato creato."""
-    # «Salvato in:»: la cartella di output, ricavata dal percorso del PDF. Compare
-    # tra i metadati in testa al documento (non più in fondo a ogni pagina).
-    saved_in = os.path.dirname(os.path.abspath(out_path))
     if RICH_PDF:
         try:
             md_text = build_md(meta["title"], meta, engine_label, sections,
-                               with_timestamps=with_timestamps, saved_in=saved_in)
+                               with_timestamps=with_timestamps)
             if build_pdf_rich(md_text, out_path):
                 return True
         except Exception:
@@ -412,7 +450,7 @@ def _save_pdf(meta: dict, sections: list[dict], out_path: str, with_timestamps: 
     try:
         build_pdf(meta["title"], meta, sections, out_path,
                   with_timestamps=with_timestamps, markdown=markdown,
-                  engine_label=engine_label, saved_in=saved_in)
+                  engine_label=engine_label)
         return True
     except Exception as e:
         console.print(f"[error]Export PDF fallito: {e}[/error]")

@@ -10,7 +10,7 @@
  *   4. «Trascrivi» chiede a Python se ci sono ostacoli (manca la chiave, il
  *      video c'e' gia', esiste un parziale) e a seconda della risposta parte o
  *      apre una finestra di scelte;
- *   5. mentre lavora parlano l'avanzamento e il diario;
+ *   5. mentre lavora parla l'avanzamento;
  *   6. alla fine una finestra dice cosa e' stato scritto e dove.
  *
  * Tutto questo succede DUE volte, una per stanza, e le due volte non si
@@ -390,15 +390,28 @@ ascolta('mostraRisultatoPlaylist', (p, res) => {
   if ((res.voci || []).length) {
     const elenco = el('div', 'elenco-video');
     res.voci.forEach((v) => {
-      const riga = el('div', 'riga-video ' + v.tono);
+      const riga = el('div', 'riga-video ' + v.tono + (v.causa ? ' con-causa' : ''));
       riga.appendChild(el('span', 'titolo', v.titolo));
+      /* Un video non riuscito porta con se' il perche'. Senza, l'elenco diceva
+       * quali erano andati male e lasciava a chi legge il compito di indovinare
+       * se valesse la pena rilanciare: tre video privati e tre cadute di rete
+       * si leggevano identici, e sono due situazioni opposte. */
+      if (v.causa) riga.appendChild(el('span', 'causa', v.causa));
+      if (v.dettaglio) riga.appendChild(riquadroDettaglio(res.et_dettaglio, v.dettaglio));
       elenco.appendChild(riga);
     });
     corpo.push(elenco);
   }
 
+  /* Se qualcosa non e' riuscito la finestra non si presenta come un successo
+   * pieno: la spunta verde su un batch in cui tre video sono caduti e' una
+   * bugia piccola, ma e' quella che fa chiudere la finestra senza leggerla. */
+  const tuttoBene = !(res.voci || []).some((v) => v.tono === 'attenzione');
+
   finestraDi(p, {
-    icona: 'spunta', tono: 'riuscito', titolo: res.titolo, corpo,
+    icona: tuttoBene ? 'spunta' : 'errore',
+    tono: tuttoBene ? 'riuscito' : 'attenzione',
+    titolo: res.titolo, corpo,
     azioni: [
       { testo: t('res.open'), tono: 'contorno', icona: 'cartella', chiudi: false,
         azione: () => window.pywebview.api.apri('cartella', p.dove) },
@@ -415,7 +428,7 @@ ascolta('mostraRisultatoPlaylist', (p, res) => {
  * Il lavoro resta nella stanza in cui e' cominciato anche scegliendo di
  * finirlo sul computer: cambia il modello che lo porta a termine, non la
  * scrivania su cui sta. Spostarlo vorrebbe dire lasciare a meta' strada il suo
- * diario e il suo avanzamento, nella stanza di prima. */
+ * avanzamento, nella stanza di prima. */
 ascolta('creditiFiniti', (p, dati) => {
   const azioni = [{ testo: t('rate.later'), tono: 'contorno', icona: 'clessidra' }];
   if (dati.puo_locale) {

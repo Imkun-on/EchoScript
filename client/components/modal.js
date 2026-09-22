@@ -53,6 +53,22 @@ function riquadroPercorso(etichetta, percorso) {
   return box;
 }
 
+/* Il testo tecnico di un errore, cosi' com'e' arrivato.
+ *
+ * Sta in un riquadro a parte, con un'etichetta sopra, per una ragione precisa:
+ * chi legge deve capire al primo sguardo che quella non e' la spiegazione ma la
+ * citazione. Messo in mezzo alla prosa sembrerebbe una frase del programma, e
+ * invece e' una frase di qualcun altro, spesso in inglese e spesso oscura.
+ *
+ * Resta selezionabile e va a capo dove capita, perche' la prima cosa che se ne
+ * fa e' copiarlo per cercarlo in rete. */
+function riquadroDettaglio(etichetta, testo) {
+  const box = el('div', 'riquadro-dettaglio');
+  if (etichetta) box.appendChild(el('div', 'etichetta-piccola', etichetta));
+  box.appendChild(el('div', 'dettaglio-tecnico', testo));
+  return box;
+}
+
 /* Una riga di dati «nome: valore», di quelle che riempiono le schede. */
 function righeDati(righe) {
   const box = el('div', 'dati');

@@ -146,7 +146,7 @@
 
       <nav class="menu">
         <!-- Due postazioni, non due impostazioni: in ciascuna c'e' tutto il
-             lavoro (link o file, output, avvio, diario) e quello che cambia
+             lavoro (link o file, output, avvio, avanzamento) e quello che cambia
              sono i modelli con cui viene fatto. Si entra in una delle due e si
              lavora li' dentro; scegliere la sezione E' scegliere il motore, che
              e' il modo piu' corto di dirlo. La targhetta segna quella in uso. -->
@@ -175,7 +175,7 @@
            Prima era una sola e traslocava nella stanza aperta. Sembrava una
            semplificazione ed era un difetto: avviando una trascrizione in
            nuvola e passando poi in locale, in locale ci si ritrovava davanti
-           l'avanzamento, il diario e la sorgente di quello che stava girando
+           l'avanzamento e la sorgente di quello che stava girando
            di la'. Le due stanze erano due porte sulla stessa scrivania.
       
            Adesso le scrivanie sono due. Si puo' avere un link incollato qui e
@@ -412,29 +412,27 @@
           </div>
         </section>
 
-        <div class="due-colonne">
-          <section class="vetro colonna">
-            <div class="titolo-pannello">
-              <span data-t="src.panel"></span>
-              <div class="spazio"></div>
-              <span class="targhetta" id="stima"></span>
-            </div>
-            <div id="sorgente-scheda" class="elenco"></div>
-          </section>
+        <!-- Qui c'erano due colonne, la sorgente e il diario. Il diario e'
+             stato tolto: era un muro di righe tecniche che raccontava lo stesso
+             lavoro gia' raccontato, meglio, dalla barra di avanzamento qui
+             sopra. E quando qualcosa andava storto, la riga che contava finiva
+             sepolta sotto le altre invece di farsi notare. Adesso un errore lo
+             dice una finestra, con scritto su quale video, di che cosa si
+             tratta e il testo tecnico sotto.
 
-          <!-- Il diario e' uno solo: viaggia con la postazione, cosi' la
-               cronologia resta una sola anche cambiando motore. -->
-          <section class="vetro colonna" id="pannello-diario">
-            <div class="titolo-pannello">
-              <span class="spia" id="spia"></span>
-              <span data-t="log.title"></span>
-              <span class="stato" id="stato"></span>
-              <div class="spazio"></div>
-              <button id="svuota" class="bottone nudo" data-t="log.clear"></button>
-            </div>
-            <div id="diario" class="diario"></div>
-          </section>
-        </div>
+             La spia e la parola di stato stavano nell'intestazione del diario e
+             non se ne sono andate con lui: dicono se la postazione sta
+             lavorando, che vale comunque, e si sono spostate qui. -->
+        <section class="vetro colonna sorgente">
+          <div class="titolo-pannello">
+            <span class="spia" id="spia"></span>
+            <span data-t="src.panel"></span>
+            <span class="stato" id="stato"></span>
+            <div class="spazio"></div>
+            <span class="targhetta" id="stima"></span>
+          </div>
+          <div id="sorgente-scheda" class="elenco"></div>
+        </section>
       </div>
       </template>
 

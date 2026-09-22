@@ -161,3 +161,70 @@ def _is_rate_limit(msg: str) -> bool:
     m = (msg or "").lower()
     return ("429" in m or "rate_limit" in m or "rate limit" in m
             or "tokens per" in m or "requests per" in m or "too many requests" in m)
+
+
+# Le famiglie in cui ricadono gli errori che si vedono davvero, nell'ordine in
+# cui vanno controllate. Ogni voce e' (nome della famiglia, pezzi di testo che
+# la riconoscono), e il nome e' la coda di una chiave di `strings.py`: chi
+# mostra l'errore ci scrive davanti `err.causa.` e ha la frase da leggere.
+#
+# L'ordine conta, e non e' alfabetico. «403» compare sia quando YouTube rifiuta
+# un download sia quando la chiave Groq non va, quindi il caso del download va
+# guardato PRIMA, altrimenti un video rifiutato verrebbe spiegato come una
+# chiave sbagliata e si andrebbe a cercare il guasto dalla parte opposta.
+_FAMIGLIE_ERRORE = (
+    ("nonDisponibile", ("video unavailable", "private video", "removed by the uploader",
+                        "members-only", "sign in to confirm your age", "age-restricted",
+                        "not available in your country", "this video is unavailable")),
+    ("rifiutato",      ("403", "forbidden", "unable to download video data",
+                        "sign in to confirm you", "precondition check failed")),
+    ("rete",           ("timed out", "timeout", "connection", "getaddrinfo",
+                        "name resolution", "unreachable", "ssl", "urlopen error",
+                        "temporary failure")),
+    ("chiave",         ("401", "invalid api key", "authentication", "unauthorized",
+                        "no api key", "chiave non valida")),
+    ("ffmpeg",         ("ffmpeg", "ffprobe")),
+    ("disco",          ("no space", "disk full", "permission denied", "accesso negato",
+                        "errno 13", "errno 28")),
+    ("modelloLocale",  ("ollama", "model not found", "pull the model", "whisper")),
+)
+
+
+def classifica_errore(msg: str) -> str:
+    """Di che cosa si tratta, in una parola: la famiglia a cui questo errore appartiene.
+
+    Perche' serve
+        Il testo di un errore lo capisce chi ha scritto il programma, non chi lo
+        usa. «unable to download video data: HTTP Error 403: Forbidden» e'
+        preciso e non dice niente a nessuno: non si capisce se sia rotto il
+        programma, se sia colpa della propria rete, se si debba riprovare fra
+        cinque minuti o se quel video non si possa proprio scaricare.
+
+        Questa funzione guarda dentro il testo e risponde a quale delle famiglie
+        note appartiene. Chi mostra l'errore usa la risposta per tirar fuori una
+        frase scritta in italiano che dice che cosa e' successo e, quando c'e',
+        che cosa si puo' fare.
+
+    Perche' si guarda il testo e non un tipo di eccezione
+        Perche' il tipo non c'e'. Quasi tutti questi guasti arrivano da
+        biblioteche di altri, gia' impacchettati dentro un'eccezione generica, e
+        l'unica cosa che sopravvive al viaggio e' il messaggio. E' la stessa
+        ragione per cui `_is_rate_limit` fa cosi'.
+
+    I crediti finiti restano fuori
+        Hanno una strada tutta loro, con il parziale salvato e la scelta fra
+        riprendere domani o finire in locale, e non sono un errore. Se pero' un
+        messaggio di quel tipo arrivasse fin qui, viene riconosciuto lo stesso
+        invece di finire fra gli sconosciuti.
+
+    Chi non assomiglia a niente torna «sconosciuto», che e' una risposta onesta:
+    meglio dire che non si e' capito, e mostrare il testo tecnico sotto, che
+    indovinare una spiegazione sbagliata e mandare chi legge fuori strada.
+    """
+    m = (msg or "").lower()
+    if _is_rate_limit(m):
+        return "crediti"
+    for famiglia, indizi in _FAMIGLIE_ERRORE:
+        if any(indizio in m for indizio in indizi):
+            return famiglia
+    return "sconosciuto"

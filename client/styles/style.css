@@ -587,9 +587,12 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 .azioni-modulo { justify-content: flex-start; margin-top: var(--s3); }
 
 
-/* ── Colonne, elenchi, diario ───────────────────────────────────────────── */
+/* ── Elenchi ────────────────────────────────────────────────────────────── */
 
-.due-colonne { display: grid; grid-template-columns: 1.1fr 1fr; gap: var(--s4); flex: 1; min-height: 0; }
+/* Qui c'era una griglia a due colonne, la sorgente e il diario. Tolto il
+   diario, la sorgente si prende tutta la larghezza e la griglia non serve piu'
+   a niente: una griglia di un elemento solo e' un giro largo per dire «resta
+   dov'e'». */
 
 /* Le due postazioni ci stanno intere, senza scorrere.
  *
@@ -603,10 +606,14 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
  * lasciar scorrere si divide: i riquadri delle impostazioni tengono l'altezza
  * che gli serve, ne' piu' ne' meno, e tutto quello che avanza va al lavoro.
  *
- * Se lo spazio non bastasse lo stesso, su uno schermo molto basso, a scorrere
- * sono gli elenchi DENTRO i riquadri (la scheda della sorgente, il diario),
- * che hanno gia' il loro scorrimento e una barra che si vede. Scorre la cosa
- * che ha troppo contenuto, non la pagina intera. */
+ * Se lo spazio non bastasse lo stesso, o se la scheda della sorgente si
+ * riempisse di trenta video, a scorrere e' lo scomparto del lavoro: scende
+ * tutto quello che sta sotto l'intestazione, che invece resta ferma in cima a
+ * dire in quale delle due stanze si e'.
+ *
+ * Una barra sola e non una dentro l'altra. Prima i riquadri scorrevano per
+ * conto loro, e il risultato era una playlist lunga letta dentro una feritoia
+ * in mezzo a una pagina vuota. */
 .sezione[data-sez="locale"],
 .sezione[data-sez="cloud"] { overflow: hidden; }
 .sezione[data-sez="locale"] > .vetro,
@@ -622,14 +629,14 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 .slot-lavoro, .postazione {
   display: flex; flex-direction: column; gap: var(--s4); min-height: 0;
 }
-/* Sorgente e diario si prendono tutto lo spazio che avanza.
+/* La sorgente si prende tutto lo spazio che avanza.
  *
- * Avevano un'altezza fissa di 300 pixel perche' la sezione scorreva e non
+ * Aveva un'altezza fissa di 300 pixel perche' la sezione scorreva e non
  * esisteva un "resto dello schermo" da cui attingere: senza quel numero il
- * diario vuoto si sarebbe ridotto a una fessura. Adesso il resto dello schermo
- * c'e' di nuovo, quindi il numero fisso se ne va e al suo posto c'e' un
- * minimo, che serve solo a non far collassare i due riquadri su una finestra
- * ridotta a mano. */
+ * riquadro vuoto si sarebbe ridotto a una fessura. Adesso il resto dello
+ * schermo c'e' di nuovo, quindi il numero fisso se ne va e al suo posto c'e'
+ * un minimo, che serve solo a non farlo collassare su una finestra ridotta a
+ * mano. */
 /* Zero, e non un minimo: e' l'ultimo riquadro della colonna, quindi e' lui a
  * pagare quando lo spazio non basta. Con un minimo di 240 pixel, su una
  * finestra bassa, non si restringeva abbastanza e veniva tagliato dal bordo:
@@ -658,9 +665,9 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 /* «Almeno alta quanto lo spazio, piu' alta se il contenuto lo chiede».
  *
  * E' il senso di `flex: 1 0 auto`, ed e' la riga che fa convivere le due
- * situazioni. Quando lo spazio basta, la postazione lo riempie tutto e il
- * diario si prende quello che avanza invece di ridursi a una fessura. Quando
- * non basta piu', smette di comprimersi e si lascia scorrere.
+ * situazioni. Quando lo spazio basta, la postazione lo riempie tutto e la
+ * sorgente si prende quello che avanza invece di ridursi a una fessura.
+ * Quando non basta piu', smette di comprimersi e si lascia scorrere.
  *
  * La parte che conta e' lo zero in mezzo, cioe' il non restringersi: senza,
  * la postazione continuerebbe a schiacciarsi per stare nello spazio, non
@@ -668,11 +675,19 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
  * scorrere proprio nel momento in cui serve. */
 .postazione { flex: 1 0 auto; }
 
-/* Un minimo, perche' i due riquadri in fondo sono gli ultimi della colonna ed
- * e' su di loro che si scarica ogni mancanza di spazio. Sotto i 320 pixel il
- * diario mostrerebbe due righe e mezzo, che tanto vale non mostrarlo. Da qui
- * in giu' la postazione supera lo scomparto, e si scorre. */
-.postazione .due-colonne { flex: 1 0 auto; min-height: 320px; }
+/* Il riquadro della sorgente copre la pagina della sezione.
+ *
+ * Due regole in una riga, e fanno cose diverse. `flex: 1 0 auto` gli da' tutto
+ * lo spazio che avanza sotto i tre riquadri e il bottone: a pagina vuota il
+ * riquadro arriva in fondo allo schermo invece di essere una striscia con
+ * sotto del vuoto.
+ *
+ * Il minimo interviene solo quando quello spazio non c'e': finestra bassa, o
+ * pannello dell'avanzamento comparso che spinge tutto in giu'. Li' il riquadro
+ * smette di stringersi, supera il bordo, e si scorre. E' legato all'altezza
+ * della finestra e non a un numero fisso perche' «mezza pagina» vuol dire cose
+ * diverse su uno schermo da portatile e su un monitor da scrivania. */
+.postazione .vetro.sorgente { flex: 1 0 auto; min-height: 45vh; }
 
 .titolo-pannello {
   display: flex; align-items: center; gap: var(--s2);
@@ -698,29 +713,24 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 .spia.error   { background: var(--rosso); box-shadow: 0 0 12px var(--rosso); }
 @keyframes pulsa { 50% { opacity: .3; } }
 
-.elenco, .diario {
-  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
-  display: flex; flex-direction: column; padding-right: 6px;
+/* Il corpo del riquadro della sorgente CRESCE, non scorre.
+ *
+ * Aveva una barra di scorrimento tutta sua, ed era la cosa sbagliata: una
+ * playlist di trenta video si leggeva dentro una feritoia alta due dita, in
+ * mezzo a una pagina per il resto vuota, e per arrivare in fondo bisognava
+ * indovinare che quella feritoia si potesse scorrere.
+ *
+ * Adesso il contenuto spinge il riquadro in basso quanto gli serve, e a
+ * scorrere e' lo scomparto del lavoro, cioe' la pagina. Una barra sola, quella
+ * grande sul bordo, che si vede e che si sa dov'e'.
+ *
+ * `flex: 1 0 auto` e' la riga che regge tutt'e due i casi: prende lo spazio che
+ * avanza quando il contenuto e' poco, e non si lascia stringere quando e'
+ * troppo. */
+.elenco {
+  flex: 1 0 auto;
+  display: flex; flex-direction: column; gap: var(--s3);
 }
-.elenco { gap: var(--s3); }
-
-.diario {
-  font-family: 'Cascadia Mono', Consolas, monospace;
-  font-size: 11px; line-height: 1.6; gap: 0;
-  -webkit-user-select: text; user-select: text;
-}
-.riga-log {
-  white-space: pre-wrap; word-break: break-word; color: var(--t1);
-  padding: 1px 0 1px 9px; border-left: 2px solid transparent;
-}
-.riga-log.ok   { color: var(--verde);  border-left-color: #34d39940; }
-.riga-log.err  { color: var(--rosso);  border-left-color: #fb718540; }
-.riga-log.warn { color: var(--giallo); border-left-color: #fbbf2440; }
-/* Le intestazioni di fase: piu' chiare e staccate da sopra, cosi' il diario si
-   legge a blocchi invece che come un elenco piatto. Il colore non e' un giudizio,
-   quello lo danno il verde e il rosso: e' solo il grado del titolo. */
-.riga-log.fase { color: var(--t0); border-left-color: var(--taglio); margin-top: 7px; }
-.riga-log.fase:first-child { margin-top: 0; }
 
 .vuoto {
   flex: 1; display: flex; flex-direction: column; align-items: center;
@@ -742,8 +752,14 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
  * locale non c'e' copertina: al suo posto l'icona, e nessun rettangolo vuoto. */
 
 .scheda-sorgente { display: flex; flex-direction: column; gap: var(--s3); }
+/* Il limite di larghezza non e' un vezzo: la copertina e' 16/9 e prende tutta
+   la larghezza che le si da'. Da quando il riquadro della sorgente occupa la
+   pagina intera, «tutta la larghezza» vuol dire milleduecento pixel, e in
+   altezza ne verrebbero seicento: la copertina da sola riempirebbe lo schermo
+   e spingerebbe fuori vista il titolo e i dati, che sono la ragione per cui si
+   sta guardando quella scheda. */
 .scheda-copertina {
-  width: 100%; aspect-ratio: 16 / 9; border-radius: var(--r-m);
+  width: 100%; max-width: 520px; aspect-ratio: 16 / 9; border-radius: var(--r-m);
   overflow: hidden; background: var(--incavo);
   border: 1px solid var(--taglio); box-shadow: var(--ombra-media);
   display: flex; align-items: center; justify-content: center;
@@ -765,6 +781,13 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
   border-radius: var(--r-s); background: var(--incavo);
   border: 1px solid var(--bordo); padding: var(--s2);
 }
+/* Il tetto di 240 pixel vale dentro una finestra, dove il corpo ha gia' il suo
+   scorrimento e un elenco che cresce senza fine spingerebbe i bottoni fuori
+   dalla finestra. Nella pagina no: li' l'elenco dei video della playlist si
+   apre per intero, e si scorre la pagina per arrivare in fondo. Era la seconda
+   barra di scorrimento dentro la prima, quella che faceva sembrare la scheda
+   piu' piccola di quello che era. */
+.sorgente .elenco-video { max-height: none; overflow: visible; }
 .riga-video { display: flex; align-items: center; gap: var(--s2); font-size: 12px; padding: 3px 4px; }
 .riga-video .numero { color: var(--t2); width: 26px; flex: 0 0 26px; font-family: 'Cascadia Mono', monospace; font-size: 10.5px; }
 .riga-video .titolo { flex: 1; min-width: 0; color: var(--t0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -772,6 +795,21 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 .riga-video.ok .titolo         { color: var(--verde); }
 .riga-video.neutro .titolo     { color: var(--t2); }
 .riga-video.attenzione .titolo { color: var(--giallo); }
+
+/* La riga di un video NON riuscito: non e' piu' una riga sola, perche' deve
+   dire anche perche' non e' riuscito. Diventa un riquadretto in colonna, e il
+   titolo smette di essere troncato con i puntini: su un video caduto sapere
+   QUALE era e' meta' dell'informazione. */
+.riga-video.con-causa {
+  flex-direction: column; align-items: stretch; gap: 5px;
+  padding: var(--s2); margin-bottom: var(--s1);
+  border-radius: var(--r-s); border: 1px solid var(--bordo);
+  background: #ffffff05;
+}
+.riga-video.con-causa .titolo {
+  white-space: normal; overflow: visible; text-overflow: clip; font-weight: 700;
+}
+.riga-video .causa { color: var(--t1); font-size: 11.5px; line-height: 1.45; }
 
 /* ── Stato della chiave ─────────────────────────────────────────────────── */
 
@@ -822,8 +860,10 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 
 
 /* ── Avvisi a comparsa ──────────────────────────────────────────────────── */
-/* Un errore dentro il diario si perde fra cinquanta righe. Qui arriva davanti,
- * resta il tempo di leggerlo e se ne va da solo. */
+/* Un rifiuto immediato, di quelli che arrivano prima che il lavoro parta: un
+ * link vuoto, un file che non c'e'. Arriva davanti, resta il tempo di
+ * leggerlo e se ne va da solo. Un lavoro che cade DOPO essere partito apre
+ * invece una finestra, che aspetta di essere letta. */
 
 .avvisi {
   position: fixed; right: var(--s5); bottom: var(--s5); z-index: 50;
@@ -954,6 +994,27 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 }
 .riquadro-cartella .percorso {
   font-size: 12px; color: var(--t0); word-break: break-all;
+  -webkit-user-select: text; user-select: text;
+}
+
+/* Il testo tecnico di un errore: si legge come una citazione, non come una
+   frase del programma. Monospaziato per quello, e selezionabile perche' la
+   prima cosa che se ne fa e' copiarlo. L'altezza e' limitata: certi errori
+   arrivano con dieci righe di traccia dietro, e riempirebbero la finestra
+   spingendo fuori vista proprio la spiegazione che serve leggere. */
+.riquadro-dettaglio {
+  border-radius: var(--r-s); padding: var(--s2);
+  background: var(--incavo); border: 1px solid var(--bordo);
+  display: flex; flex-direction: column; gap: 3px;
+}
+.riquadro-dettaglio .etichetta-piccola {
+  font-size: 10px; text-transform: uppercase; letter-spacing: .7px;
+  color: var(--t2); font-weight: 700;
+}
+.dettaglio-tecnico {
+  font-family: 'Cascadia Mono', monospace; font-size: 10.5px; line-height: 1.5;
+  color: var(--t2); word-break: break-word; white-space: pre-wrap;
+  max-height: 130px; overflow-y: auto;
   -webkit-user-select: text; user-select: text;
 }
 
@@ -1157,14 +1218,11 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 .tendina-testa, .tendina-voce, .cursore {
   transition-timing-function: var(--molla);
 }
-.elenco, .diario, .finestra-corpo { scroll-behavior: smooth; }
+.slot-lavoro, .finestra-corpo { scroll-behavior: smooth; }
 .alone, .onde, .cursa, .sezione.attiva, .sezione.uscita { will-change: transform, opacity; }
 
-/* Sotto i 1120 px la seconda colonna scende sotto la prima invece di
- * strizzarsi fino a rendere illeggibili i titoli. */
 @media (max-width: 1120px) {
-  .due-colonne { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
-  /* Anche i tre menu dei modelli vanno in colonna: a 250 px l'uno il nome del
+  /* I tre menu dei modelli vanno in colonna: a 250 px l'uno il nome del
      modello e la sua descrizione finirebbero entrambi tagliati. */
   .sezione[data-sez="locale"] .riga .gruppo.largo,
   .sezione[data-sez="cloud"]  .riga .gruppo.largo { flex-basis: 100%; }

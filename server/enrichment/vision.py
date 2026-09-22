@@ -60,7 +60,7 @@ from server.utils.contract import (
 )
 from server.utils.ffmpeg import _probe_duration
 from server.utils.ollama import _ollama_has_model, _ollama_installed_models
-from server.utils.text import _format_timestamp, _lp, _safe_filename
+from server.utils.text import _format_timestamp, _lp, _safe_filename, cartella_video
 
 
 def _parse_showinfo_times(stderr: str) -> list[float]:
@@ -189,15 +189,25 @@ _VISION_SYSTEM_PROMPT = (
     "Analizzi UN fotogramma di un video didattico/divulgativo. Estrai SOLO il "
     "contenuto informativo VISIBILE a schermo che il parlato non può rendere:\n"
     "• CODICE sorgente: trascrivilo ALLA LETTERA (indentazione e simboli inclusi) "
-    "dentro un blocco markdown ``` con il nome del linguaggio.\n"
+    "dentro un blocco markdown ``` con il nome del linguaggio. Anche un comando "
+    "solo o una riga sola va nel blocco, mai lasciato dentro la frase.\n"
     "• FORMULE matematiche e relativi PASSAGGI/DIMOSTRAZIONI: scrivile in LaTeX "
-    "(`$...$` in linea, `$$...$$` per i passaggi), riportando tutti i passaggi "
-    "visibili.\n"
+    "(`$...$` in linea, `$$...$$` su riga propria per i passaggi), riportando "
+    "tutti i passaggi visibili.\n"
+    "• A ogni blocco di codice o di formula aggiungi UNA riga che dice che cosa "
+    "fa, ricavata da ciò che è visibile e dal contesto audio: a che cosa serve "
+    "quella funzione, che cosa calcola quella formula. Una riga sola, e solo se "
+    "la puoi dire con certezza: se non è chiaro, lascia il blocco senza commento "
+    "invece di tirare a indovinare.\n"
     "• GRAFICI, DIAGRAMMI, TABELLE, SCHEMI: descrivili indicando assi, valori, "
     "relazioni e la conclusione che mostrano.\n"
-    "• TESTO significativo di slide (titoli, definizioni, elenchi): riportalo.\n"
+    "• TESTO significativo di slide (titoli, definizioni, elenchi): riportalo. Se "
+    "sono voci brevi, rendile come elenco puntato, una per riga aperta da «- », "
+    "nell'ordine in cui compaiono.\n"
     "Regole: NON descrivere volti, persone che parlano, sfondi, arredi o elementi "
-    "decorativi. Se il fotogramma non contiene NULLA di tecnico/informativo (solo "
+    "decorativi. Non usare formule come «nella slide si vede», «a schermo "
+    "compare», «l'immagine mostra»: scrivi direttamente il contenuto. Se il "
+    "fotogramma non contiene NULLA di tecnico/informativo (solo "
     "una persona che parla, una slide di titolo, una transizione), rispondi "
     "ESATTAMENTE con la sola parola: NIENTE. Rispondi in italiano, conciso e ben "
     "strutturato, senza preamboli e SENZA includere il tuo ragionamento: fornisci "
@@ -594,7 +604,11 @@ def save_visual_notes(out_root: str, meta: dict, notes: list[dict],
     if not notes:
         return
     safe = _safe_filename(meta["title"])
-    video_dir = os.path.join(out_root, safe)
+    # Stessa cartella dove sono finite trascrizione e riassunto, numero della
+    # playlist compreso: calcolarsela qui a modo proprio voleva dire che con una
+    # playlist le note visive finivano in una cartella gemella senza numero,
+    # accanto a quella giusta.
+    video_dir = cartella_video(out_root, meta["title"], meta.get("_num_playlist"))
     vdir = os.path.join(video_dir, visual_subdir())
     frames_dir = os.path.join(vdir, "frames")
     os.makedirs(_lp(vdir), exist_ok=True)
@@ -614,7 +628,7 @@ def save_visual_notes(out_root: str, meta: dict, notes: list[dict],
     # Markdown del documento: fotogramma (se presente) + testo, per ogni nota.
     # 'img_prefix' permette link RELATIVI per il .md (portabile) e ASSOLUTI per il
     # PDF (il browser headless deve trovare i file).
-    def _companion_md(img_prefix: str, saved_in: str | None = None) -> str:
+    def _companion_md(img_prefix: str) -> str:
         """Il documento che si legge da solo, con le note in ordine di tempo.
 
         E' un file a parte e non un pezzo del riassunto, perche' risponde a una
@@ -622,11 +636,10 @@ def save_visual_notes(out_root: str, meta: dict, notes: list[dict],
         a schermo, e a che minuto». Con i fotogrammi accanto, serve a ritrovare
         un pezzo di codice o una formula senza riaprire il video.
         """
-        saved_line = [f"- **Salvato in:** {saved_in}"] if saved_in else []
         out = [f"# {meta['title']}: Analisi visiva", "",
                f"- **Estratto con:** {engine_label}",
                f"- **Fotogrammi con contenuto:** {len(notes)}",
-               *saved_line, "", "---", ""]
+               "", "---", ""]
         for n in notes:
             out.append(f"## [{_format_timestamp(n['start'])}]")
             out.append("")
@@ -645,13 +658,12 @@ def save_visual_notes(out_root: str, meta: dict, notes: list[dict],
     # PDF "ricco": fotogramma + testo estratto, uno per nota (immagini con percorso
     # ASSOLUTO). Solo se l'export è attivo e ci sono davvero dei fotogrammi salvati.
     if do_export and RICH_PDF and any(n.get("image") for n in notes):
-        pdf_saved_in = os.path.abspath(vdir)
         try:
             if quiet:
-                build_pdf_rich(_companion_md(frames_dir + os.sep, saved_in=pdf_saved_in), base + ".pdf")
+                build_pdf_rich(_companion_md(frames_dir + os.sep), base + ".pdf")
             else:
                 with console.status("[info]Creo il PDF dell'analisi visiva (fotogrammi + testo)...[/info]", spinner="dots"):
-                    ok = build_pdf_rich(_companion_md(frames_dir + os.sep, saved_in=pdf_saved_in), base + ".pdf")
+                    ok = build_pdf_rich(_companion_md(frames_dir + os.sep), base + ".pdf")
                 if ok:
                     console.print(f"  {SYM_OK} PDF analisi visiva con i fotogrammi creato.")
         except Exception:
@@ -672,7 +684,7 @@ def load_visual_notes(out_root: str, title: str) -> list[dict]:
     """
     safe = _safe_filename(title)
     for sub in (VISUAL_SUBDIR, NOMI_VECCHI[VISUAL_SUBDIR]):
-        p = os.path.join(out_root, safe, sub, f"{safe}_visivo.json")
+        p = os.path.join(cartella_video(out_root, title), sub, f"{safe}_visivo.json")
         if os.path.isfile(_lp(p)):
             try:
                 with open(_lp(p), "r", encoding="utf-8") as f:

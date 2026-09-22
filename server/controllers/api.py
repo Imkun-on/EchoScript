@@ -28,10 +28,8 @@ Perche' il motore si importa tardi
 """
 from __future__ import annotations
 
-import datetime as _dt
 import io
 import os
-import re
 import sys
 import threading
 import traceback
@@ -45,7 +43,7 @@ from server.config import settings
 from server.services import estimate
 from server.sources import metadata
 from server.state import checkpoints, jobs
-from server.utils import media, ollama
+from server.utils import contract, media, ollama
 
 
 # I due nomi del motore restano vuoti finche' non li riempie carica_motore().
@@ -318,100 +316,53 @@ def riempi_cataloghi() -> None:
 
 
 
-def _ora() -> str:
-    """L'ora attuale, come si scrive in testa a una riga di diario.
-
-    Serve a poter dire, rileggendo, quanto e' durato ogni passaggio. Su un
-    lavoro lungo e' spesso l'unica informazione da cui si capisce dove il
-    programma ha impiegato tutto quel tempo.
-    """
-    return _dt.datetime.now().strftime('%H:%M:%S')
-
-
 class Diario(io.TextIOBase):
-    """Raccoglie cio' che i moduli stampano e lo manda alla pagina, riga a riga.
+    """Dove finisce cio' che i moduli stampano, adesso che non lo legge piu' nessuno.
 
-    ``transcriber.py`` parla con Rich, che colora scrivendo sequenze di
-    controllo ANSI: dentro una pagina web quelle diventerebbero caratteri strani
-    in mezzo al testo, quindi si tolgono. Il colore lo rimette la pagina, in
-    base a cosa dice la riga.
+    Com'era
+        Queste righe finivano in un riquadro a schermo, il diario, accanto alla
+        sorgente. Il riquadro e' stato tolto: raccontava lo stesso lavoro che la
+        barra di avanzamento racconta meglio, e quando qualcosa andava storto la
+        riga che contava finiva sepolta sotto centinaia di righe di servizio.
+        Adesso un guasto apre una finestra che dice su quale video, di che cosa
+        si tratta e qual era il testo tecnico.
 
-    Chi ci scrive davvero, e chi no
-        Nessuno dei due moduli chiamati da qui stampa qualcosa. ``engine.py``
-        non contiene una sola print, e le funzioni di ``transcriber.py`` che
-        usa (``download_audio``, ``split_audio``, ``transcribe_local``) sono le
-        versioni nude, quelle che riferiscono solo col callback; a stampare con
-        Rich sono i wrapper ``_cli_*``, che chiama soltanto la riga di comando.
+    Perche' la classe non e' sparita insieme al riquadro
+        Perche' il suo altro mestiere, quello silenzioso, serve ancora. Il
+        programma installato gira SENZA console (``console=False`` nello spec di
+        PyInstaller): l'uscita standard, li', non e' un terminale, e una print
+        arrivata nel momento sbagliato diventa un guasto vero in un punto che
+        con quella print non c'entra niente.
 
-        Quindi su questa strada il dirottamento di ``stdout`` cattura solo i
-        guasti, cioe' il traceback di ``_in_thread``, e il diario lo riempie
-        ``Avanzamento``, che racconta le fasi mentre la barra le mostra. Questa
-        classe resta perche' il giorno in cui uno di quei moduli avesse
-        qualcosa da dire, lo direbbe nel posto giusto senza modifiche.
+        Questa classe e' il paracadute. Prende quello che qualcuno stampa, dice
+        di averlo preso, e non ne fa niente.
+
+    Chi ci scrive davvero
+        Quasi nessuno, ed e' il motivo per cui buttare via va bene. ``engine.py``
+        non contiene una sola print, e le funzioni di trascrizione chiamate da
+        qui sono le versioni nude, quelle che riferiscono solo col callback; a
+        stampare con Rich sono i wrapper ``_cli_*``, che chiama soltanto la riga
+        di comando. Quello che passava di qui erano le fasi, che si vedono nella
+        barra, e i guasti, che adesso arrivano nella finestra dell'errore con il
+        loro traceback allegato.
     """
-
-    _ANSI = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
-
-    def __init__(self):
-        """Prepara il pezzo di riga avanzato e il lucchetto che lo protegge.
-
-        Il pezzo avanzato serve perche' chi stampa non lo fa mai una riga
-        intera alla volta: manda un po' di caratteri, poi altri, e il fine riga
-        arriva quando arriva. Quello che avanza si tiene da parte fino al
-        pezzo successivo.
-
-        Il lucchetto perche' a stampare possono essere piu' thread insieme, e
-        senza, due righe finirebbero mescolate carattere per carattere.
-        """
-        self._resto = ''
-        self._lucchetto = threading.Lock()
 
     def write(self, s: str) -> int:      # type: ignore[override]
-        """Riceve quello che qualcuno ha stampato e ne ricava righe intere.
+        """Accetta quello che qualcuno ha stampato e lo lascia cadere.
 
-        Python chiama questo metodo ogni volta che qualcosa finisce sull'uscita
-        standard, con pezzi di lunghezza qualunque. Qui si accumulano finche'
-        non si trova un fine riga, e solo allora si manda la riga alla pagina.
-
-        Il motivo e' che il diario a schermo e' fatto di righe: mandare mezze
-        righe produrrebbe una cronologia spezzata in punti casuali.
+        Il numero restituito e' quanti caratteri si e' presi in carico, e va
+        restituito per davvero: chi stampa lo controlla, e un conto che non
+        torna lo fa riprovare all'infinito.
         """
-        if not s:
-            return 0
-        with self._lucchetto:
-            self._resto += s
-            while '\n' in self._resto:
-                riga, self._resto = self._resto.split('\n', 1)
-                self._manda(riga)
-        return len(s)
+        return len(s or '')
 
     def flush(self) -> None:
-        """Manda anche l'ultimo pezzo, pure se non finiva con un a capo.
+        """Non c'e' niente in sospeso da mandare, ma il metodo deve esistere.
 
-        Si chiama alla fine di un lavoro. Senza, l'ultima riga stampata da un
-        programma che non ha messo l'a capo resterebbe in sospeso per sempre, e
-        sarebbe proprio quella che dice com'e' finita.
+        Python lo chiama sull'uscita standard in momenti che non decidiamo noi,
+        per esempio alla chiusura del programma. Una classe che non ce l'ha
+        farebbe fallire quella chiamata.
         """
-        with self._lucchetto:
-            if self._resto:
-                self._manda(self._resto)
-                self._resto = ''
-
-    def _manda(self, grezza: str) -> None:
-        """Ripulisce una riga dai codici colore e la consegna alla pagina.
-
-        Rich colora scrivendo delle sequenze di controllo che un terminale
-        interpreta come «da qui in poi scrivi in verde». Dentro una pagina web
-        quelle sequenze non vogliono dire niente e si vedrebbero come caratteri
-        strani in mezzo al testo.
-
-        Il colore non si perde: la pagina lo rimette guardando cosa dice la
-        riga. Le righe vuote si buttano, perche' nel diario a schermo non
-        aggiungono niente.
-        """
-        testo = self._ANSI.sub('', grezza).rstrip()
-        if testo:
-            _verso_pagina('aggiungiRiga', testo)
 
 
 class Avanzamento:
@@ -449,41 +400,14 @@ class Avanzamento:
         """
         self.piano = piano
         self._massimo = 0.0
-        self._fase_detta: str | None = None
-        self._dettaglio_detto = ''
-
-    def _nome(self, fase: str) -> str:
-        """Il nome leggibile della fase, con lo stesso ripiego della pagina.
-
-        Una chiave assente tornerebbe come chiave, cioe' 'phase.pippo'
-        scritto in chiaro nel diario, mentre qui serve una frase.
-        """
-        chiave = 'phase.' + fase
-        return i18n.t(chiave if chiave in i18n.catalogo() else 'phase.default')
-
-    def _racconta(self, fase: str, dettaglio: str) -> None:
-        """Una riga di diario quando cambia qualcosa, e solo allora.
-
-        Il motore riferisce anche molte volte al secondo con lo stesso testo:
-        scriverle tutte farebbe un muro di righe identiche in cui non si legge
-        piu' niente, e il diario tiene solo le ultime quattrocento.
-        """
-        if fase != self._fase_detta:
-            self._fase_detta = fase
-            self._dettaglio_detto = ''
-            _verso_pagina('aggiungiRiga', f'{_ora()}  ▸ {self._nome(fase)}')
-        if dettaglio and dettaglio != self._dettaglio_detto:
-            self._dettaglio_detto = dettaglio
-            _verso_pagina('aggiungiRiga', f'{_ora()}     {dettaglio}')
 
     def riferisci(self, fase: str, corrente, totale, dettaglio: str = '') -> None:
-        """Il motore dice a che punto e'; qui diventa una barra e una riga.
+        """Il motore dice a che punto e'; qui diventa una barra.
 
         Traduce due cose diverse in una sola: quanto manca alla fine di QUESTA
         fase, e quanto pesa questa fase sul lavoro intero. Il motore sa solo la
         prima, perche' non ha idea di quante altre fasi siano previste.
         """
-        self._racconta(fase, dettaglio or '')
         if fase not in self.piano:
             # Una fase fuori piano (rara: il motore ne aggiunge una che non
             # avevamo previsto) muove il testo ma non la barra, che altrimenti
@@ -506,7 +430,6 @@ class Avanzamento:
         self._massimo = 1.0
         _verso_pagina('avanzaLavoro', self.piano[-1], len(self.piano) - 1,
                       len(self.piano), 1.0, '')
-        _verso_pagina('aggiungiRiga', f'{_ora()}  {i18n.t("log.done")}')
 
 
 def piano_fasi(motore: str, sorgente: str, opzioni: dict) -> list[str]:
@@ -1522,6 +1445,12 @@ class Api:
         lunga: un video gia' presente si salta senza spendere nulla; uno che
         fallisce non ferma gli altri; se Groq esaurisce i crediti ci si ferma li'
         I blocchi gia' fatti restano salvati e domani si riprende.
+
+        Le cartelle portano davanti il numero d'ordine della playlist, che e'
+        l'ordine in cui i video sono elencati su YouTube. Senza, aprendo la
+        cartella di un corso di trenta lezioni si trovano trenta titoli
+        ordinati alfabeticamente, e capire da dove si comincia vuol dire
+        tornare su YouTube a guardare la playlist.
         """
         playlist = self._p().playlist
         voci = playlist['items']
@@ -1531,7 +1460,12 @@ class Api:
 
         fatti: list[dict] = []
         saltati: list[str] = []
-        falliti: list[str] = []
+        # I falliti non sono piu' solo un titolo. Un elenco di titoli in fondo a
+        # un batch di trenta video dice che tre non sono riusciti e non dice
+        # perche': tre video privati e tre guasti di rete si leggono uguali,
+        # mentre nel primo caso non c'e' niente da fare e nel secondo basta
+        # rilanciare. Adesso ogni fallito si porta dietro la sua spiegazione.
+        falliti: list[dict] = []
         senza_crediti = False
 
         for numero, meta in enumerate(voci, 1):
@@ -1552,6 +1486,12 @@ class Api:
                 meta2, segmenti, etichetta, cliente = engine.transcribe_only(
                     meta.get('webpage_url') or '', opzioni,
                     on_progress=self._riferisci, resume=False)
+                # Il numero d'ordine va attaccato ai dati del video PRIMA di
+                # salvare, perche' meta2 arriva fresco da YouTube e di essere
+                # il quarto video di una playlist non ne sa niente. Da qui in
+                # poi se lo porta dietro, e lo ritrovano sia chi scrive la
+                # trascrizione sia chi scrive le note visive.
+                meta2['_num_playlist'] = text.numero_playlist(numero, len(voci))
                 fatti.append(engine.save_results(
                     meta2, segmenti, etichetta, opzioni, radice, cliente,
                     on_progress=self._riferisci))
@@ -1562,8 +1502,8 @@ class Api:
             except engine.RateLimitReached:
                 senza_crediti = True
                 break
-            except Exception:                          # noqa: BLE001
-                falliti.append(meta['title'])
+            except Exception as exc:                   # noqa: BLE001
+                falliti.append(self._scheda_errore(exc, meta['title']))
                 continue
 
         self._p().ultima_cartella = radice
@@ -1578,9 +1518,15 @@ class Api:
                 {'tono': 'attenzione', 'testo': i18n.t('playlist.res.failed', n=len(falliti))}
                 if falliti else None,
             ],
-            'voci': ([{'tono': 'ok', 'titolo': r.get('title', '?')} for r in fatti]
-                     + [{'tono': 'neutro', 'titolo': t} for t in saltati]
-                     + [{'tono': 'attenzione', 'titolo': t} for t in falliti]),
+            # I falliti portano con se' la causa e il testo tecnico, e vengono
+            # messi PER PRIMI: sono l'unica cosa di questo riepilogo su cui ci
+            # sia qualcosa da decidere, e in fondo a un elenco di trenta video
+            # riusciti non li leggerebbe nessuno.
+            'voci': ([{'tono': 'attenzione', 'titolo': f['video'],
+                       'causa': f['causa'], 'dettaglio': f['dettaglio']} for f in falliti]
+                     + [{'tono': 'ok', 'titolo': r.get('title', '?')} for r in fatti]
+                     + [{'tono': 'neutro', 'titolo': t} for t in saltati]),
+            'et_dettaglio': i18n.t('err.dettaglio'),
         })
 
     # ── Il risultato ─────────────────────────────────────────────────────────
@@ -1737,16 +1683,65 @@ class Api:
             except engine.RateLimitReached as exc:
                 self._crediti_finiti(exc)
             except engine.EngineError as exc:
-                _verso_pagina('erroreLavoro', str(exc))
+                _verso_pagina('erroreLavoro', self._scheda_errore(exc))
             except Exception as exc:                   # noqa: BLE001
-                _verso_pagina('aggiungiRiga', traceback.format_exc())
-                _verso_pagina('erroreLavoro', i18n.t('err.unexpected', e=exc))
+                # Un guasto che non era previsto: qui il dettaglio tecnico e' il
+                # traceback intero e non la sola frase dell'eccezione. Prima
+                # finiva nel diario, che non c'e' piu'; buttarlo via sarebbe
+                # stato togliere l'unica cosa da cui si capisce dove si e' rotto.
+                _verso_pagina('erroreLavoro',
+                              self._scheda_errore(exc, dettaglio=traceback.format_exc()))
             finally:
                 diario.flush()
                 _SMISTATORE.dimentica()
                 posto.occupato = False
 
         threading.Thread(target=guscio, daemon=True).start()
+
+    def _scheda_errore(self, exc, titolo_video: str | None = None,
+                       dettaglio: str | None = None) -> dict:
+        """Un errore messo in una forma che chi legge possa capire.
+
+        Le tre cose che servono, e perche' sono tre
+            Quale video, che cosa e' successo, e il testo tecnico. La prima
+            serve perche' in una playlist di trenta video «non e' riuscito» da
+            solo non dice niente. La seconda perche' «HTTP Error 403:
+            Forbidden» e' esatto e incomprensibile, e chi legge deve poter
+            capire se riprovare, aspettare o lasciar perdere. La terza perche'
+            il testo originale, per quanto oscuro, e' l'unica cosa che permette
+            di cercare in rete o di farsi aiutare, e cancellarlo sarebbe
+            togliere l'unico appiglio vero.
+
+            La spiegazione a parole non sostituisce il testo tecnico: gli sta
+            sopra. Chi vuole solo sapere se ha senso riprovare legge la prima
+            riga e si ferma, chi vuole capire davvero continua.
+
+        Il titolo, e perche' puo' arrivare da fuori
+            Di norma e' quello del video su cui si sta lavorando adesso. Ma in
+            una playlist il video fermo non e' quello della postazione, e' uno
+            dei trenta della lista: in quel caso chi chiama lo passa, e non lo
+            si va a indovinare.
+
+        Il dettaglio, quando e' piu' lungo della frase dell'eccezione
+            Per un guasto imprevisto chi chiama passa il traceback intero. La
+            frase da sola direbbe «KeyError: title», che non basta a capire
+            dove: la famiglia dell'errore si continua a leggere dalla frase,
+            perche' il traceback e' pieno di parole che porterebbero fuori
+            strada, ma quello che si mostra sotto e' il traceback.
+        """
+        messaggio = str(exc) or i18n.t('err.unknown')
+        famiglia = contract.classifica_errore(messaggio)
+        if titolo_video is None:
+            meta = self._p().meta
+            titolo_video = (meta or {}).get('title') or ''
+        return {
+            'titolo': i18n.t('err.title'),
+            'video': titolo_video,
+            'causa': i18n.t('err.causa.' + famiglia),
+            'dettaglio': dettaglio or messaggio,
+            'et_video': i18n.t('err.video'),
+            'et_dettaglio': i18n.t('err.dettaglio'),
+        }
 
     def _crediti_finiti(self, exc) -> None:
         """Groq ha esaurito i crediti: e' un'attesa, non un guasto.

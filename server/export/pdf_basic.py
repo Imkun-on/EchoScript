@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import re
 
+from server.export import document
 from server.utils.media import _is_local
 from server.utils.text import (
     _format_duration, _format_timestamp, _format_upload_date, _lp,
@@ -44,7 +45,7 @@ def _section_heading(sec: dict, with_timestamps: bool) -> str:
 
 def build_pdf(title: str, meta: dict, sections: list[dict], out_path: str,
               with_timestamps: bool = True, markdown: bool = False,
-              engine_label: str = "", saved_in: str | None = None) -> None:
+              engine_label: str = "") -> None:
     """Create a readable PDF, divided by chapters, with fpdf2 (no LaTeX).
 
     Uses Windows' Arial font (TrueType) to support accents and Unicode
@@ -52,8 +53,7 @@ def build_pdf(title: str, meta: dict, sections: list[dict], out_path: str,
     body text in paragraphs. Con 'markdown=True' (riassunto) il corpo interpreta
     il **grassetto** Markdown, così le parole chiave risaltano anche nel PDF.
     Aggiunge un SOMMARIO cliccabile in testa (link interni ai capitoli) e i
-    segnalibri/outline del PDF; NON stampa data, percorso o numero di pagina.
-    'saved_in' aggiunge la riga «Salvato in:» tra i metadati."""
+    segnalibri/outline del PDF; NON stampa data, percorso o numero di pagina."""
     from fpdf import FPDF                  # lazy import: needed only when exporting
     from fpdf.enums import XPos, YPos       # to bring the cursor back to the left after each cell
 
@@ -94,8 +94,6 @@ def build_pdf(title: str, meta: dict, sections: list[dict], out_path: str,
         cell(5, meta["webpage_url"])
     if engine_label:
         cell(5, f"Trascritto con: {engine_label}")
-    if saved_in:
-        cell(5, f"Salvato in: {saved_in}")
     pdf.ln(4)
 
     for sec in sections:
@@ -112,7 +110,12 @@ def build_pdf(title: str, meta: dict, sections: list[dict], out_path: str,
         pdf.ln(1)
         if sec["text"]:
             pdf.set_font("Doc", "", 11)
-            cell(6, sec["text"], md=markdown)
+            # Il riassunto e' scritto in markdown, ma fpdf2 sa disegnare solo il
+            # grassetto: i cancelletti dei sottotitoli e i tre apici del codice
+            # finirebbero stampati tali e quali. Si tolgono prima, tenendo il
+            # grassetto che invece la libreria disegna davvero.
+            corpo = document.appiattisci_markdown(sec["text"], grassetto=True) if markdown else sec["text"]
+            cell(6, corpo, md=markdown)
         pdf.ln(3)
 
     pdf.output(_lp(out_path))

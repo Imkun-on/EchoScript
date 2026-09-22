@@ -2,8 +2,8 @@
  *
  * Cosa sono
  *     «Locale» e «Cloud» sono due scrivanie vere e indipendenti. Ognuna ha la
- *     sua sorgente, i suoi interruttori, il suo avanzamento e il suo diario, e
- *     in tutte e due puo' esserci un lavoro in corso nello stesso momento:
+ *     sua sorgente, i suoi interruttori e il suo avanzamento, e in tutte e due
+ *     puo' esserci un lavoro in corso nello stesso momento:
  *     mentre Groq trascrive sui suoi server, questo computer puo' trascriverne
  *     un altro per conto suo. Sono due mestieri che non si contendono niente,
  *     e farli aspettare a turno sarebbe stato buttare via meta' del tempo.
@@ -11,7 +11,7 @@
  * Com'era prima, e perche' non andava
  *     C'era una postazione sola, che traslocava nella stanza aperta. Avviando
  *     una trascrizione in nuvola e passando poi in locale, in locale ci si
- *     trovava davanti l'avanzamento, il diario e la sorgente di quello che
+ *     trovava davanti l'avanzamento e la sorgente di quello che
  *     stava girando di la'. Le due stanze erano due porte sulla stessa
  *     scrivania, e la seconda non si poteva usare finche' la prima era
  *     occupata.
