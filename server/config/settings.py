@@ -10,10 +10,9 @@ Da dove arrivano i valori
     valori scritti a mano: ogni riga dice sia quanto vale di suo, sia con quale
     nome la si puo' cambiare da fuori.
 
-I SETTE CHE CAMBIANO MENTRE IL PROGRAMMA GIRA
-    ``GROQ_MODEL``, ``GROQ_SUMMARY_MODEL``, ``GROQ_VISION_MODEL``,
-    ``OLLAMA_MODEL``, ``OLLAMA_TRANSLATE_MODEL``, ``OLLAMA_VISION_MODEL``,
-    ``LANGUAGE``.
+I CINQUE CHE CAMBIANO MENTRE IL PROGRAMMA GIRA
+    ``GROQ_MODEL``, ``GROQ_SUMMARY_MODEL``, ``OLLAMA_MODEL``,
+    ``OLLAMA_TRANSLATE_MODEL``, ``LANGUAGE``.
 
     Questi non sono costanti: li riscrivono l'interfaccia e il direttore
     d'orchestra ogni volta che si sceglie qualcosa nei menu.
@@ -263,26 +262,6 @@ OLLAMA_NUM_CTX = _env_int("ECHOSCRIPT_OLLAMA_NUM_CTX", 8192)
 # i parziali vengono uniti (map-reduce), per non sforare il contesto del modello.
 SUMMARY_MAX_CHARS = _env_int("ECHOSCRIPT_SUMMARY_MAX_CHARS", 12000)
 
-# --- ANALISI VISIVA (vision): trascrive ciò che si VEDE nel video ---
-# Oltre all'audio, EchoScript può "guardare" i fotogrammi di un video (slide,
-# codice a schermo, formule, grafici, diagrammi) ed estrarne il contenuto con un
-# modello multimodale, per arricchire il riassunto. È OPZIONALE (chiesto a ogni
-# run su sorgenti video) e usa gli stessi due motori del resto del programma:
-#   • Groq (cloud): modello vision di GroqCloud (veloce; consuma crediti/frame).
-#   • Ollama (locale): modello vision via Ollama (100% offline; richiede
-#     `ollama pull <modello-vision>`, es. llama3.2-vision).
-# Estensioni con traccia VIDEO (da cui ha senso estrarre i fotogrammi).
-VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
-# Modello vision su Groq. Default: qwen3.6-27b (multimodale; sostituto del
-# deprecato llama-4-scout). Cambiabile da .env.
-GROQ_VISION_MODEL = _env_str("ECHOSCRIPT_GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
-# Modelli vision Groq selezionabili, come sopra per il testo.
-GROQ_VISION_MODELS = {
-    "1": ("qwen/qwen3.6-27b", "multimodale, buon OCR (default)"),
-}
-# Modello vision su Ollama (locale). Scaricalo con: ollama pull llama3.2-vision
-OLLAMA_VISION_MODEL = _env_str("ECHOSCRIPT_OLLAMA_VISION_MODEL", "llama3.2-vision")
-
 # --- Modelli Ollama proposti nei pannelli di scelta (CLI e GUI) ---
 # Numero -> (nome modello, RAM indicativa richiesta, descrizione). Il pannello
 # segna quelli GIÀ scaricati (letti da /api/tags) e accetta anche un nome
@@ -295,35 +274,6 @@ OLLAMA_TEXT_MODELS = {
     "4": ("gemma3:12b",  "~10 GB", "ottimo multilingua (16 GB di RAM)"),
     "5": ("gpt-oss:20b", "~16 GB", "qualità vicina al cloud (24 GB+ o GPU)"),
 }
-# VISION = analisi visiva dei fotogrammi in locale.
-OLLAMA_VISION_MODELS = {
-    "1": ("qwen2.5vl:3b",    "~4 GB",  "leggero, ottimo OCR: ideale con 8 GB di RAM"),
-    "2": ("gemma3:4b",       "~4 GB",  "multimodale leggero, buon multilingua"),
-    "3": ("qwen2.5vl:7b",    "~7 GB",  "buon equilibrio (12-16 GB di RAM)"),
-    "4": ("llama3.2-vision", "~9 GB",  "default storico (16 GB di RAM)"),
-    "5": ("qwen2.5vl:32b",   "~24 GB", "qualità vicina al cloud (32 GB+ o GPU)"),
-}
-# Soglia di "cambio scena" (0..1) per scegliere i fotogrammi: più è bassa, più
-# fotogrammi (e più analisi/costo). 0.4 cattura bene i cambi di slide/codice.
-VISION_SCENE_THRESHOLD = float(_env_str("ECHOSCRIPT_VISION_SCENE", "0.4"))
-# Larghezza (px) a cui ridimensionare i fotogrammi prima dell'analisi (riduce
-# token/banda; l'altezza resta proporzionale).
-VISION_FRAME_WIDTH = _env_int("ECHOSCRIPT_VISION_WIDTH", 1280)
-# Tetto massimo di fotogrammi analizzati per video (controlla costo/tempo): se il
-# rilevamento scene ne trova di più, vengono campionati uniformemente.
-VISION_MAX_FRAMES = _env_int("ECHOSCRIPT_VISION_MAX_FRAMES", 60)
-# Se il rilevamento scene trova troppi pochi fotogrammi (video con un'unica
-# inquadratura fissa), si campiona a intervalli regolari ogni N secondi.
-VISION_FALLBACK_INTERVAL = _env_int("ECHOSCRIPT_VISION_INTERVAL", 45)
-# Distanza minima (secondi) tra due fotogrammi chiave. Il rilevamento scene di
-# ffmpeg spesso scatta DUE volte sulla stessa transizione (un frame a metà stacco
-# + uno assestato), generando coppie ravvicinate ridondanti: spesso una è lo
-# shot largo "dove non si vede nulla". Raggruppiamo i frame entro questa finestra
-# e teniamo l'ULTIMO del gruppo (lo stato assestato, più leggibile). 0 disattiva.
-VISION_MIN_GAP = _env_int("ECHOSCRIPT_VISION_MIN_GAP", 8)
-# Risoluzione massima del video scaricato da YouTube per l'analisi visiva (più
-# bassa = download più leggero). Usata solo quando l'analisi è attiva.
-VISION_YT_MAX_HEIGHT = _env_int("ECHOSCRIPT_VISION_YT_HEIGHT", 720)
 
 # --- PDF "ricco" (formule LaTeX + mappe Mermaid DISEGNATE) ---
 # Il PDF base (fpdf2) è testo semplice: mostra le formule come `$...$` grezzo e i
@@ -337,12 +287,15 @@ RICH_PDF = _env_bool("ECHOSCRIPT_RICH_PDF", True)
 # Percorso a un browser Chromium specifico (altrimenti rilevato in automatico).
 BROWSER_PATH = _env_opt("ECHOSCRIPT_BROWSER")
 
-# Mappa concettuale (diagramma Mermaid) nel riassunto dei video con analisi
-# visiva. Disattivata di default: spesso è banale/ridondante rispetto al testo e
-# i diagrammi generati da un LLM sono la parte meno affidabile. Codice e formule
-# restano comunque (sono il vero valore). Attivala con ECHOSCRIPT_CONCEPT_MAP=1.
-CONCEPT_MAP = _env_bool("ECHOSCRIPT_CONCEPT_MAP", False)
-# Mostra i FOTOGRAMMI anche dentro il riassunto (oltre che nel documento di
-# analisi visiva), accanto al testo, raggruppati per sezione/timestamp. Costo
-# Groq aggiuntivo: ZERO (i frame esistono già). Disattiva con ECHOSCRIPT_SUMMARY_FRAMES=0.
-SUMMARY_FRAMES = _env_bool("ECHOSCRIPT_SUMMARY_FRAMES", True)
+# Grafici nel riassunto: quando il parlato contiene numeri confrontabili (una
+# statistica, una distribuzione, una serie nel tempo, una funzione calcolata in
+# qualche punto) il modello puo' aggiungere un grafico Mermaid (a barre, a linee
+# o a torta), che il PDF disegna davvero. Mai con dati inventati: solo quelli
+# detti o calcolabili esattamente dal testo. E' il valore di partenza; la
+# finestra lo cambia lavoro per lavoro. Disattiva con ECHOSCRIPT_SUMMARY_CHARTS=0.
+SUMMARY_CHARTS = _env_bool("ECHOSCRIPT_SUMMARY_CHARTS", True)
+# Commenti dentro i blocchi di codice del riassunto: brevi, nella sintassi del
+# linguaggio, sulle righe che non si spiegano da sole. Il codice resta quello
+# detto: si aggiungono commenti, non istruzioni. Disattiva con
+# ECHOSCRIPT_SUMMARY_CODE_COMMENTS=0.
+SUMMARY_CODE_COMMENTS = _env_bool("ECHOSCRIPT_SUMMARY_CODE_COMMENTS", True)

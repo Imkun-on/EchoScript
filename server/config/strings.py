@@ -24,11 +24,16 @@ TESTI: dict[str, str] = {
 
     'menu.locale':      'Locale',
     'menu.cloud':       'Cloud',
+    'menu.storico':     'Storico',
 
     'sez.locale.title': 'Trascrivi sul tuo computer',
     'sez.locale.desc':  "Quello che parte da qui gira su questa macchina, con i modelli "
                         "scelti qui sotto: niente rete, niente chiave, niente crediti. "
                         "L'audio non esce di casa.",
+    'sez.storico.title': 'Storico dei lavori',
+    'sez.storico.desc': "Tutto quello che è stato trascritto: con quale motore, quando, "
+                        "quanto è costato e se è finito. Una riga per video e per "
+                        "sezione; riprendere un lavoro aggiorna la sua riga.",
     'sez.cloud.title':  'Trascrivi sui server Groq',
     'sez.cloud.desc':   "Quello che parte da qui gira in nuvola, con i modelli scelti "
                         "qui sotto e a carico della chiave. Molto più veloce, ma "
@@ -78,11 +83,13 @@ TESTI: dict[str, str] = {
     'src.local':        'Un file sul computer',
     'src.input.url':    'Link del video o della playlist',
     'src.input.file':   'File audio o video',
-    'src.load':         "Guarda cos'è",
-    'src.load.loading': 'Leggo…',
+    # Il link si legge da solo mentre lo si incolla: niente bottone, solo una
+    # riga sotto la casella che dice che cosa sta succedendo.
+    'src.load.hint':    "Incolla il link: l'anteprima si apre da sola in una finestra.",
+    'src.load.loading': 'Leggo il link…',
     'src.load.playlist': 'Leggo i video della playlist…',
     'src.panel':        'Sorgente',
-    'src.empty':        "Incolla un link e premi «Guarda cos'è», oppure scegli un file.",
+    'src.empty':        "Incolla un link (l'anteprima si apre da sola) oppure scegli un file.",
     'src.start':        'Trascrivi',
     'src.busy':         'Elaborazione in corso…',
 
@@ -94,11 +101,21 @@ TESTI: dict[str, str] = {
     'opt.summary':      'Crea riassunto',
     'opt.summary.desc': 'Riassunto pulito per sezione in /riassunti, con lo stesso '
                         'modello di testo della traduzione.',
-    'opt.visual':       'Analisi visiva del video',
-    'opt.visual.desc':  '«Guarda» i fotogrammi ed estrae codice, formule e grafici a '
-                        'schermo, nel riassunto più un documento con i frame. Più '
-                        'lento; usa il modello vision del motore scelto (Ollama in '
-                        'locale, Groq in nuvola: più crediti).',
+    'opt.charts':       'Grafici nel riassunto',
+    'opt.charts.desc':  'Quando il video dà numeri confrontabili (statistiche, '
+                        'percentuali, andamenti, valori di una funzione) il riassunto '
+                        'aggiunge un grafico, disegnato nel PDF. Mai con dati inventati.',
+    'opt.comments':     'Commenti nei blocchi di codice',
+    'opt.comments.desc': 'Il codice riportato nel riassunto arriva con brevi commenti '
+                         'sulle righe che non si spiegano da sole. Il codice non cambia.',
+    # Le due aggiunte valgono solo per il riassunto: spento quello, restano
+    # grigie, e questa riga dice perche'.
+    'opt.needsummary':  'Serve «Crea riassunto»',
+    'opt.detail':       'Quanto dettagliato',
+    'opt.detail.esteso': 'Esteso · ricco e completo (come sempre)',
+    'opt.detail.normale': 'Normale · circa un terzo del parlato',
+    'opt.detail.breve': 'Breve · solo i concetti principali',
+    'opt.detail.punti': 'Punti chiave · un elenco per il ripasso',
 
     # ── Scheda della sorgente ────────────────────────────────────────────────
     'info.channel':     'Canale',
@@ -118,6 +135,23 @@ TESTI: dict[str, str] = {
     'confirm.title':    'Conferma il video',
     'confirm.question': 'È questo il video che vuoi trascrivere?',
     'confirm.ok':       '✓ Video confermato: {titolo}',
+    # Quando c'e' gia' una sorgente, o un lavoro in corso, l'anteprima chiede
+    # dove mettere il video nuovo.
+    'confirm.question.more': 'C\'è già «{titolo}». Lo sostituisco con questo, o lo '
+                             'metto in coda e lo trascrivo dopo?',
+    'confirm.question.busy': 'Questa sezione sta già lavorando: lo metto in coda, e '
+                             'parte appena ha finito.',
+    'confirm.replace':  'Sostituisci',
+    'confirm.queue':    'Aggiungi alla coda',
+    'confirm.queued':   '✓ In coda: {titolo} · {n} in attesa',
+
+    # ── La coda ──────────────────────────────────────────────────────────────
+    'coda.title':       'In coda',
+    'coda.group':       '{n} video in fila',
+    'coda.group.question': 'Li trascrivo uno dopo l\'altro, in quest\'ordine?',
+    'coda.remove':      'Togli dalla coda',
+    'coda.res.title':   'Coda completata',
+    'coda.card':        '{n} in coda',
 
     'playlist.title':   'Conferma la playlist',
     'playlist.question': 'Trascrivo tutti i {n} video di questa playlist?',
@@ -151,18 +185,16 @@ TESTI: dict[str, str] = {
     'posti.altrove':    'C\'è qualcosa da vedere in «{stanza}»',
 
     'eng.local.hint':   'Tutto quello che serve gira qui, senza rete e senza chiave: '
-                        'trascrizione (Whisper), riassunto e traduzione (Ollama), '
-                        'analisi visiva (Ollama vision). ✓ = già scaricato in Ollama.',
+                        'trascrizione (Whisper), riassunto e traduzione (Ollama). '
+                        '✓ = già scaricato in Ollama.',
     'eng.model.whisper': 'Trascrizione (Whisper)',
     'eng.model.ollama':  'Riassunto e traduzione (Ollama)',
-    'eng.model.vision':  'Analisi visiva (Ollama vision)',
 
-    'eng.groq.hint':    'Gli stessi tre mestieri, ma in nuvola e a carico della '
-                        'chiave: trascrizione, riassunto e traduzione, analisi '
-                        'visiva. Niente di tutto questo tocca il tuo computer.',
+    'eng.groq.hint':    'Gli stessi due mestieri, ma in nuvola e a carico della '
+                        'chiave: trascrizione, riassunto e traduzione. Niente di '
+                        'tutto questo tocca il tuo computer.',
     'eng.model.groq':   'Trascrizione (Whisper su Groq)',
     'eng.model.groqtesto': 'Riassunto e traduzione (Groq)',
-    'eng.model.groqvista': 'Analisi visiva (Groq vision)',
     'eng.key':          'Chiave API',
     'eng.key.load':     'Carica da file .txt',
     'eng.key.get':      'Ottieni una chiave →',
@@ -183,12 +215,11 @@ TESTI: dict[str, str] = {
     'groqm.whisper-large-v3-turbo': 'whisper-large-v3-turbo: $0.04/ora · veloce, consigliato',
     'groqm.whisper-large-v3': 'whisper-large-v3: $0.111/ora · più accurato',
 
-    # Modelli Groq di testo (riassunto e traduzione) e di analisi visiva, per
-    # numero di catalogo, come per Ollama: cosi' aggiungerne uno resta una riga
-    # in transcriber.py e una qui.
+    # Modelli Groq di testo (riassunto e traduzione), per numero di catalogo,
+    # come per Ollama: cosi' aggiungerne uno resta una riga nelle impostazioni
+    # e una qui.
     'gm.text.1':        'qualità piena, consigliato',
     'gm.text.2':        'più economico e rapido',
-    'gm.vis.1':         'multimodale, ottimo con slide e codice',
 
     # Descrizioni dei modelli Ollama, per numero di catalogo.
     'om.text.1':        'leggero e moderno · ideale con 8 GB di RAM',
@@ -196,11 +227,6 @@ TESTI: dict[str, str] = {
     'om.text.3':        'più accurato · 12-16 GB di RAM',
     'om.text.4':        'ottimo multilingua · 16 GB di RAM',
     'om.text.5':        'qualità vicina al cloud · 24 GB+ o GPU',
-    'om.vis.1':         'leggero, ottimo OCR · ideale con 8 GB di RAM',
-    'om.vis.2':         'multimodale leggero, buon multilingua',
-    'om.vis.3':         'buon equilibrio · 12-16 GB di RAM',
-    'om.vis.4':         'default storico · 16 GB di RAM',
-    'om.vis.5':         'qualità vicina al cloud · 32 GB+ o GPU',
 
     # ── Stima prima di partire ───────────────────────────────────────────────
     'est.cost':         'Costo stimato ~${c} · Groq {m}',
@@ -209,15 +235,39 @@ TESTI: dict[str, str] = {
     # ── Cosa manca per partire ───────────────────────────────────────────────
     'warn.title':       'Manca qualcosa',
     'warn.prefix':      'Per avviare la trascrizione serve:',
-    'warn.key':         'caricare la chiave API Groq (sezione «Motore»)',
-    'warn.src.yt':      'caricare e confermare il video YouTube',
+    'warn.key':         'caricare la chiave API Groq (riquadro «Chiave API»)',
+    'warn.src.yt':      'incollare il link del video YouTube e confermarlo',
     'warn.src.local':   'scegliere un file audio',
+    # Ollama si controlla prima di partire: il riassunto viene dopo la
+    # trascrizione, e scoprire a meta' che era spento vuol dire aver aspettato
+    # per niente.
+    'warn.ollama.off':  'avviare Ollama: non risponde su {host}. Aprilo dal menu Start '
+                        '(o lancia «ollama serve»), oppure spegni «Traduci» e «Crea riassunto»',
+    'warn.ollama.model': 'scaricare il modello {m}: lancia «ollama pull {m}» in un terminale',
+
+    # ── I crediti prima di partire ──────────────────────────────────────────
+    'credest.title':    'I crediti potrebbero non bastare',
+    'credest.desc':     'Oggi a Groq restano {restano} di audio, e da trascrivere ce '
+                        'n\'è {serve}.',
+    'credest.when':     'I crediti si ricaricano alle {ora}.',
+    'credest.go':       'Parti lo stesso',
+    'credest.go.desc':  'La trascrizione si fermerà dopo circa {restano} e verrà '
+                        'salvata: la riprendi più tardi o la finisci in locale.',
 
     # ── Avanzamento ──────────────────────────────────────────────────────────
     'prog.title':       'Cosa sta facendo',
     'prog.steps':       'Passaggi',
     'prog.plan':        'Piano:',
     'prog.phase':       'Fase {i}/{n}',
+    # Il tempo che manca alla fine della fase, stimato da quanto ci ha messo
+    # finora. Compare solo quando la stima ha senso.
+    'prog.eta.min':     'circa {n} min',
+    'prog.eta.sec':     'meno di un minuto',
+    'prog.cancel':      'Annulla',
+    'prog.cancelling':  'Mi fermo al prossimo punto sicuro…',
+    # Una fase che non sa quanto le manca (carica un modello, legge le
+    # informazioni): al posto del numero, questo.
+    'prog.working':     'in corso',
     'phase.default':    'In corso…',
     'phase.info':       'Lettura informazioni',
     'phase.download':   'Download audio',
@@ -225,7 +275,6 @@ TESTI: dict[str, str] = {
     'phase.transcribe': 'Trascrizione',
     'phase.translate':  'Traduzione in italiano',
     'phase.summarize':  'Riassunto',
-    'phase.visual':     'Analisi visiva',
     'phase.export':     'Esportazione / salvataggio',
 
     'engine.groq':      'Groq (cloud) · {model}',
@@ -234,7 +283,6 @@ TESTI: dict[str, str] = {
                          'diversi minuti.',
 
     'ov.base':          "trascrivo l'audio",
-    'ov.visual':        'analizzo i fotogrammi del video',
     'ov.translate':     'lo traduco in italiano',
     'ov.summary':       'creo il riassunto',
     'ov.save':          'salvo i file (PDF incluso)',
@@ -246,7 +294,6 @@ TESTI: dict[str, str] = {
     'narr.export':      'Salvo la trascrizione e genero il PDF…',
     'narr.translate':   'Traduco il testo, sezione per sezione…',
     'narr.summarize':   'Creo un riassunto pulito per ogni sezione…',
-    'narr.visual':      'Guardo i fotogrammi ed estraggo codice, formule e grafici…',
 
     # ── Video già trascritto / ripresa ──────────────────────────────────────
     'already.title':    'Questo video c\'è già',
@@ -272,14 +319,35 @@ TESTI: dict[str, str] = {
 
     # ── Crediti esauriti ─────────────────────────────────────────────────────
     'rate.title':       'Crediti Groq esauriti',
-    'rate.msg':         'I crediti gratuiti Groq per oggi sono terminati.\n\n'
+    'rate.msg':         'I crediti gratuiti Groq sono terminati.\n\n'
                         'La trascrizione si è fermata a {fatto} su {totale} ed è '
                         'stata salvata automaticamente.\n\n'
-                        'Quando i crediti torneranno disponibili (di norma domani) '
+                        'Quando i crediti torneranno disponibili ({quando}) '
                         'riapri questo video e scegli «Riprendi». In alternativa puoi '
                         'completarlo subito sul tuo computer.',
+    'rate.when.at':     'alle {ora}',
+    'rate.when.tomorrow': 'di norma domani',
+    # I crediti risultavano gia' finiti prima di cominciare: il lavoro non
+    # parte nemmeno, invece di partire e restare fermo ad aspettare.
+    'rate.before':      'I crediti Groq risultano già esauriti: tornano alle {ora}.\n\n'
+                        'Il lavoro non è partito, così non resta fermo ad aspettare. '
+                        'Riprova a quell\'ora, oppure trascrivi dalla sezione «Locale», '
+                        'che non usa crediti.',
     'rate.later':       'Riprendo domani',
+    'rate.ok':          'Ho capito',
     'rate.local':       'Continua ora in locale',
+
+    'cancel.title':     'Lavoro annullato',
+    'cancel.msg':       'Il lavoro si è fermato e quello che era già fatto è salvato.\n\n'
+                        'Riaprendo lo stesso video trovi «Riprendi», che riparte da '
+                        'dove ti eri fermato invece che da capo.',
+    'cancel.batch':     'Annullato: i video già finiti sono salvati, quello in corso '
+                        'si può riprendere.',
+
+    # Le notifiche di Windows a fine lavoro, quando si stava guardando altro.
+    'notify.done.title': 'EchoScript: lavoro completato',
+    'notify.batch.title': 'EchoScript: coda completata',
+    'notify.error.title': 'EchoScript: il lavoro si è fermato',
 
     'sumlocal.title':   'Riassunto interrotto',
     'sumlocal.msg':     'I crediti Groq sono terminati durante il riassunto, che è '
@@ -301,9 +369,41 @@ TESTI: dict[str, str] = {
     'res.credits':      'Crediti Groq',
     'res.credits.used': 'Audio trascritto',
     'res.credits.left': 'Audio residuo oggi',
-    'res.visual':       'Analisi visiva',
-    'res.visual.count': '{n} fotogrammi con contenuto estratto',
-    'res.visual.open':  'Apri l\'analisi visiva',
+    'res.read':         'Leggi',
+    'read.riassunto':   'il riassunto',
+    'read.traduzione':  'la traduzione',
+    'read.trascrizione': 'la trascrizione',
+
+    # ── Storico ─────────────────────────────────────────────────────────────
+    'hist.search':      'Cerca per titolo, canale o playlist…',
+    'hist.count':       '{n} lavori',
+    'hist.empty':       'Ancora niente: i lavori compariranno qui man mano che li fai.',
+    'hist.col.url':     'URL',
+    'hist.col.channel': 'Canale',
+    'hist.col.title':   'Video',
+    'hist.col.duration': 'Durata',
+    'hist.col.credits': 'Crediti usati',
+    'hist.col.kind':    'Tipo',
+    'hist.col.state':   'Stato',
+    'hist.col.mode':    'Modo',
+    'hist.col.date':    'Data',
+    'hist.single':      'Video singolo',
+    'hist.playlist':    'Playlist',
+    'hist.file':        'Audio registrato',
+    'hist.done':        'Completo',
+    'hist.half':        'A metà',
+    'hist.min':         '{n} min',
+    'hist.lessmin':     '< 1 min',
+    'hist.free':        '0 · gratis',
+    'hist.audio':       '{n} s audio',
+    'hist.tokens':      '{n} token',
+    'hist.read':        'Leggi',
+    'hist.folder':      'Cartella',
+    'hist.remove':      'Togli dallo storico',
+    'hist.refresh':     'Aggiorna',
+    'hist.gone':        'Questa riga non c\'è più nello storico.',
+    'hist.nodoc':       'Il documento non si trova più: forse la cartella è stata '
+                        'spostata o cancellata.',
 
     # ── Crediti (sezione dedicata) ───────────────────────────────────────────
 
@@ -311,12 +411,16 @@ TESTI: dict[str, str] = {
     'err.title':        'Errore',
     'err.unknown':      'Errore sconosciuto.',
     'err.no_url':       'Incolla prima il link del video.',
+    'src.pasted':       'Link incollato in «{stanza}»: apro l\'anteprima…',
     'err.no_file':      'Scegli prima un file audio.',
     'err.unexpected':   'Errore imprevisto: {e}',
 
     # Il video su cui il lavoro si e' fermato, e l'etichetta del testo tecnico.
     'err.video':        'Video:',
     'err.dettaglio':    'Dettaglio tecnico',
+    # Quando a fermarsi e' la lettura del link, prima ancora di cominciare.
+    'err.src.title':    'Non riesco a leggere il link',
+    'err.link':         'Link:',
 
     # ── Di cosa si tratta ────────────────────────────────────────────────────
     #
@@ -358,6 +462,11 @@ TESTI: dict[str, str] = {
     'err.causa.modelloLocale':
         'Il modello sul tuo computer non è partito. Controlla che Ollama sia '
         'in esecuzione e che il modello scelto sia già stato scaricato.',
+    'err.causa.programma':
+        'È un difetto del programma, non un problema tuo: il link, la rete e '
+        'le impostazioni non c\'entrano, e riprovare non lo risolve. Segnalalo '
+        'copiando il dettaglio tecnico qui sotto, che dice esattamente dove si '
+        'è rotto.',
     'err.causa.sconosciuto':
         'Il lavoro si è fermato per un motivo che il programma non sa '
         'riconoscere. Il testo qui sotto è quello originale dell\'errore.',

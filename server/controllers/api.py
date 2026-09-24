@@ -30,9 +30,12 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import sys
 import threading
+import time
 import traceback
+from datetime import datetime
 
 import webview
 
@@ -42,8 +45,12 @@ from server.controllers import bridge
 from server.config import settings
 from server.services import estimate
 from server.sources import metadata
-from server.state import checkpoints, jobs
-from server.utils import contract, media, ollama
+from server.state import checkpoints, credits, jobs, storico
+from server.utils import contract, media, notifica, ollama
+
+# Sotto questa durata un lavoro finito non manda la notifica di Windows: la
+# finestra la si sta ancora guardando, e un avviso sarebbe solo rumore.
+_NOTIFICA_DOPO = 20.0
 
 
 # I due nomi del motore restano vuoti finche' non li riempie carica_motore().
@@ -275,14 +282,14 @@ _DLG_APRI = getattr(getattr(webview, 'FileDialog', None), 'OPEN',
 # Sono divisi in due gruppi che non si mescolano mai (quelli che girano sul
 # computer e quelli che girano sui server Groq), perche' e' cosi' che sono
 # divise le due sezioni dell'interfaccia: scegliere il motore sceglie il gruppo
-# intero, trascrizione e riassunto e analisi visiva insieme.
+# intero, trascrizione e riassunto insieme.
 
 # I modelli di trascrizione sono scritti qui perche' sono un elenco fisso e
 # corto, che non dipende da niente.
 _WHISPER = ('base', 'small', 'medium', 'large-v3', 'large-v3-turbo')
 _GROQ = ('whisper-large-v3-turbo', 'whisper-large-v3')
 
-# Gli altri quattro invece si costruiscono leggendo i cataloghi di
+# Gli altri due invece si costruiscono leggendo i cataloghi di
 # transcriber.py, che al momento in cui si legge questo file non e' ancora
 # stato importato: nascono vuoti e li riempie riempi_cataloghi(), chiamata
 # da carica_motore() appena il motore c'e'.
@@ -291,28 +298,22 @@ _GROQ = ('whisper-large-v3-turbo', 'whisper-large-v3')
 # alla pagina, e la pagina non puo' chiedere niente finche' non ha ricevuto
 # risposta da avvio(), che a sua volta aspetta il motore.
 _OLLAMA_TESTO: list = []
-_OLLAMA_VISTA: list = []
 _GROQ_TESTO: list = []
-_GROQ_VISTA: list = []
 
 
 def riempi_cataloghi() -> None:
     """Costruisce gli elenchi dei modelli leggendoli dalle impostazioni.
 
     Ogni voce si porta dietro la chiave del testo che la descrive
-    ('om.text.2', 'gm.vis.1'). E' il motivo per cui aggiungere un modello resta
+    ('om.text.2', 'gm.text.1'). E' il motivo per cui aggiungere un modello resta
     una riga nelle impostazioni e una nel file dei testi: il codice che disegna
     i menu non sa quali modelli esistono, li chiede.
     """
-    global _OLLAMA_TESTO, _OLLAMA_VISTA, _GROQ_TESTO, _GROQ_VISTA
+    global _OLLAMA_TESTO, _GROQ_TESTO
     _OLLAMA_TESTO = [(nome, ram, f'om.text.{k}')
                      for k, (nome, ram, _d) in settings.OLLAMA_TEXT_MODELS.items()]
-    _OLLAMA_VISTA = [(nome, ram, f'om.vis.{k}')
-                     for k, (nome, ram, _d) in settings.OLLAMA_VISION_MODELS.items()]
     _GROQ_TESTO = [(nome, f'gm.text.{k}')
                    for k, (nome, _d) in settings.GROQ_TEXT_MODELS.items()]
-    _GROQ_VISTA = [(nome, f'gm.vis.{k}')
-                   for k, (nome, _d) in settings.GROQ_VISION_MODELS.items()]
 
 
 
@@ -366,68 +367,62 @@ class Diario(io.TextIOBase):
 
 
 class Avanzamento:
-    """Traduce le fasi del motore in una barra che non torna mai indietro.
+    """Traduce le fasi del motore in una barra per fase, che non torna indietro.
 
     Il motore riferisce ``(fase, corrente, totale, dettaglio)`` e non sa quante
     fasi ci siano in tutto: quello lo decide chi avvia il lavoro, in base a cosa
     e' stato chiesto (un file locale non si scarica, solo Groq divide in
     blocchi, traduzione e riassunto ci sono solo se spuntati).
 
-    Ogni fase occupa una fetta ``[i/n, (i+1)/n]`` del totale, e dentro la fetta
-    si interpola col progresso vero. Quando una fase non sa quanto manca, per
-    esempio mentre carica un modello, la barra resta all'inizio della sua
-    fetta invece di
-    girare a vuoto: cosi' quando si muove vuol dire qualcosa.
+    Perche' la percentuale e' della fase e non del lavoro intero
+        Prima la barra misurava il lavoro intero, con ogni fase a occupare una
+        fetta uguale. Era un numero che non voleva dire niente: il download di
+        un minuto e la trascrizione di mezz'ora pesavano uguale, e la barra
+        correva al 40% in pochi secondi per poi restare li' ferma per venti
+        minuti. Adesso ogni fase ha la sua percentuale, da 0 a 100, e l'elenco
+        dei passaggi dice a che punto si e' del lavoro intero.
 
-    Scrive anche il diario, dagli stessi dati. Non e' una ripetizione: la barra
-    dice dove siamo adesso e cancella cio' che c'era prima, il diario tiene
-    l'ordine e le ore. Su un lavoro lungo (novanta secondi fermi a caricare un
-    modello) o su una playlist di cinquanta video, quello che e' gia' successo
-    conta quanto quello che sta succedendo.
+    Quando una fase non sa quanto manca, per esempio mentre carica un modello,
+    la percentuale non si inventa: si manda None, e la pagina mostra una barra
+    che scorre invece di un numero fermo.
     """
 
     def __init__(self, piano: list[str]):
         """Parte da un piano: l'elenco delle fasi previste per questo lavoro.
 
-        Serve a poter dire un numero vero invece di far girare una barra a
-        vuoto. Sapendo che le fasi sono cinque e che si e' alla terza, la barra
-        puo' dire sessanta per cento e non mentire.
-
-        Il massimo raggiunto si tiene da parte perche' la barra non deve MAI
-        tornare indietro: una fase che riferisce un valore piu' basso della
-        precedente capita, e vedere una barra che arretra fa pensare che
-        qualcosa sia andato storto anche quando va tutto bene.
+        Si tiene la fase in corso e il massimo raggiunto DENTRO quella fase,
+        perche' la barra non deve MAI tornare indietro: una fase che riferisce
+        un valore piu' basso di prima capita (un «sto aspettando» dopo un «meta'
+        fatto»), e vedere una barra che arretra fa pensare che qualcosa sia
+        andato storto anche quando va tutto bene.
         """
         self.piano = piano
-        self._massimo = 0.0
+        self._fase = -1
+        self._quota: float | None = None
 
     def riferisci(self, fase: str, corrente, totale, dettaglio: str = '') -> None:
-        """Il motore dice a che punto e'; qui diventa una barra.
-
-        Traduce due cose diverse in una sola: quanto manca alla fine di QUESTA
-        fase, e quanto pesa questa fase sul lavoro intero. Il motore sa solo la
-        prima, perche' non ha idea di quante altre fasi siano previste.
-        """
-        if fase not in self.piano:
-            # Una fase fuori piano (rara: il motore ne aggiunge una che non
-            # avevamo previsto) muove il testo ma non la barra, che altrimenti
-            # salterebbe a un punto sbagliato.
+        """Il motore dice a che punto e'; qui diventa la percentuale della fase."""
+        if fase not in self.piano or self.piano.index(fase) < self._fase:
+            # Una fase fuori piano, o una gia' conclusa che torna a parlare:
+            # muove il testo ma non la barra, che altrimenti salterebbe
+            # indietro.
             _verso_pagina('avanzaLavoro', fase, -1, len(self.piano), None, dettaglio or '')
             return
         i = self.piano.index(fase)
-        dentro = (max(0.0, min(1.0, corrente / totale))
-                  if (corrente is not None and totale) else 0.0)
-        globale = max((i + dentro) / len(self.piano), self._massimo)
-        self._massimo = globale
-        _verso_pagina('avanzaLavoro', fase, i, len(self.piano), globale, dettaglio or '')
+        if i != self._fase:
+            self._fase, self._quota = i, None
+        if corrente is not None and totale:
+            quota = max(0.0, min(1.0, corrente / totale))
+            self._quota = max(quota, self._quota or 0.0)
+        _verso_pagina('avanzaLavoro', fase, i, len(self.piano), self._quota, dettaglio or '')
 
     def concludi(self) -> None:
-        """Il lavoro e' finito: la barra arriva in fondo e ci resta.
+        """Il lavoro e' finito: l'ultima fase arriva in fondo e ci resta.
 
         Serve perche' l'ultima fase riferisce l'ultimo blocco e poi tace: senza
         questa la barra si fermerebbe al 96% con tutto gia' scritto sul disco.
         """
-        self._massimo = 1.0
+        self._fase, self._quota = len(self.piano) - 1, 1.0
         _verso_pagina('avanzaLavoro', self.piano[-1], len(self.piano) - 1,
                       len(self.piano), 1.0, '')
 
@@ -437,8 +432,8 @@ def piano_fasi(motore: str, sorgente: str, opzioni: dict) -> list[str]:
 
     Dipende dal contesto: un file locale non si scarica, solo Groq divide
     l'audio in blocchi, e le fasi facoltative si aggiungono solo se richieste,
-    nello stesso ordine in cui il motore le esegue (visiva, traduzione,
-    riassunto), che e' dopo aver scritto la trascrizione.
+    nello stesso ordine in cui il motore le esegue (traduzione, riassunto),
+    che e' dopo aver scritto la trascrizione.
     """
     piano = ['info']
     if sorgente != 'local':
@@ -446,8 +441,6 @@ def piano_fasi(motore: str, sorgente: str, opzioni: dict) -> list[str]:
     if motore == 'groq':
         piano.append('prepare')
     piano += ['transcribe', 'export']
-    if opzioni.get('visual'):
-        piano.append('visual')
     if opzioni.get('translate'):
         piano.append('translate')
     if opzioni.get('summarize'):
@@ -501,6 +494,41 @@ class Posto:
         self.meta: dict | None = None
         self.src: str = ''
         self.playlist: dict | None = None
+        # 'youtube' o 'local': di che tipo e' la sorgente confermata.
+        self.kind: str | None = None
+
+        # Il link appena letto, con l'anteprima aperta, non ancora confermato.
+        # Sta a parte perche' leggere un link nuovo non deve cancellare quello
+        # gia' confermato: se l'anteprima viene rifiutata, resta tutto com'era.
+        self.proposta: dict | None = None
+
+        # I video che aspettano il loro turno. Ognuno sa gia' dove andra' a
+        # finire e, se viene da una playlist, con che numero. Si puo' riempire
+        # anche mentre si lavora: il giro della coda la rilegge a ogni video.
+        self.coda: list[dict] = []
+
+        # Il video del lavoro in corso (o dell'ultimo), fissato alla partenza.
+        # Non e' la sorgente: quella si puo' cambiare mentre si lavora, e le vie
+        # d'uscita come «Continua in locale» devono parlare di QUESTO video.
+        self.corrente: dict | None = None
+        self.corrente_src: str = ''
+        self.corrente_kind: str | None = None
+
+        # Il segnale di «Annulla», nuovo per ogni lavoro (vedi _in_thread).
+        self.annulla = threading.Event()
+
+        # Titolo e testo della notifica di fine lavoro, scritti da chi lavora.
+        self.fine: tuple[str, str] | None = None
+
+        # I documenti dell'ultimo risultato che il bottone «Leggi» puo' aprire.
+        self.documenti: set[str] = set()
+
+        # Quante letture di link sono state chieste qui. Adesso un link si
+        # legge da solo mentre lo si incolla o lo si scrive, quindi puo'
+        # capitare che ne partano due di fila: vale solo l'ultima, e una
+        # lettura vecchia che arriva in ritardo viene lasciata cadere invece di
+        # aprire l'anteprima del link di prima.
+        self.letture = 0
 
         # Dove sono finiti i file dell'ultimo lavoro FINITO QUI. Servono al
         # bottone «Apri la cartella» del riepilogo, che e' il riepilogo di
@@ -508,7 +536,6 @@ class Posto:
         # finendo due lavori a poca distanza, il bottone del primo avrebbe
         # aperto la cartella del secondo.
         self.ultima_cartella = ''
-        self.ultima_visiva = ''
 
         # Gli interruttori degli output. Stanno qui e non fra le scelte
         # generali perche' si sceglie video per video: si puo' volere il
@@ -606,17 +633,20 @@ class Api:
         self.scelte = {
             'motore':  prefs.get('motore', 'local'),
             'sorgente': prefs.get('sorgente', 'youtube'),
-            # I tre modelli locali...
+            # I due modelli locali...
             'whisper': prefs.get('whisper', 'small'),
             'ollama':  prefs.get('ollama', settings.OLLAMA_MODEL),
-            'vision':  prefs.get('vision', settings.OLLAMA_VISION_MODEL),
-            # ...e i tre di Groq, che fanno gli stessi tre mestieri sui server.
+            # ...e i due di Groq, che fanno gli stessi due mestieri sui server.
             'groq':    prefs.get('groq', _GROQ[0]),
             'groq_testo': prefs.get('groq_testo', settings.GROQ_SUMMARY_MODEL),
-            'groq_vista': prefs.get('groq_vista', settings.GROQ_VISION_MODEL),
             'translate': bool(prefs.get('translate', False)),
             'summarize': bool(prefs.get('summarize', False)),
-            'visual':    bool(prefs.get('visual', False)),
+            # Quanto lungo il riassunto: esteso (quello di sempre), normale,
+            # breve, o soltanto i punti chiave.
+            'dettaglio': prefs.get('dettaglio', 'esteso'),
+            # Le due aggiunte al riassunto: grafici e commenti nel codice.
+            'grafici':   bool(prefs.get('grafici', settings.SUMMARY_CHARTS)),
+            'commenti':  bool(prefs.get('commenti', settings.SUMMARY_CODE_COMMENTS)),
         }
         # Le due postazioni nascono uguali, con le abitudini dell'ultima
         # volta. Da qui in poi divergono appena qualcuno tocca un interruttore
@@ -681,10 +711,9 @@ class Api:
         """
         settings.GROQ_MODEL = self.scelte['groq']
         settings.GROQ_SUMMARY_MODEL = self.scelte['groq_testo']
-        settings.GROQ_VISION_MODEL = self.scelte['groq_vista']
 
     def _modelli(self) -> dict:
-        """I sei cataloghi di modelli, gia' con etichetta e descrizione.
+        """I quattro cataloghi di modelli, gia' con etichetta e descrizione.
 
         Le etichette le compone Python perche' e' Python a sapere quali modelli
         esistono e quali sono gia' scaricati; la pagina si limita a riempirne
@@ -709,13 +738,10 @@ class Api:
         # cominciasse il giudizio sul modello.
         ollama = [{'valore': n, 'nome': f'{n}{spunta(n)} ({ram})', 'chiave': k}
                   for n, ram, k in _OLLAMA_TESTO]
-        vision = [{'valore': n, 'nome': f'{n}{spunta(n)} ({ram})', 'chiave': k}
-                  for n, ram, k in _OLLAMA_VISTA]
 
         # I modelli Groq non si scaricano, quindi niente ✓ e niente memoria: il
         # nome basta a se stesso, la descrizione dice il resto.
         groq_testo = [{'valore': n, 'nome': n, 'chiave': k} for n, k in _GROQ_TESTO]
-        groq_vista = [{'valore': n, 'nome': n, 'chiave': k} for n, k in _GROQ_VISTA]
 
         # Un modello fuori catalogo, imposto da .env oppure scelto quando il
         # catalogo era diverso, va comunque offerto: altrimenti il valore
@@ -724,9 +750,7 @@ class Api:
         # cambiando di nascosto il modello scelto. Si guarda la scelta salvata,
         # non il valore del modulo: sono la stessa cosa solo al primo avvio.
         for elenco, corrente in ((ollama, self.scelte['ollama']),
-                                 (vision, self.scelte['vision']),
-                                 (groq_testo, self.scelte['groq_testo']),
-                                 (groq_vista, self.scelte['groq_vista'])):
+                                 (groq_testo, self.scelte['groq_testo'])):
             if corrente and corrente not in [v['valore'] for v in elenco]:
                 # Nome nudo: non si puo' sapere da dove venga (.env o una scelta
                 # di ieri), e scriverlo sbagliato sarebbe peggio che tacere.
@@ -736,17 +760,17 @@ class Api:
             # Sul computer.
             'whisper': [{'valore': m, 'nome': '', 'chiave': f'model.{m}'} for m in _WHISPER],
             'ollama':  ollama,
-            'vision':  vision,
             # Sui server Groq.
             'groq':    [{'valore': m, 'nome': '', 'chiave': f'groqm.{m}'} for m in _GROQ],
             'groq_testo': groq_testo,
-            'groq_vista': groq_vista,
         }
 
     # Le scelte che appartengono al singolo lavoro e non al programma. Sono
-    # quelle che le due postazioni tengono separate: la sorgente e i tre
-    # interruttori degli output.
-    SCELTE_DEL_POSTO = ('sorgente', 'translate', 'summarize', 'visual')
+    # quelle che le due postazioni tengono separate: la sorgente e gli
+    # interruttori degli output (traduzione, riassunto, e le due aggiunte al
+    # riassunto).
+    SCELTE_DEL_POSTO = ('sorgente', 'translate', 'summarize', 'grafici', 'commenti',
+                        'dettaglio')
 
     def imposta(self, valori: dict, dove: str = 'locale') -> dict:
         """Registra una scelta dell'interfaccia e la ricorda per la volta dopo.
@@ -757,12 +781,12 @@ class Api:
         ricalcola qui e torna gia' pronta.
 
         Le scelte finiscono in due posti diversi
-            La sorgente e i tre interruttori vanno nella postazione da cui
+            La sorgente e gli interruttori vanno nella postazione da cui
             arrivano, perche' li' devono restare: spuntare «riassunto» in
             «Cloud» non deve spuntarlo anche di la'.
 
-            I modelli vanno nelle scelte generali, perche' le sei tendine sono
-            sei e non dodici.
+            I modelli vanno nelle scelte generali, perche' le quattro tendine
+            sono quattro e non otto.
 
             Su disco si salva comunque tutto, e vale come punto di partenza al
             prossimo avvio: e' un valore ricordato, non un valore condiviso.
@@ -855,87 +879,167 @@ class Api:
         return ''
 
     # ── Leggere la sorgente ──────────────────────────────────────────────────
+    #
+    # Una sorgente passa per due stati. Prima e' una PROPOSTA: il link e' stato
+    # letto e l'anteprima e' aperta, ma nessuno ha ancora detto di si'. Poi,
+    # confermata, diventa la sorgente della postazione, oppure va in CODA dietro
+    # a quella che c'e' gia' (o dietro al lavoro che sta girando).
+    #
+    # Tenere separata la proposta e' cio' che permette di leggere un link nuovo
+    # senza perdere quello gia' confermato: prima la lettura scriveva
+    # direttamente la sorgente, e annullare un'anteprima cancellava anche il
+    # video di prima.
+
+    @staticmethod
+    def _link_in(testo: str) -> list[str]:
+        """Gli indirizzi dentro un testo incollato: uno, o tanti (uno per riga).
+
+        Se non c'e' niente che sembri un indirizzo si prova col testo intero:
+        sara' yt-dlp a dire che cosa non va, con il suo messaggio.
+        """
+        testo = (testo or '').strip()
+        trovati = re.findall(r'https?://\S+', testo)
+        visti: list[str] = []
+        for u in trovati:
+            if u not in visti:
+                visti.append(u)
+        return visti or ([testo] if testo else [])
 
     def carica_info(self, testo: str, dove: str = 'locale') -> dict:
-        """Guarda cosa c'e' dietro un link, senza scaricare nulla.
+        """Guarda cosa c'e' dietro uno o piu' link, senza scaricare nulla.
 
         Torna subito: il lavoro vero avviene in un thread, e la pagina viene
         avvisata a cose fatte. Cosi' la finestra non si congela nei secondi in
         cui yt-dlp interroga YouTube, che su una playlist lunga sono parecchi,
         perche' ogni video va letto uno per uno.
+
+        Si puo' chiamare anche mentre la postazione lavora: e' il modo di
+        preparare il prossimo video, che andra' in coda.
         """
         # Prima riga di tutte: da quale delle due stanze arriva questo
         # clic. Da qui in poi lo sa il thread, e ogni cosa che questo
         # metodo dira' alla pagina partira' gia' con l'indirizzo giusto.
         self._entra(dove)
-        if self._p().occupato:
-            return {'ok': False, 'errore': i18n.t('err.busy')}
-        testo = (testo or '').strip()
-        if not testo:
+        indirizzi = self._link_in(testo)
+        if not indirizzi:
             return {'ok': False, 'errore': i18n.t('err.no_url')}
+        # Ogni lettura prende un numero: se nel frattempo ne parte un'altra,
+        # questa arrivera' vecchia e verra' lasciata cadere.
+        self._p().letture += 1
         # Anche questo thread nasce senza sapere dov'e', quindi l'indirizzo
         # glielo si passa come primo argomento. Vale per la lettura di un link
         # esattamente come per un lavoro: la conferma che ne esce deve aprirsi
         # nella stanza in cui qualcuno ha incollato quel link, non nell'altra.
-        threading.Thread(target=self._carica_davvero, args=(testo, _qui()),
+        threading.Thread(target=self._carica_davvero,
+                         args=(indirizzi, (testo or '').strip(), _qui(),
+                               self._p().letture),
                          daemon=True).start()
         return {'ok': True, 'avviato': True}
 
-    def _carica_davvero(self, url: str, dove: str = 'locale') -> None:
-        """Legge cosa c'e' dietro un link, in un thread a parte.
+    def _leggi_link(self, url: str) -> tuple[list[dict], dict | None]:
+        """Le voci di lavoro dietro un link: un video, o tutti quelli di una playlist.
+
+        Ogni voce sa gia' dove andra' a finire (la radice dei risultati, o la
+        cartella della playlist) e con che numero, cosi' in coda non si perde
+        niente di quello che una playlist confermata da sola avrebbe avuto.
+        Il secondo valore e' la playlist, quando c'e'.
+        """
+        playlist = engine.get_playlist_info(url) if 'list=' in url else None
+        if playlist and playlist['count'] >= 1:
+            _verso_pagina('caricamentoPlaylist')
+            letti = []
+            for indirizzo in playlist['entries']:
+                try:
+                    letti.append(engine.get_video_info(indirizzo))
+                except Exception:                      # noqa: BLE001, S112
+                    pass
+            if not letti:
+                return [], None
+            nome = playlist.get('title') or playlist.get('channel') or 'playlist'
+            sottocartella = text._safe_filename(nome)
+            radice = os.path.join(RISULTATI, sottocartella)
+            voci = [{'meta': m, 'src': m.get('webpage_url') or '', 'kind': 'youtube',
+                     'radice': radice, 'num': text.numero_playlist(i, len(letti)),
+                     'playlist': nome} for i, m in enumerate(letti, 1)]
+            info = {'title': playlist.get('title'), 'channel': playlist.get('channel'),
+                    'subdir': sottocartella, 'items': letti}
+            return voci, info
+        meta = engine.get_video_info(url)
+        return [{'meta': meta, 'src': url, 'kind': 'youtube', 'radice': RISULTATI,
+                 'num': None, 'playlist': ''}], None
+
+    def _carica_davvero(self, indirizzi: list[str], testo: str, dove: str = 'locale',
+                        numero: int = 0) -> None:
+        """Legge cosa c'e' dietro i link, in un thread a parte.
 
         Sta in un thread perche' su una playlist lunga yt-dlp interroga YouTube
         un video per volta, e sono parecchi secondi. Farlo nel thread della
         finestra la bloccherebbe: niente si muove, niente risponde, e sembra
         piantato.
 
-        Prima si guarda se e' una playlist, perche' un link di playlist
-        contiene anche un video e trattandolo come singolo si prenderebbe solo
-        quello, senza dire niente degli altri quarantanove.
+        Il risultato e' una proposta, non ancora la sorgente: l'anteprima
+        chiede se confermarla, sostituire quella che c'e' o metterla in coda.
         """
         _DOVE.dove = dove
+        ultima = lambda: numero == self._p().letture       # noqa: E731
         try:
-            playlist = engine.get_playlist_info(url) if 'list=' in url else None
-            if playlist and playlist['count'] >= 1:
-                self._carica_playlist(url, playlist)
+            voci: list[dict] = []
+            playlist = None
+            for url in indirizzi:
+                trovate, info = self._leggi_link(url)
+                voci += trovate
+                if len(indirizzi) == 1:
+                    playlist = info
+            if not ultima():
                 return
-            meta = engine.get_video_info(url)
-            self._p().meta, self._p().src, self._p().playlist = meta, url, None
-            _verso_pagina('chiediConferma', self._scheda_video(meta))
+            if not voci:
+                _verso_pagina('erroreSorgente', {
+                    'titolo': i18n.t('err.src.title'), 'video': testo,
+                    'causa': i18n.t('playlist.none'), 'dettaglio': '',
+                    'et_video': i18n.t('err.link'), 'et_dettaglio': i18n.t('err.dettaglio'),
+                    'url': testo})
+                return
+            self._p().proposta = {'voci': voci, 'playlist': playlist,
+                                  'url': indirizzi[0] if len(indirizzi) == 1 else ''}
+            if playlist:
+                scheda = self._scheda_playlist(playlist)
+            elif len(voci) == 1:
+                scheda = self._scheda_video(voci[0]['meta'])
+            else:
+                scheda = self._scheda_gruppo(voci)
+            _verso_pagina('chiediConferma', self._con_contesto(scheda, testo))
         except Exception as exc:                       # noqa: BLE001
-            _verso_pagina('erroreSorgente', str(exc))
+            if ultima():
+                # Non una riga che sparisce dopo sette secondi, ma la stessa
+                # finestra dei lavori caduti: di che cosa si tratta, e sotto il
+                # testo tecnico. «_lang_name() takes 1 positional argument but
+                # 2 were given» e' arrivato cosi' a chi usava il programma, e
+                # non c'era modo di capire che non era colpa sua.
+                scheda = self._scheda_errore(exc, titolo_video=testo,
+                                             dettaglio=self._dettaglio(exc))
+                scheda.update({'url': testo, 'titolo': i18n.t('err.src.title'),
+                               'et_video': i18n.t('err.link')})
+                _verso_pagina('erroreSorgente', scheda)
 
-    def _carica_playlist(self, url: str, playlist: dict) -> None:
-        """Legge i metadati di ogni video della playlist, saltando i non disponibili.
+    def _con_contesto(self, scheda: dict, url: str) -> dict:
+        """La scheda dell'anteprima, con quello che serve a scegliere i bottoni.
 
-        Un video privato o rimosso non deve far fallire l'intera lettura: se ne
-        salta uno, non si perde la playlist. La pagina intanto vede la riga
-        "leggo i video…", perche' su una lista lunga qui si sta parecchio.
+        Se la postazione ha gia' una sorgente, o sta lavorando, l'anteprima non
+        puo' limitarsi a «Conferma»: deve chiedere se sostituire o mettere in
+        coda.
         """
-        _verso_pagina('caricamentoPlaylist')
-        voci = []
-        for indirizzo in playlist['entries']:
-            try:
-                voci.append(engine.get_video_info(indirizzo))
-            except Exception:                          # noqa: BLE001, S112
-                pass
-        if not voci:
-            _verso_pagina('erroreSorgente', i18n.t('playlist.none'))
-            return
-        sottocartella = text._safe_filename(
-            playlist.get('title') or playlist.get('channel') or 'playlist')
-        self._p().playlist = {'title': playlist.get('title'),
-                          'channel': playlist.get('channel'),
-                          'subdir': sottocartella, 'items': voci}
-        self._p().meta, self._p().src = voci[0], url
-        _verso_pagina('chiediConferma', self._scheda_playlist(self._p().playlist))
+        posto = self._p()
+        scheda.update({'url': url, 'ha_sorgente': bool(posto.meta),
+                       'lavora': posto.occupato, 'in_coda': len(posto.coda)})
+        return scheda
 
     def scegli_file(self, dove: str = 'locale') -> dict:
         """Apre il selettore di file del sistema per un audio o un video.
 
         I formati accettati sono esattamente quelli che accetta la riga di
         comando: il filtro si costruisce da ``settings.AUDIO_EXTENSIONS``, cosi'
-        aggiungerne uno vale per tutt'e due senza toccare questo file.
+        aggiungerne uno vale per tutt'e due senza toccare questo file. Il file
+        scelto diventa una proposta, come un link letto.
         """
         # Prima riga di tutte: da quale delle due stanze arriva questo
         # clic. Da qui in poi lo sa il thread, e ogni cosa che questo
@@ -953,23 +1057,89 @@ class Api:
 
         percorso = scelti[0]
         meta = metadata.local_file_meta(percorso)
-        self._p().meta, self._p().src, self._p().playlist = meta, percorso, None
-        return {'ok': True, 'scheda': self._scheda_file(meta, percorso)}
+        self._p().proposta = {'voci': [{'meta': meta, 'src': percorso, 'kind': 'local',
+                                        'radice': RISULTATI, 'num': None, 'playlist': ''}],
+                              'playlist': None, 'url': ''}
+        return {'ok': True, 'scheda': self._con_contesto(self._scheda_file(meta, percorso), '')}
 
-    def dimentica(self, dove: str = 'locale') -> dict:
-        """La sorgente non vale piu': l'URL e' cambiato, o si e' annullata.
+    def conferma(self, modo: str = 'sostituisci', dove: str = 'locale') -> dict:
+        """La proposta diventa la sorgente, oppure va in coda.
 
-        Serve perche' una conferma vecchia non deve restare valida per un link
-        nuovo: sarebbe il modo piu' facile di trascrivere il video sbagliato,
-        che con Groq costa anche crediti.
+        ``sostituisci`` la fa diventare la sorgente della postazione (i link in
+        piu', se ne erano stati incollati tanti, vanno in coda dietro di lei);
+        ``coda`` la mette in fondo alla coda. Mentre la postazione lavora vale
+        sempre la seconda: sostituire il video che sta girando non ha senso.
+        """
+        self._entra(dove)
+        posto = self._p()
+        proposta, posto.proposta = posto.proposta, None
+        if not proposta:
+            return {'ok': False, 'errore': i18n.t('err.no_url')}
+        voci = proposta['voci']
+        if modo == 'coda' or posto.occupato:
+            posto.coda.extend(voci)
+            return {'ok': True, 'coda': self._elenco_coda(), 'scheda': None}
+        if proposta.get('playlist'):
+            posto.playlist = proposta['playlist']
+            posto.meta, posto.src, posto.kind = voci[0]['meta'], proposta['url'], 'youtube'
+            scheda = self._scheda_playlist(posto.playlist)
+        else:
+            primo = voci[0]
+            posto.meta, posto.src, posto.kind = primo['meta'], primo['src'], primo['kind']
+            posto.playlist = None
+            posto.coda.extend(voci[1:])
+            scheda = (self._scheda_file(primo['meta'], primo['src']) if primo['kind'] == 'local'
+                      else self._scheda_video(primo['meta']))
+        return {'ok': True, 'coda': self._elenco_coda(), 'scheda': scheda}
+
+    def dimentica(self, cosa: str = 'tutto', dove: str = 'locale') -> dict:
+        """Lascia cadere la proposta, oppure tutto: sorgente, playlist e coda.
+
+        ``proposta`` e' l'anteprima rifiutata: la sorgente confermata resta dov'e'.
+        ``tutto`` e' il ricominciare da capo, per esempio cambiando tipo di
+        sorgente o premendo «Trascrivi un altro video».
         """
         # Prima riga di tutte: da quale delle due stanze arriva questo
         # clic. Da qui in poi lo sa il thread, e ogni cosa che questo
         # metodo dira' alla pagina partira' gia' con l'indirizzo giusto.
         self._entra(dove)
-        self._p().meta = self._p().playlist = None
-        self._p().src = ''
-        return {'ok': True}
+        posto = self._p()
+        posto.proposta = None
+        if cosa == 'tutto':
+            posto.meta = posto.playlist = posto.kind = None
+            posto.src = ''
+            if not posto.occupato:
+                posto.coda = []
+        return {'ok': True, 'coda': self._elenco_coda()}
+
+    def togli_dalla_coda(self, indice: int, dove: str = 'locale') -> dict:
+        """Toglie un video dalla coda, prima che il suo turno arrivi."""
+        self._entra(dove)
+        coda = self._p().coda
+        if 0 <= int(indice) < len(coda):
+            coda.pop(int(indice))
+        return {'ok': True, 'coda': self._elenco_coda()}
+
+    def _elenco_coda(self) -> list[dict]:
+        """La coda come la mostra la pagina: titolo, durata e playlist."""
+        return [{'titolo': v['meta'].get('title') or '?',
+                 'durata': text._format_duration(v['meta'].get('duration')),
+                 'playlist': v.get('playlist') or ''} for v in self._p().coda]
+
+    def _scheda_gruppo(self, voci: list[dict]) -> dict:
+        """L'anteprima di tanti link incollati insieme: vanno in fila."""
+        totale = sum((v['meta'].get('duration') or 0) for v in voci)
+        return {
+            'tipo': 'gruppo',
+            'titolo': i18n.t('coda.group', n=len(voci)),
+            'miniatura': voci[0]['meta'].get('thumbnail') or '',
+            'righe': [{'chiave': 'info.videos', 'valore': str(len(voci))},
+                      {'chiave': 'info.duration', 'valore': text._format_duration(totale)}],
+            'stima': self._stima({'duration': totale}),
+            'voci': [{'titolo': v['meta'].get('title') or '?',
+                      'durata': text._format_duration(v['meta'].get('duration'))}
+                     for v in voci],
+        }
 
     # ── Le schede della sorgente ─────────────────────────────────────────────
 
@@ -1088,8 +1258,8 @@ class Api:
 
         Da dove vengono i valori, che non e' piu' un posto solo
             I modelli vengono dalle scelte generali, perche' sono gli stessi da
-            qualunque stanza li si guardi: le sei tendine esistono in un
-            esemplare ciascuna, tre per il computer e tre per Groq.
+            qualunque stanza li si guardi: le quattro tendine esistono in un
+            esemplare ciascuna, due per il computer e due per Groq.
 
             Il motore e gli interruttori vengono invece dalla postazione. Il
             motore perche' ADESSO e' la stanza: lavorare in «Cloud» vuol dire
@@ -1105,56 +1275,99 @@ class Api:
             'backend': motore,
             'model': self.scelte['whisper'],
             'ollama_model': self.scelte['ollama'],
-            'ollama_vision_model': self.scelte['vision'],
             'groq_model': self.scelte['groq'],
             'groq_summary_model': self.scelte['groq_testo'],
-            'groq_vision_model': self.scelte['groq_vista'],
             'api_key': self._chiave if motore == 'groq' else '',
             'export': True,
-            'source_kind': opz.get('sorgente', 'youtube'),
+            # Il tipo della sorgente confermata vince sul menu: il menu si puo'
+            # cambiare dopo aver confermato un file, e il file resta un file.
+            'source_kind': posto.kind or opz.get('sorgente', 'youtube'),
             # I nomi delle cartelle seguono la lingua dell'interfaccia.
             'translate': bool(opz.get('translate')),
             'summarize': bool(opz.get('summarize')),
-            'visual': bool(opz.get('visual')),
+            'charts': bool(opz.get('grafici')),
+            'code_comments': bool(opz.get('commenti')),
+            'summary_detail': opz.get('dettaglio') or 'esteso',
         }
 
-    def prepara(self, dove: str = 'locale') -> dict:
+    def _problemi_ollama(self, serve_traduzione: bool = True) -> list[str]:
+        """Che cosa manca perche' Ollama possa riassumere e tradurre, adesso.
+
+        Si chiede PRIMA di partire, e non e' pignoleria: il riassunto viene
+        dopo la trascrizione, e scoprire che Ollama e' spento dopo mezz'ora di
+        trascrizione vuol dire tornare al computer e trovare solo meta' del
+        lavoro. Ogni voce dice anche che cosa fare, col comando esatto.
+        """
+        presenti = ollama._ollama_installed_models(timeout=3)
+        if presenti is None:
+            return [i18n.t('warn.ollama.off', host=settings.OLLAMA_HOST)]
+        modelli = [self.scelte['ollama']]
+        a_parte = os.environ.get('ECHOSCRIPT_OLLAMA_TRANSLATE_MODEL', '').strip()
+        if serve_traduzione and a_parte and a_parte not in modelli:
+            modelli.append(a_parte)
+        return [i18n.t('warn.ollama.model', m=m) for m in modelli
+                if not ollama._ollama_has_model(m, presenti)]
+
+    def _durata_in_attesa(self) -> float:
+        """Quanto audio c'e' da trascrivere in tutto: sorgente, playlist e coda."""
+        posto = self._p()
+        if posto.playlist:
+            totale = sum((m.get('duration') or 0) for m in posto.playlist['items'])
+        else:
+            totale = (posto.meta or {}).get('duration') or 0
+        return totale + sum((v['meta'].get('duration') or 0) for v in posto.coda)
+
+    def prepara(self, salta_crediti: bool = False, dove: str = 'locale') -> dict:
         """Cosa succede se si preme «Trascrivi», prima di spendere qualcosa.
 
-        Tre risposte possibili, e nessuna avvia niente da sola:
+        Le risposte possibili, e nessuna avvia niente da sola:
 
-          manca    non ci sono i presupposti (chiave, sorgente): l'elenco di
-                   cosa manca, che la pagina mostra in una finestra;
+          manca    non ci sono i presupposti (chiave, sorgente, Ollama acceso
+                   col modello scaricato): l'elenco di cosa manca, con il
+                   comando da lanciare quando c'e';
+          crediti  in «Cloud», l'audio da trascrivere e' piu' di quello che
+                   Groq lascia ancora oggi: si dice dove si fermera', e si
+                   chiede se partire lo stesso;
           gia      il video e' gia' nella cartella dei risultati: si offre di
                    rifarlo, riprenderlo, o riusarlo per traduzione/riassunto;
           ripresa  esiste un parziale: si offre di continuarlo o buttarlo;
           pronto   niente di tutto cio', si puo' partire.
 
         Chiedere prima invece di trascrivere e basta e' cio' che evita di
-        rispendere crediti Groq su un lavoro gia' fatto.
+        rispendere crediti Groq su un lavoro gia' fatto, o di scoprire a meta'
+        che qualcosa mancava fin dall'inizio.
         """
         # Prima riga di tutte: da quale delle due stanze arriva questo
         # clic. Da qui in poi lo sa il thread, e ogni cosa che questo
         # metodo dira' alla pagina partira' gia' con l'indirizzo giusto.
         self._entra(dove)
-        if self._p().occupato:
+        posto = self._p()
+        if posto.occupato:
             return {'ok': False, 'errore': i18n.t('err.busy')}
 
         mancano = []
-        if self._p().motore == 'groq' and not self._chiave:
+        if posto.motore == 'groq' and not self._chiave:
             mancano.append(i18n.t('warn.key'))
-        if not self._p().meta:
-            mancano.append(i18n.t('warn.src.yt') if self.scelte['sorgente'] == 'youtube'
+        if not posto.meta and not posto.coda:
+            mancano.append(i18n.t('warn.src.yt') if (posto.opz.get('sorgente') or 'youtube') == 'youtube'
                            else i18n.t('warn.src.local'))
+        if posto.motore == 'local' and (posto.opz.get('translate') or posto.opz.get('summarize')):
+            mancano += self._problemi_ollama(bool(posto.opz.get('translate')))
         if mancano:
             return {'ok': True, 'stato': 'manca', 'voci': mancano}
 
-        # Una playlist si avvia sempre: il controllo "gia' fatto" lo fa il batch
-        # video per video, saltando quelli presenti senza spendere un credito.
-        if self._p().playlist:
+        if posto.motore == 'groq' and not salta_crediti:
+            stima = engine.stima_crediti(self._durata_in_attesa(), self._chiave)
+            if stima:
+                return self._avviso_crediti(stima)
+
+        # Una playlist o una coda si avviano sempre: il controllo "gia' fatto"
+        # lo fa il giro video per video, saltando quelli presenti senza
+        # spendere un credito.
+        if posto.playlist or posto.coda:
             return {'ok': True, 'stato': 'pronto'}
 
-        meta = self._p().meta
+        meta = posto.meta
         if jobs.transcription_exists(RISULTATI, meta['title']):
             voci = [{'azione': 'nuova', 'icona': 'rifai', 'tono': 'attenzione',
                      'titolo': i18n.t('already.again'),
@@ -1174,7 +1387,7 @@ class Api:
             return {'ok': True, 'stato': 'gia', 'titolo': i18n.t('already.title'),
                     'desc': i18n.t('already.desc'), 'voci': voci}
 
-        parziale = (checkpoints.load_checkpoint(meta) if self._p().motore == 'groq'
+        parziale = (checkpoints.load_checkpoint(meta) if posto.motore == 'groq'
                     else checkpoints.load_local_checkpoint(meta))
         if parziale:
             return {'ok': True, 'stato': 'ripresa', 'titolo': i18n.t('resume.title'),
@@ -1190,6 +1403,24 @@ class Api:
                     ]}
 
         return {'ok': True, 'stato': 'pronto'}
+
+    @staticmethod
+    def _avviso_crediti(stima: dict) -> dict:
+        """«Restano 20 minuti di audio, il video ne dura 45»: detto prima di partire.
+
+        Non blocca: si puo' partire lo stesso, e la trascrizione si fermera'
+        dove finiscono i crediti, salvando il parziale da riprendere piu'
+        tardi. Ma lo si decide sapendolo, invece di scoprirlo a meta'.
+        """
+        restano = text._format_duration(stima['restano'])
+        serve = text._format_duration(stima['serve'])
+        ora = stima.get('ripresa')
+        return {'ok': True, 'stato': 'crediti', 'titolo': i18n.t('credest.title'),
+                'desc': i18n.t('credest.desc', restano=restano, serve=serve)
+                        + (' ' + i18n.t('credest.when', ora=ora) if ora else ''),
+                'voci': [{'azione': 'parti', 'icona': 'avvia', 'tono': 'attenzione',
+                          'titolo': i18n.t('credest.go'),
+                          'desc': i18n.t('credest.go.desc', restano=restano)}]}
 
     @staticmethod
     def _quanto_fatto(parziale: dict) -> dict:
@@ -1222,26 +1453,47 @@ class Api:
         # clic. Da qui in poi lo sa il thread, e ogni cosa che questo
         # metodo dira' alla pagina partira' gia' con l'indirizzo giusto.
         self._entra(dove)
-        if self._p().occupato:
+        posto = self._p()
+        if posto.occupato:
             return {'ok': False, 'errore': i18n.t('err.busy')}
-        if not self._p().meta:
+        if not posto.meta and not posto.coda:
             return {'ok': False, 'errore': i18n.t('err.no_file')}
 
-        if self._p().playlist:
-            self._in_thread(self._playlist_davvero)
+        if posto.playlist or (posto.coda and azione in ('nuova', 'parti')):
+            self._in_thread(self._batch_davvero)
             return {'ok': True, 'avviato': True}
 
         if azione == 'ricomincia':
-            meta = self._p().meta
-            (checkpoints.delete_local_checkpoint if self._p().motore == 'local'
-             else checkpoints.delete_checkpoint)(meta)
+            (checkpoints.delete_local_checkpoint if posto.motore == 'local'
+             else checkpoints.delete_checkpoint)(posto.meta)
             azione = 'nuova'
 
         if azione in ('traduci', 'riassumi', 'riprendi_post'):
+            # Queste due strade passano sempre da Ollama in «Locale»: si
+            # controlla qui, perche' da questa finestra si arriva senza passare
+            # dagli interruttori che prepara() guarda.
+            if posto.motore == 'local':
+                problemi = self._problemi_ollama(azione != 'riassumi')
+                if problemi:
+                    return {'ok': False, 'errore': ' · '.join(problemi)}
             self._in_thread(self._dopo_davvero, azione)
         else:
             self._in_thread(self._trascrivi_davvero, azione == 'riprendi')
         return {'ok': True, 'avviato': True}
+
+    def annulla(self, dove: str = 'locale') -> dict:
+        """«Annulla»: chiede al lavoro di questa postazione di fermarsi.
+
+        Non lo ferma di colpo: alza il segnale, e il lavoro si ferma al primo
+        punto sicuro (fra un blocco e l'altro, fra una sezione e l'altra),
+        salvando il parziale. Di solito e' questione di secondi; durante un
+        riassunto in locale si aspetta la fine della sezione in corso.
+        """
+        self._entra(dove)
+        posto = self._p()
+        if posto.occupato:
+            posto.annulla.set()
+        return {'ok': True}
 
     def _apri_lavoro(self, opzioni: dict, piano: list[str]) -> None:
         """Prepara la pagina per un lavoro che sta per cominciare.
@@ -1255,8 +1507,6 @@ class Api:
         """
         self._p().avanz = Avanzamento(piano)
         parti = [i18n.t('ov.base')]
-        if opzioni.get('visual'):
-            parti.append(i18n.t('ov.visual'))
         if opzioni.get('translate'):
             parti.append(i18n.t('ov.translate'))
         if opzioni.get('summarize'):
@@ -1289,6 +1539,95 @@ class Api:
         if self._p().avanz:
             self._p().avanz.riferisci(fase, corrente, totale, dettaglio)
 
+    # ── Lo storico ───────────────────────────────────────────────────────────
+
+    def _registra(self, meta: dict | None, video_dir: str = '', playlist: str = '',
+                  stato: str | None = None, modo: str | None = None) -> None:
+        """Scrive nello storico com'e' andato il lavoro su questo video.
+
+        Lo stato, se non viene detto, lo decide il foglietto delle fasi: se
+        resta qualcosa da riprendere (una traduzione o un riassunto a meta')
+        il lavoro e' a meta', altrimenti e' completo.
+        """
+        if not meta:
+            return
+        try:
+            if stato is None:
+                stato = storico.A_META if jobs.has_resumable_state(meta) else storico.COMPLETO
+            if not video_dir:
+                video_dir = text.cartella_video(RISULTATI, meta.get('title') or '')
+            modo = modo or ('Cloud' if self._p().motore == 'groq' else 'Locale')
+            storico.registra(meta, stato, modo, video_dir, playlist,
+                             storico.documento_da_leggere(video_dir), credits.consumo(),
+                             postazione=self._p().dove)
+        except Exception:                              # noqa: BLE001
+            pass                                       # lo storico non ferma mai un lavoro
+
+    def storico(self) -> dict:
+        """Le righe dello storico, gia' pronte per la tabella della pagina."""
+        voci = storico.elenco(RISULTATI)
+        return {'ok': True, 'voci': [self._riga_storico(v) for v in voci]}
+
+    @staticmethod
+    def _riga_storico(v: dict) -> dict:
+        """Una riga dello storico con le parole e i numeri scritti per chi legge.
+
+        La durata in minuti interi, senza secondi: nello storico serve a farsi
+        un'idea, non a cronometrare. I crediti sono quelli che Groq conta
+        davvero, secondi di audio e token; in locale non si paga niente.
+        """
+        durata = v.get('durata')
+        if durata:
+            minuti = int(float(durata) // 60)
+            durata_testo = i18n.t('hist.min', n=minuti) if minuti else i18n.t('hist.lessmin')
+        else:
+            durata_testo = '—'
+        if v.get('modo') == 'Locale':
+            crediti = i18n.t('hist.free')
+        elif v.get('audio_s') is None and v.get('token') is None:
+            crediti = '—'
+        else:
+            parti = []
+            if v.get('audio_s'):
+                parti.append(i18n.t('hist.audio', n=f"{int(round(v['audio_s'])):,}".replace(',', '.')))
+            if v.get('token'):
+                parti.append(i18n.t('hist.tokens', n=f"{int(v['token']):,}".replace(',', '.')))
+            crediti = ' · '.join(parti) or '0'
+        try:
+            data = datetime.fromisoformat(v.get('data', '')).strftime('%d/%m/%Y %H:%M')
+        except ValueError:
+            data = v.get('data', '')
+        return {
+            'id': v.get('id'), 'url': v.get('url', ''), 'canale': v.get('canale') or '—',
+            'titolo': v.get('titolo', '?'), 'durata': durata_testo, 'crediti': crediti,
+            'playlist': v.get('playlist') or '', 'locale': bool(v.get('locale')),
+            'stato': v.get('stato', ''), 'completo': v.get('stato') == storico.COMPLETO,
+            'modo': v.get('modo', ''), 'data': data, 'ordina': v.get('data', ''),
+            'leggibile': bool(v.get('documento') or v.get('cartella')),
+        }
+
+    def storico_apri(self, voce_id: str, cosa: str = 'cartella') -> dict:
+        """Dalla tabella: apre la cartella, il documento, o il link del video."""
+        v = storico.trova(voce_id)
+        if not v:
+            return {'ok': False, 'errore': i18n.t('hist.gone')}
+        if cosa == 'leggi':
+            documento = (v.get('documento') if v.get('documento') and os.path.isfile(v['documento'])
+                         else storico.documento_da_leggere(v.get('cartella', '')))
+            if not documento:
+                return {'ok': False, 'errore': i18n.t('hist.nodoc')}
+            return self._apri_lettore(documento, v.get('titolo') or 'EchoScript')
+        if cosa == 'link':
+            return self.apri_url(v.get('url', ''))
+        return self._apri_percorso(v.get('cartella', ''))
+
+    def storico_togli(self, voce_id: str) -> dict:
+        """Toglie una riga dallo storico. I file sul disco non si toccano."""
+        storico.togli(voce_id)
+        return self.storico()
+
+    # ── I lavori ─────────────────────────────────────────────────────────────
+
     def _trascrivi_davvero(self, riprendi: bool) -> None:
         """Il lavoro completo su un video: dall'audio al documento finito.
 
@@ -1299,21 +1638,26 @@ class Api:
         raccoglie _in_thread, che lo tratta per quello che e', cioe' un'attesa
         e non un guasto. Prenderlo qui vorrebbe dire scriverne il trattamento
         in cinque punti diversi, e prima o poi uno resterebbe indietro.
+
+        Se nel frattempo qualcuno ha messo dei video in coda, finito questo si
+        prosegue con quelli, e il riepilogo alla fine e' quello della coda.
         """
+        posto = self._p()
         opzioni = self._opzioni()
-        piano = piano_fasi(opzioni['backend'], self.scelte['sorgente'], opzioni)
+        piano = piano_fasi(opzioni['backend'], opzioni['source_kind'], opzioni)
         self._apri_lavoro(opzioni, piano)
-        meta_iniziale = self._p().meta
-        # Il crediti-esauriti non si intercetta qui: lo raccoglie _in_thread, che
-        # lo tratta per quello che e', cioe' un'attesa e non un guasto, ed e'
-        # l'unico
-        # posto in cui la distinzione va fatta, invece che in ogni lavoro.
+        meta_iniziale = posto.corrente = posto.meta
         meta, segmenti, etichetta, cliente = engine.transcribe_only(
-            self._p().src, opzioni, on_progress=self._riferisci, resume=riprendi)
+            posto.src, opzioni, on_progress=self._riferisci, resume=riprendi)
         risultato = engine.save_results(
             meta, segmenti, etichetta, opzioni, RISULTATI, cliente,
             on_progress=self._riferisci)
-        self._p().avanz.concludi()
+        posto.avanz.concludi()
+        self._registra(meta, risultato.get('video_dir', ''))
+        posto.fine = (i18n.t('notify.done.title'), meta.get('title') or '')
+        if posto.coda:
+            self._batch_davvero(gia_fatti=[risultato])
+            return
         # Il riassunto fermato per crediti esauriti non e' un errore: la
         # trascrizione e' salvata, e si puo' concludere in locale senza rifare
         # nulla. Chiederlo qui e' l'unico momento in cui la domanda ha senso.
@@ -1328,13 +1672,11 @@ class Api:
         Tradurre, riassumere, o riprendere un lavoro rimasto a meta'. Nessuna
         delle tre ritrascrive niente: ripartono dai file gia' sul disco, ed e'
         il motivo per cui costano pochissimo rispetto al lavoro originale.
-
-        L'analisi visiva resta spenta anche se era accesa nei menu: rifarla
-        vorrebbe dire riscaricare il video e rimandare tutti i fotogrammi, che
-        e' il contrario di quello che si sta chiedendo.
         """
+        posto = self._p()
+        meta = posto.corrente = posto.meta
         opzioni = self._opzioni()
-        opzioni.update({'translate': True, 'summarize': True, 'visual': False})
+        opzioni.update({'translate': True, 'summarize': True})
         piano = {'traduci': ['info', 'translate'],
                  'riassumi': ['info', 'summarize'],
                  'riprendi_post': ['info', 'translate', 'summarize']}[azione]
@@ -1342,12 +1684,14 @@ class Api:
         funzione = {'traduci': engine.translate_only,
                     'riassumi': engine.summary_only,
                     'riprendi_post': engine.resume}[azione]
-        risultato = funzione(self._p().meta, opzioni, RISULTATI, on_progress=self._riferisci)
-        self._p().avanz.concludi()
+        risultato = funzione(meta, opzioni, RISULTATI, on_progress=self._riferisci)
+        posto.avanz.concludi()
+        self._registra(meta, risultato.get('video_dir', ''))
+        posto.fine = (i18n.t('notify.done.title'), meta.get('title') or '')
         if risultato.get('summary_status') == 'partial' and opzioni['backend'] == 'groq':
-            _verso_pagina('riassuntoInterrotto', self._risultato(risultato, self._p().meta))
+            _verso_pagina('riassuntoInterrotto', self._risultato(risultato, meta))
         else:
-            _verso_pagina('mostraRisultato', self._risultato(risultato, self._p().meta))
+            _verso_pagina('mostraRisultato', self._risultato(risultato, meta))
 
     def concludi_in_locale(self, dove: str = 'cloud') -> dict:
         """Finisce sul computer un riassunto che Groq ha lasciato a meta'.
@@ -1364,9 +1708,12 @@ class Api:
         # La finestra puo' restare aperta mentre si cambia il link, e cambiarlo
         # dimentica la sorgente: senza questo controllo il lavoro partirebbe
         # senza sapere su cosa, e fallirebbe a meta' con un errore oscuro.
-        if not self._p().meta:
+        if not (self._p().corrente or self._p().meta):
             return {'ok': False, 'errore': i18n.t('err.no_file')}
-        self._in_thread(self._riassunto_locale)
+        problemi = self._problemi_ollama(False)
+        if problemi:
+            return {'ok': False, 'errore': ' · '.join(problemi)}
+        self._in_thread(self._riassunto_locale, nuovo=False)
         return {'ok': True, 'avviato': True}
 
     def _riassunto_locale(self) -> None:
@@ -1379,14 +1726,17 @@ class Api:
         Si forza il motore locale anche se nei menu era scelto Groq, perche' e'
         esattamente il punto: Groq in questo momento non risponde piu'.
         """
+        posto = self._p()
+        meta = posto.corrente = posto.corrente or posto.meta
         opzioni = self._opzioni(motore='local')
-        opzioni.update({'api_key': '', 'translate': True,
-                        'summarize': True, 'visual': False})
+        opzioni.update({'api_key': '', 'translate': True, 'summarize': True})
         self._apri_lavoro(opzioni, ['info', 'summarize'])
-        risultato = engine.summary_only(self._p().meta, opzioni, RISULTATI,
+        risultato = engine.summary_only(meta, opzioni, RISULTATI,
                                         on_progress=self._riferisci)
-        self._p().avanz.concludi()
-        _verso_pagina('mostraRisultato', self._risultato(risultato, self._p().meta))
+        posto.avanz.concludi()
+        self._registra(meta, risultato.get('video_dir', ''), modo='Cloud + Locale')
+        posto.fine = (i18n.t('notify.done.title'), meta.get('title') or '')
+        _verso_pagina('mostraRisultato', self._risultato(risultato, meta))
 
     def continua_in_locale(self, dove: str = 'cloud') -> dict:
         """Completa sul computer una trascrizione Groq rimasta senza crediti.
@@ -1398,22 +1748,22 @@ class Api:
             Resta in «Cloud», dove e' cominciato, e da li' continua a
             raccontarsi. Cambia solo il modello che lo porta a termine, ed e'
             ``_opzioni(motore='local')`` a imporlo.
-
-            Prima questa riga spostava anche la scelta del motore, quando la
-            scelta era una cosa a parte che si poteva spostare. Adesso il
-            motore E' la stanza: spostarlo vorrebbe dire far saltare il lavoro
-            da una lavagna all'altra a meta' strada, lasciando il suo diario e
-            il suo avanzamento in quella di prima.
         """
         # Prima riga di tutte: da quale delle due stanze arriva questo
         # clic. Da qui in poi lo sa il thread, e ogni cosa che questo
         # metodo dira' alla pagina partira' gia' con l'indirizzo giusto.
         self._entra(dove)
-        if self._p().occupato:
+        posto = self._p()
+        if posto.occupato:
             return {'ok': False, 'errore': i18n.t('err.busy')}
-        if not self._p().meta or not self._p().src:
+        if not posto.corrente or not posto.corrente_src:
             return {'ok': False, 'errore': i18n.t('err.no_file')}
-        self._in_thread(self._coda_in_locale)
+        opz = posto.opz
+        if opz.get('translate') or opz.get('summarize'):
+            problemi = self._problemi_ollama(bool(opz.get('translate')))
+            if problemi:
+                return {'ok': False, 'errore': ' · '.join(problemi)}
+        self._in_thread(self._coda_in_locale, nuovo=False)
         return {'ok': True, 'avviato': True}
 
     def _coda_in_locale(self) -> None:
@@ -1426,39 +1776,64 @@ class Api:
         l'etichetta in testa lo dice: la qualita' puo' cambiare a meta',
         e chi rilegge deve poterlo sapere.
         """
+        posto = self._p()
         opzioni = self._opzioni(motore='local')
-        piano = piano_fasi('local', self.scelte['sorgente'], opzioni)
+        opzioni['source_kind'] = posto.corrente_kind or opzioni['source_kind']
+        piano = piano_fasi('local', opzioni['source_kind'], opzioni)
         self._apri_lavoro(opzioni, piano)
         meta, segmenti, etichetta, _ = engine.continue_local_from_groq(
-            self._p().src, opzioni, on_progress=self._riferisci)
+            posto.corrente_src, opzioni, on_progress=self._riferisci)
         risultato = engine.save_results(meta, segmenti, etichetta, opzioni,
                                         RISULTATI, None, on_progress=self._riferisci)
-        self._p().avanz.concludi()
-        _verso_pagina('mostraRisultato', self._risultato(risultato, self._p().meta))
+        posto.avanz.concludi()
+        self._registra(meta, risultato.get('video_dir', ''), modo='Cloud + Locale')
+        posto.fine = (i18n.t('notify.done.title'), meta.get('title') or '')
+        _verso_pagina('mostraRisultato', self._risultato(risultato, posto.corrente))
 
-    # ── Playlist ─────────────────────────────────────────────────────────────
+    # ── Playlist e coda ──────────────────────────────────────────────────────
 
-    def _playlist_davvero(self) -> None:
-        """Trascrive in fila tutti i video di una playlist confermata.
+    def _voci_della_sorgente(self) -> list[dict]:
+        """La sorgente confermata come elenco di voci di lavoro."""
+        posto = self._p()
+        if posto.playlist:
+            p = posto.playlist
+            nome = p.get('title') or p.get('channel') or 'playlist'
+            radice = os.path.join(RISULTATI, p['subdir'])
+            items = p['items']
+            return [{'meta': m, 'src': m.get('webpage_url') or '', 'kind': 'youtube',
+                     'radice': radice, 'num': text.numero_playlist(i, len(items)),
+                     'playlist': nome} for i, m in enumerate(items, 1)]
+        if posto.meta:
+            return [{'meta': posto.meta, 'src': posto.src, 'kind': posto.kind or 'youtube',
+                     'radice': RISULTATI, 'num': None, 'playlist': ''}]
+        return []
+
+    def _batch_davvero(self, gia_fatti: list[dict] | None = None) -> None:
+        """Trascrive in fila una playlist, una coda, o tutte e due.
 
         Tre regole, e sono quelle che rendono il batch sopportabile su una lista
         lunga: un video gia' presente si salta senza spendere nulla; uno che
         fallisce non ferma gli altri; se Groq esaurisce i crediti ci si ferma li'
         I blocchi gia' fatti restano salvati e domani si riprende.
 
-        Le cartelle portano davanti il numero d'ordine della playlist, che e'
+        La coda si legge mentre si lavora, non una volta all'inizio: un video
+        messo in coda a lavoro gia' partito viene preso quando arriva il suo
+        turno. 'gia_fatti' sono i risultati di un lavoro singolo appena finito,
+        che si e' trasformato in coda perche' nel frattempo qualcuno ha
+        aggiunto dei video.
+
+        Le cartelle delle playlist portano davanti il numero d'ordine, che e'
         l'ordine in cui i video sono elencati su YouTube. Senza, aprendo la
         cartella di un corso di trenta lezioni si trovano trenta titoli
         ordinati alfabeticamente, e capire da dove si comincia vuol dire
         tornare su YouTube a guardare la playlist.
         """
-        playlist = self._p().playlist
-        voci = playlist['items']
-        radice = os.path.join(RISULTATI, playlist['subdir'])
+        posto = self._p()
+        era_playlist = bool(posto.playlist) and not gia_fatti
+        voci = [] if gia_fatti else self._voci_della_sorgente()
         opzioni = self._opzioni()
-        opzioni['source_kind'] = 'youtube'
 
-        fatti: list[dict] = []
+        fatti: list[dict] = list(gia_fatti or [])
         saltati: list[str] = []
         # I falliti non sono piu' solo un titolo. Un elenco di titoli in fondo a
         # un batch di trenta video dice che tre non sono riusciti e non dice
@@ -1466,9 +1841,14 @@ class Api:
         # mentre nel primo caso non c'e' niente da fare e nel secondo basta
         # rilanciare. Adesso ogni fallito si porta dietro la sua spiegazione.
         falliti: list[dict] = []
-        senza_crediti = False
+        senza_crediti = annullato = False
+        ultima_radice = RISULTATI
 
-        for numero, meta in enumerate(voci, 1):
+        while voci or posto.coda:
+            voce = voci.pop(0) if voci else posto.coda.pop(0)
+            _verso_pagina('aggiornaCoda', self._elenco_coda())
+            meta = voce['meta']
+            radice = ultima_radice = voce['radice']
             # Il controllo «c'e' gia'» viene PRIMA di annunciare il lavoro: un
             # video saltato non deve azzerare la barra e riscrivere il piano per
             # poi non fare niente, che a schermo si legge come un lavoro partito
@@ -1477,40 +1857,65 @@ class Api:
                 saltati.append(meta['title'])
                 continue
 
-            piano = piano_fasi(opzioni['backend'], 'youtube', opzioni)
+            opzioni['source_kind'] = voce['kind']
+            piano = piano_fasi(opzioni['backend'], voce['kind'], opzioni)
             self._apri_lavoro(opzioni, piano)
+            totale = len(fatti) + len(saltati) + len(falliti) + 1 + len(voci) + len(posto.coda)
             _verso_pagina('lavoroBatch',
-                          i18n.t('playlist.batch', i=numero, n=len(voci)),
+                          i18n.t('playlist.batch', i=totale - len(voci) - len(posto.coda), n=totale),
                           meta.get('title') or '?')
+            posto.corrente, posto.corrente_src, posto.corrente_kind = meta, voce['src'], voce['kind']
+            credits.azzera_consumo()
             try:
                 meta2, segmenti, etichetta, cliente = engine.transcribe_only(
-                    meta.get('webpage_url') or '', opzioni,
-                    on_progress=self._riferisci, resume=False)
+                    voce['src'], opzioni, on_progress=self._riferisci, resume=False)
                 # Il numero d'ordine va attaccato ai dati del video PRIMA di
                 # salvare, perche' meta2 arriva fresco da YouTube e di essere
-                # il quarto video di una playlist non ne sa niente. Da qui in
-                # poi se lo porta dietro, e lo ritrovano sia chi scrive la
-                # trascrizione sia chi scrive le note visive.
-                meta2['_num_playlist'] = text.numero_playlist(numero, len(voci))
-                fatti.append(engine.save_results(
-                    meta2, segmenti, etichetta, opzioni, radice, cliente,
-                    on_progress=self._riferisci))
+                # il quarto video di una playlist non ne sa niente.
+                if voce.get('num'):
+                    meta2['_num_playlist'] = voce['num']
+                res = engine.save_results(meta2, segmenti, etichetta, opzioni, radice,
+                                          cliente, on_progress=self._riferisci)
+                fatti.append(res)
+                self._registra(meta2, res.get('video_dir', ''), voce.get('playlist', ''))
                 # Come per un video singolo: l'ultima fase riferisce e poi tace,
                 # quindi senza questa la barra di ogni video resterebbe a un
                 # passo dalla fine con tutto gia' scritto sul disco.
-                self._p().avanz.concludi()
+                posto.avanz.concludi()
+            except engine.CreditiEsauriti:
+                senza_crediti = True
+                posto.coda[:0] = [voce] + voci         # restano in coda per dopo
+                break
             except engine.RateLimitReached:
                 senza_crediti = True
+                self._registra(meta, stato=storico.A_META, playlist=voce.get('playlist', ''))
+                break
+            except contract.Annullato:
+                annullato = True
+                self._registra(meta, stato=storico.A_META, playlist=voce.get('playlist', ''))
                 break
             except Exception as exc:                   # noqa: BLE001
-                falliti.append(self._scheda_errore(exc, meta['title']))
+                falliti.append(self._scheda_errore(exc, meta['title'],
+                                                   dettaglio=self._dettaglio(exc)))
+                if checkpoints.load_checkpoint(meta) or checkpoints.load_local_checkpoint(meta):
+                    self._registra(meta, stato=storico.A_META, playlist=voce.get('playlist', ''))
                 continue
 
-        self._p().ultima_cartella = radice
+        _verso_pagina('aggiornaCoda', self._elenco_coda())
+        cartella = (os.path.join(RISULTATI, posto.playlist['subdir'])
+                    if era_playlist else ultima_radice)
+        posto.ultima_cartella = cartella
+        posto.fine = (i18n.t('notify.batch.title'),
+                      i18n.t('playlist.res.done', n=len(fatti)))
+        avviso = ''
+        if senza_crediti:
+            avviso = i18n.t('playlist.stopped')
+        elif annullato:
+            avviso = i18n.t('cancel.batch')
         _verso_pagina('mostraRisultatoPlaylist', {
-            'titolo': i18n.t('playlist.res.title'),
-            'cartella': radice,
-            'avviso': i18n.t('playlist.stopped') if senza_crediti else '',
+            'titolo': i18n.t('playlist.res.title' if era_playlist else 'coda.res.title'),
+            'cartella': cartella,
+            'avviso': avviso,
             'conteggi': [
                 {'tono': 'ok', 'testo': i18n.t('playlist.res.done', n=len(fatti))},
                 {'tono': 'neutro', 'testo': i18n.t('playlist.res.skipped', n=len(saltati))}
@@ -1536,17 +1941,30 @@ class Api:
 
         I file vengono raggruppati per cartella perche' e' cosi' che stanno sul
         disco, ed e' l'unico modo in cui l'elenco di dieci nomi resta leggibile.
+
+        I documenti da leggere (riassunto, traduzione, trascrizione) si
+        ricordano nella postazione: il bottone «Leggi» li apre in una finestra
+        con formule e grafici gia' disegnati.
         """
-        self._p().ultima_cartella = res.get('video_dir', '')
-        visiva = res.get('visual') or {}
-        self._p().ultima_visiva = visiva.get('dir') or ''
+        cartella = res.get('video_dir', '')
+        self._p().ultima_cartella = cartella
 
         gruppi: dict[str, list[str]] = {}
         for percorso in res.get('files', []):
             taglio = percorso.find('/')
-            cartella = percorso[:taglio] if taglio >= 0 else ''
+            sotto = percorso[:taglio] if taglio >= 0 else ''
             nome = percorso[taglio + 1:] if taglio >= 0 else percorso
-            gruppi.setdefault(cartella, []).append(nome)
+            gruppi.setdefault(sotto, []).append(nome)
+
+        documenti = []
+        for sotto, tipo in ((jobs.SUMMARY_SUBDIR, 'riassunto'),
+                            (jobs.TRANSL_SUBDIR, 'traduzione'),
+                            (jobs.TRANS_SUBDIR, 'trascrizione')):
+            md = [n for n in gruppi.get(sotto, []) if n.lower().endswith('.md')]
+            if md:
+                documenti.append({'tipo': tipo, 'etichetta': i18n.t('read.' + tipo),
+                                  'percorso': os.path.join(cartella, sotto, md[0])})
+        self._p().documenti = {d['percorso'] for d in documenti}
 
         crediti = res.get('credits') or {}
         residuo = None
@@ -1566,37 +1984,24 @@ class Api:
                 {'chiave': 'res.sections',
                  'valore': str(res.get('sections') or i18n.t('res.continuous'))},
             ],
-            'cartella': res.get('video_dir', ''),
+            'cartella': cartella,
             'gruppi': [{'cartella': c or i18n.t('res.root'), 'file': f}
                        for c, f in gruppi.items()],
+            'documenti': documenti,
             'crediti': ([
                 {'chiave': 'res.credits.used',
                  'valore': text._format_timestamp(crediti.get('audio_seconds_used') or 0)},
             ] + ([{'chiave': 'res.credits.left',
                    'valore': text._format_timestamp(residuo)}] if residuo is not None else [])
             ) if crediti else [],
-            'visiva': ({'n': visiva['count'], 'cartella': visiva.get('dir', '')}
-                       if visiva.get('count') else None),
         }
 
     # ── Aprire cose nel sistema ──────────────────────────────────────────────
 
-    def apri(self, quale: str = 'cartella', dove: str = 'locale') -> dict:
-        """Apre una cartella con il gestore di file del sistema.
-
-        E' il modo piu' rapido di arrivare ai file appena prodotti, e sostituisce
-        il dover ricordare dove il programma li aveva messi.
-
-        Su Windows c'e' una chiamata apposta; altrove si passa dal meccanismo
-        che apre gli indirizzi, che davanti a un percorso locale apre il
-        gestore di file.
-        """
-        # Prima riga di tutte: da quale delle due stanze arriva questo
-        # clic. Da qui in poi lo sa il thread, e ogni cosa che questo
-        # metodo dira' alla pagina partira' gia' con l'indirizzo giusto.
-        self._entra(dove)
-        percorso = self._p().ultima_visiva if quale == 'visiva' else self._p().ultima_cartella
-        if not percorso:
+    @staticmethod
+    def _apri_percorso(percorso: str) -> dict:
+        """Apre una cartella (o un file) con il programma giusto del sistema."""
+        if not percorso or not os.path.exists(percorso):
             return {'ok': False}
         try:
             if os.name == 'nt':
@@ -1608,24 +2013,94 @@ class Api:
             return {'ok': False}
         return {'ok': True}
 
+    def apri(self, quale: str = 'cartella', dove: str = 'locale') -> dict:
+        """Apre la cartella dell'ultimo lavoro finito in questa postazione.
+
+        E' il modo piu' rapido di arrivare ai file appena prodotti, e sostituisce
+        il dover ricordare dove il programma li aveva messi.
+        """
+        # Prima riga di tutte: da quale delle due stanze arriva questo
+        # clic. Da qui in poi lo sa il thread, e ogni cosa che questo
+        # metodo dira' alla pagina partira' gia' con l'indirizzo giusto.
+        self._entra(dove)
+        return self._apri_percorso(self._p().ultima_cartella)
+
+    def leggi(self, percorso: str, dove: str = 'locale') -> dict:
+        """«Leggi»: apre un documento appena prodotto in una finestra sua.
+
+        Si accettano solo i documenti dell'ultimo risultato di questa
+        postazione: la pagina non puo' chiedere di aprire un file qualunque.
+        """
+        self._entra(dove)
+        if percorso not in self._p().documenti:
+            return {'ok': False}
+        return self._apri_lettore(percorso, os.path.basename(percorso))
+
+    @staticmethod
+    def _apri_lettore(percorso: str, titolo: str) -> dict:
+        """Mostra un documento con formule e grafici disegnati, in una finestra.
+
+        La pagina e' la stessa che diventa il PDF (pdf_rich.pagina_html), in
+        versione da schermo. Si scrive in un file e la si apre come file, non
+        dal server interno della finestra principale: le due librerie che
+        disegnano formule e grafici stanno sul disco, e una pagina servita da
+        un indirizzo web non potrebbe caricarle.
+
+        Se la finestra non si apre, o le librerie non ci sono, il documento si
+        apre col programma predefinito del sistema: meglio il markdown nudo
+        che niente.
+        """
+        import hashlib
+        import pathlib
+        import tempfile
+        from server.export import pdf_rich
+        try:
+            with open(text._lp(percorso), encoding='utf-8') as fh:
+                md = fh.read()
+        except OSError:
+            return {'ok': False, 'errore': i18n.t('hist.nodoc')}
+        pagina = pdf_rich.pagina_html(md, schermo=True)
+        if pagina is None:
+            return Api._apri_percorso(percorso)
+        cartella = os.path.join(tempfile.gettempdir(), 'echoscript_lettore')
+        os.makedirs(cartella, exist_ok=True)
+        nome = hashlib.sha1(percorso.encode('utf-8')).hexdigest()[:12] + '.html'
+        destinazione = os.path.join(cartella, nome)
+        with open(destinazione, 'w', encoding='utf-8') as fh:
+            fh.write(pagina)
+        indirizzo = pathlib.Path(destinazione).as_uri()
+        try:
+            webview.create_window(titolo, indirizzo, width=1000, height=820,
+                                  background_color='#eef1ef')
+        except Exception:                              # noqa: BLE001
+            import webbrowser
+            webbrowser.open(indirizzo)
+        return {'ok': True}
+
     def apri_url(self, indirizzo: str) -> dict:
         """Apre un indirizzo nel browser di chi sta usando il programma.
 
-        Serve al pulsante «Ottieni una chiave», che porta alla pagina di Groq.
-        Si apre fuori e non dentro la finestra apposta: dentro sarebbe una
-        pagina web dentro un'altra pagina web, senza barra degli indirizzi e
-        senza il proprio accesso gia' fatto.
+        Serve al pulsante «Ottieni una chiave», che porta alla pagina di Groq,
+        e ai link dello storico. Si apre fuori e non dentro la finestra
+        apposta: dentro sarebbe una pagina web dentro un'altra pagina web,
+        senza barra degli indirizzi e senza il proprio accesso gia' fatto.
         """
         import webbrowser
+        if not indirizzo:
+            return {'ok': False}
         try:
-            webbrowser.open(indirizzo)
+            if re.match(r'^https?://', indirizzo):
+                webbrowser.open(indirizzo)
+            else:
+                # Un file locale dello storico: si apre la cartella che lo contiene.
+                return Api._apri_percorso(os.path.dirname(indirizzo))
         except Exception:                              # noqa: BLE001
             return {'ok': False}
         return {'ok': True}
 
     # ── Utilita' interne ─────────────────────────────────────────────────────
 
-    def _in_thread(self, funzione, *argomenti) -> None:
+    def _in_thread(self, funzione, *argomenti, nuovo: bool = True) -> None:
         """Fa girare il lavoro fuori dal thread della finestra.
 
         Il passaggio di consegne fra i due thread
@@ -1645,29 +2120,45 @@ class Api:
         """
         dove = _qui()
         posto = self._posti[dove]
+        # Il lavoro che parte adesso: la sorgente e' fissata qui, cosi' se nel
+        # frattempo si conferma un altro link (che va in coda) le vie d'uscita
+        # come «Continua in locale» parlano ancora di QUESTO video. Loro stesse
+        # ('nuovo' falso) continuano il video di prima e non lo cambiano.
+        if nuovo:
+            posto.corrente, posto.corrente_src = posto.meta, posto.src
+            posto.corrente_kind = posto.kind
+        posto.fine = None
 
         def guscio():
             """Fa girare il lavoro in un thread, con tutte le reti di sicurezza.
 
-            E' l'involucro che sta intorno a ogni operazione lunga, e fa cinque
+            E' l'involucro che sta intorno a ogni operazione lunga, e fa sei
             cose che nessuna di quelle operazioni deve ripetere per conto suo:
 
             dice a questo thread in quale postazione si trova, e da quel
             momento tutto cio' che dira' arriva alla lavagna giusta;
 
+            gli attacca il segnale di «Annulla» e il conto dei crediti di
+            questa postazione, che l'altra non vede;
+
             segna che si sta lavorando, cosi' la pagina non ne fa partire due
             NELLA STESSA STANZA, mentre nell'altra si puo' eccome;
 
-            manda quello che viene stampato dentro il diario di questa
-            postazione, e non in quello dell'altra;
+            distingue i crediti finiti, l'annullamento e un guasto vero,
+            perche' sono tre cose diverse e portano a tre messaggi diversi;
 
-            distingue i crediti finiti da un guasto vero, perche' sono due
-            cose diverse e portano a due messaggi diversi;
+            avvisa con una notifica di Windows quando un lavoro lungo finisce,
+            se nel frattempo si stava guardando altro;
 
             e si cancella dal registro alla fine, anche quando e' andata male.
             """
             _DOVE.dove = dove
             posto.occupato = True
+            posto.annulla = threading.Event()
+            contract.usa_segnale(posto.annulla)
+            credits.azzera_consumo()
+            inizio = time.monotonic()
+            avviso = None
             _verso_pagina('cambiaStato', 'working')
 
             # Il diario si iscrive allo smistatore invece di prendere il posto
@@ -1680,23 +2171,51 @@ class Api:
             try:
                 funzione(*argomenti)
                 _verso_pagina('cambiaStato', 'done')
+                avviso = posto.fine and (posto.fine[0], posto.fine[1], True)
             except engine.RateLimitReached as exc:
+                self._registra(posto.corrente, stato=storico.A_META)
                 self._crediti_finiti(exc)
+                avviso = (i18n.t('rate.title'), (posto.corrente or {}).get('title', ''), False)
+            except engine.CreditiEsauriti as exc:
+                self._crediti_gia_finiti(exc)
+            except contract.Annullato:
+                self._registra(posto.corrente, stato=storico.A_META)
+                self._annullato()
             except engine.EngineError as exc:
+                if posto.corrente and (checkpoints.load_checkpoint(posto.corrente)
+                                       or checkpoints.load_local_checkpoint(posto.corrente)):
+                    self._registra(posto.corrente, stato=storico.A_META)
                 _verso_pagina('erroreLavoro', self._scheda_errore(exc))
+                avviso = (i18n.t('notify.error.title'), (posto.corrente or {}).get('title', ''), False)
             except Exception as exc:                   # noqa: BLE001
                 # Un guasto che non era previsto: qui il dettaglio tecnico e' il
                 # traceback intero e non la sola frase dell'eccezione. Prima
                 # finiva nel diario, che non c'e' piu'; buttarlo via sarebbe
                 # stato togliere l'unica cosa da cui si capisce dove si e' rotto.
                 _verso_pagina('erroreLavoro',
-                              self._scheda_errore(exc, dettaglio=traceback.format_exc()))
+                              self._scheda_errore(exc, dettaglio=self._dettaglio(exc)))
+                avviso = (i18n.t('notify.error.title'), (posto.corrente or {}).get('title', ''), False)
             finally:
                 diario.flush()
                 _SMISTATORE.dimentica()
                 posto.occupato = False
+                contract.usa_segnale(None)
+            # Solo per i lavori lunghi: per un riassunto di dieci secondi la
+            # finestra la si sta ancora guardando, e una notifica sarebbe rumore.
+            if avviso and time.monotonic() - inizio > _NOTIFICA_DOPO:
+                notifica.avvisa(*avviso)
 
         threading.Thread(target=guscio, daemon=True).start()
+
+    def _annullato(self) -> None:
+        """Il lavoro si e' fermato perche' e' stato premuto «Annulla».
+
+        Non e' un errore, e la finestra non e' rossa: il parziale e' salvato,
+        e riaprendo lo stesso video si trova «Riprendi».
+        """
+        _verso_pagina('cambiaStato', 'idle')
+        _verso_pagina('lavoroAnnullato', {'titolo': i18n.t('cancel.title'),
+                                          'testo': i18n.t('cancel.msg')})
 
     def _scheda_errore(self, exc, titolo_video: str | None = None,
                        dettaglio: str | None = None) -> dict:
@@ -1730,9 +2249,10 @@ class Api:
             strada, ma quello che si mostra sotto e' il traceback.
         """
         messaggio = str(exc) or i18n.t('err.unknown')
-        famiglia = contract.classifica_errore(messaggio)
+        famiglia = (('programma' if self._e_un_difetto(exc) else None)
+                    or contract.classifica_errore(messaggio))
         if titolo_video is None:
-            meta = self._p().meta
+            meta = self._p().corrente or self._p().meta
             titolo_video = (meta or {}).get('title') or ''
         return {
             'titolo': i18n.t('err.title'),
@@ -1743,6 +2263,44 @@ class Api:
             'et_dettaglio': i18n.t('err.dettaglio'),
         }
 
+    @staticmethod
+    def _e_un_difetto(exc) -> bool:
+        """True se l'errore e' un difetto del programma e non un guasto del mondo.
+
+        Un TypeError, un KeyError, un AttributeError non arrivano da YouTube ne'
+        dalla rete: vogliono dire che il codice ha chiamato qualcosa nel modo
+        sbagliato. Chi legge deve saperlo, perche' cambia tutto: non c'e' niente
+        da correggere dalla sua parte, e riprovare non serve. Serve segnalarlo.
+        """
+        if isinstance(exc, (engine.EngineError, contract.MediaError)):
+            return False
+        return isinstance(exc, (TypeError, AttributeError, NameError,
+                                KeyError, IndexError))
+
+    def _dettaglio(self, exc) -> str:
+        """Il testo tecnico da mettere sotto: il traceback per i difetti.
+
+        Per un difetto del programma la frase dell'eccezione da sola non basta
+        a trovarlo («KeyError: title» non dice dove): serve il traceback. Per
+        un guasto normale la frase e' tutto quello che c'e' da sapere.
+        """
+        if self._e_un_difetto(exc):
+            return ''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        return str(exc)
+
+    def _crediti_gia_finiti(self, exc) -> None:
+        """I crediti erano finiti ancora prima di cominciare: lo si dice subito.
+
+        E' la stessa finestra dei crediti finiti a meta', ma senza parziale da
+        riprendere: non e' partito niente, e non c'e' niente da completare in
+        locale. C'e' solo un orario a cui riprovare.
+        """
+        _verso_pagina('creditiFiniti', {
+            'titolo': i18n.t('rate.title'),
+            'testo': i18n.t('rate.before', ora=getattr(exc, 'ripresa', '') or '?'),
+            'puo_locale': False,
+        })
+
     def _crediti_finiti(self, exc) -> None:
         """Groq ha esaurito i crediti: e' un'attesa, non un guasto.
 
@@ -1750,10 +2308,13 @@ class Api:
         entrambe vere: tornare domani e riprendere, o finire adesso sul proprio
         computer. Dirlo in rosso sarebbe sbagliato: non si e' rotto niente.
         """
+        ripresa = getattr(exc, 'ripresa', None)
         _verso_pagina('creditiFiniti', {
             'titolo': i18n.t('rate.title'),
             'testo': i18n.t('rate.msg',
                             fatto=text._format_timestamp(int(getattr(exc, 'done_seconds', 0) or 0)),
-                            totale=text._format_timestamp(int(getattr(exc, 'total_seconds', 0) or 0))),
-            'puo_locale': self._p().src != '' and self._p().meta is not None,
+                            totale=text._format_timestamp(int(getattr(exc, 'total_seconds', 0) or 0)),
+                            quando=(i18n.t('rate.when.at', ora=ripresa) if ripresa
+                                    else i18n.t('rate.when.tomorrow'))),
+            'puo_locale': bool(self._p().corrente_src) and self._p().corrente is not None,
         })

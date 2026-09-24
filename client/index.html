@@ -96,11 +96,6 @@
          stroke-linecap="round" stroke-linejoin="round">
         <path d="M4 5.5h11M4 10h11M4 14.5h7M4 19h5"/><circle cx="17.5" cy="17.5" r="3.2"/>
       </g>
-      <g id="i-occhio" fill="none" stroke="currentColor" stroke-width="1.6"
-         stroke-linecap="round" stroke-linejoin="round">
-        <path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/>
-        <circle cx="12" cy="12" r="2.6"/>
-      </g>
       <g id="i-spunta" fill="none" stroke="currentColor" stroke-width="1.9"
          stroke-linecap="round" stroke-linejoin="round">
         <path d="M4.5 12.5l5 5 10-11"/>
@@ -120,6 +115,19 @@
       <g id="i-freccia" fill="none" stroke="currentColor" stroke-width="1.7"
          stroke-linecap="round" stroke-linejoin="round">
         <path d="M9 5l7 7-7 7"/>
+      </g>
+      <g id="i-storico" fill="none" stroke="currentColor" stroke-width="1.6"
+         stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3.5 12a8.5 8.5 0 102.5-6"/><path d="M3 4v4.5h4.5"/><path d="M12 7.5V12l3 2"/>
+      </g>
+      <g id="i-leggi" fill="none" stroke="currentColor" stroke-width="1.6"
+         stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 5.5c2.8-1.2 5.8-1.2 9 .8v13c-3.2-2-6.2-2-9-.8z"/>
+        <path d="M21 5.5c-2.8-1.2-5.8-1.2-9 .8v13c3.2-2 6.2-2 9-.8z"/>
+      </g>
+      <g id="i-togli" fill="none" stroke="currentColor" stroke-width="1.7"
+         stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 6l12 12M18 6L6 18"/>
       </g>
     </defs>
   </svg>
@@ -161,6 +169,14 @@
           <svg class="icona" viewBox="0 0 24 24"><use href="#i-nuvola"/></svg>
           <span data-t="menu.cloud"></span>
           <span class="targhetta-menu" id="targhetta-cloud"></span>
+        </button>
+        <!-- Lo storico non e' una postazione: non ci si lavora, ci si guarda
+             quello che e' stato fatto nelle altre due. Sta in fondo, staccato,
+             per dirlo senza parole. -->
+        <button class="voce voce-staccata" data-va="storico">
+          <span class="rotaia"></span>
+          <svg class="icona" viewBox="0 0 24 24"><use href="#i-storico"/></svg>
+          <span data-t="menu.storico"></span>
         </button>
       </nav>
     </aside>
@@ -204,7 +220,7 @@
              capita di dover cambiare piu' spesso.
 
              Ogni riquadro mostra la scelta fatta e un pulsante per cambiarla.
-             Il come si cambia sta in una finestra a parte: sono tre menu a
+             Il come si cambia sta in una finestra a parte: sono due menu a
              tendina o un modulo intero, e tenerli sempre a schermo vorrebbe
              dire una pagina piena di cose gia' decise. -->
         <div class="carte">
@@ -245,7 +261,7 @@
               <span data-t="carta.video"></span>
             </div>
             <div class="carta-corpo" id="riepilogo-video"></div>
-            <button id="apri-video" class="bottone contorno carta-azione">
+            <button id="apri-video" class="bottone contorno carta-azione resta-attivo">
               <svg class="icona" viewBox="0 0 24 24"><use href="#i-cerca"/></svg>
               <span data-t="carta.video.bottone"></span>
             </button>
@@ -289,10 +305,6 @@
                 <label data-t="eng.model.ollama"></label>
                 <select id="m-ollama" class="campo"></select>
               </div>
-              <div class="gruppo largo">
-                <label data-t="eng.model.vision"></label>
-                <select id="m-vision" class="campo"></select>
-              </div>
             </div>
           </div>
 
@@ -307,15 +319,13 @@
                 <label data-t="eng.model.groqtesto"></label>
                 <select id="m-groq-testo" class="campo"></select>
               </div>
-              <div class="gruppo largo">
-                <label data-t="eng.model.groqvista"></label>
-                <select id="m-groq-vista" class="campo"></select>
-              </div>
             </div>
           </div>
 
           <div id="modulo-video">
-            <div class="riga">
+            <!-- Questa riga resta attiva anche mentre la postazione lavora: e'
+                 da qui che si incolla il prossimo link, che va in coda. -->
+            <div class="riga resta-attivo">
               <div class="gruppo stretto">
                 <label data-t="src.label"></label>
               <select id="sorgente" class="campo">
@@ -325,7 +335,12 @@
             </div>
 
             <!-- I due ingressi occupano lo stesso posto: si vede solo quello
-                 della sorgente scelta, cosi' la riga non cambia altezza. -->
+                 della sorgente scelta, cosi' la riga non cambia altezza.
+
+                 Il link non ha piu' un bottone per leggerlo: si legge da solo
+                 appena incollato (o dopo un attimo di pausa mentre lo si
+                 scrive), e l'anteprima si apre in una finestra. La riga sotto
+                 la casella dice che cosa sta succedendo. -->
             <div class="gruppo largo" id="ingresso-youtube">
               <label data-t="src.input.url"></label>
               <div class="campo-icona">
@@ -333,6 +348,7 @@
                 <input id="url" class="campo con-icona" type="text" spellcheck="false"
                        placeholder="https://www.youtube.com/watch?v=…">
               </div>
+              <div class="nota-lettura" id="lettura" data-t="src.load.hint"></div>
             </div>
             <div class="gruppo largo" id="ingresso-file" hidden>
               <label data-t="src.input.file"></label>
@@ -361,21 +377,33 @@
                 <span class="interruttore-nota" data-t="opt.summary.desc"></span>
               </span>
             </label>
-            <label class="interruttore">
-              <input type="checkbox" id="opt-visual"><span class="cursore"></span>
+            <!-- Le due aggiunte al riassunto. Stanno rientrate sotto di lui
+                 perche' senza riassunto non valgono niente, e spento quello
+                 si spengono anche loro. -->
+            <label class="interruttore dipende">
+              <input type="checkbox" id="opt-charts"><span class="cursore"></span>
               <span class="interruttore-testo">
-                <span class="interruttore-nome" data-t="opt.visual"></span>
-                <span class="interruttore-nota" data-t="opt.visual.desc"></span>
+                <span class="interruttore-nome" data-t="opt.charts"></span>
+                <span class="interruttore-nota" data-t="opt.charts.desc"></span>
               </span>
             </label>
-          </div>
-
-            <div class="azioni azioni-modulo">
-              <button id="leggi" class="bottone contorno">
-                <svg class="icona" viewBox="0 0 24 24"><use href="#i-cerca"/></svg>
-                <span data-t="src.load"></span>
-              </button>
+            <label class="interruttore dipende">
+              <input type="checkbox" id="opt-comments"><span class="cursore"></span>
+              <span class="interruttore-testo">
+                <span class="interruttore-nome" data-t="opt.comments"></span>
+                <span class="interruttore-nota" data-t="opt.comments.desc"></span>
+              </span>
+            </label>
+            <div class="gruppo dipende" id="riga-dettaglio">
+              <label data-t="opt.detail"></label>
+              <select id="opt-detail" class="campo">
+                <option value="esteso" data-t="opt.detail.esteso"></option>
+                <option value="normale" data-t="opt.detail.normale"></option>
+                <option value="breve" data-t="opt.detail.breve"></option>
+                <option value="punti" data-t="opt.detail.punti"></option>
+              </select>
             </div>
+          </div>
           </div>
         </div>
 
@@ -394,6 +422,13 @@
             <div class="spazio"></div>
             <span class="targhetta" id="badge-fase"></span>
             <span class="avanz-pct" id="avanz-pct"></span>
+            <span class="avanz-eta" id="avanz-eta"></span>
+            <!-- Resta cliccabile mentre tutto il resto della postazione e'
+                 spento: e' l'unico gesto che ha senso durante un lavoro. -->
+            <button id="annulla" class="bottone contorno piccolo resta-attivo">
+              <svg class="icona" viewBox="0 0 24 24"><use href="#i-togli"/></svg>
+              <span data-t="prog.cancel"></span>
+            </button>
           </div>
           <div class="avanz-nota" id="badge-nota" hidden></div>
           <div class="binario"><div class="cursa" id="barra"></div></div>
@@ -432,6 +467,12 @@
             <span class="targhetta" id="stima"></span>
           </div>
           <div id="sorgente-scheda" class="elenco"></div>
+          <!-- I video che aspettano il loro turno, ciascuno con il suo × per
+               toglierlo prima che parta. Vuota, non si vede. -->
+          <div class="coda-blocco" id="coda-blocco" hidden>
+            <label class="etichetta" data-t="coda.title"></label>
+            <div class="elenco-video" id="coda-lista"></div>
+          </div>
         </section>
       </div>
       </template>
@@ -453,7 +494,7 @@
 
       <!-- ══ CLOUD ══════════════════════════════════════════════════════ -->
       <!-- E qui dentro, per lo stesso motivo, solo cose che vivono sui server
-           Groq: i tre modelli e la chiave che li paga. -->
+           Groq: i due modelli e la chiave che li paga. -->
       <div class="sezione" data-sez="cloud">
         <header class="intestazione">
           <h1 data-t="sez.cloud.title"></h1>
@@ -464,6 +505,53 @@
         <div class="slot-lavoro"></div>
       </div>
 
+      <!-- ══ STORICO ════════════════════════════════════════════════════ -->
+      <!-- Una tabella sola, con quello che e' stato trascritto in tutte e due
+           le postazioni. La riempie storico.js chiedendola a Python ogni
+           volta che si entra: i lavori finiscono mentre si guarda altro, e una
+           tabella ferma alla prima apertura mentirebbe. -->
+      <div class="sezione" data-sez="storico">
+        <header class="intestazione">
+          <h1 data-t="sez.storico.title"></h1>
+          <p data-t="sez.storico.desc"></p>
+        </header>
+        <hr class="divisore">
+
+        <section class="vetro storico">
+          <div class="storico-barra">
+            <div class="campo-icona storico-cerca">
+              <svg class="icona-campo" viewBox="0 0 24 24"><use href="#i-cerca"/></svg>
+              <input id="storico-cerca" class="campo con-icona" type="text" spellcheck="false">
+            </div>
+            <span class="targhetta" id="storico-conta"></span>
+            <div class="spazio"></div>
+            <button id="storico-aggiorna" class="bottone contorno piccolo">
+              <svg class="icona" viewBox="0 0 24 24"><use href="#i-rifai"/></svg>
+              <span data-t="hist.refresh"></span>
+            </button>
+          </div>
+          <div class="storico-scorri">
+            <table class="tabella-storico">
+              <thead>
+                <tr>
+                  <th data-t="hist.col.url"></th>
+                  <th data-t="hist.col.channel"></th>
+                  <th data-t="hist.col.title"></th>
+                  <th data-t="hist.col.duration"></th>
+                  <th data-t="hist.col.credits"></th>
+                  <th data-t="hist.col.kind"></th>
+                  <th data-t="hist.col.state"></th>
+                  <th data-t="hist.col.mode"></th>
+                  <th data-t="hist.col.date"></th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="storico-righe"></tbody>
+            </table>
+          </div>
+          <div id="storico-vuoto"></div>
+        </section>
+      </div>
 
     </main>
   </div>
@@ -523,6 +611,7 @@
   <script src="features/engine.js"></script>
   <script src="features/transcribe.js"></script>
   <script src="features/carte.js"></script>
+  <script src="features/storico.js"></script>
   <script>avvia();</script>
 </body>
 </html>

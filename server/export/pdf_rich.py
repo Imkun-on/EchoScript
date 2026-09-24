@@ -105,9 +105,30 @@ _PDF_HTML_TEMPLATE = """<!doctype html>
   svg: {fontCache: 'global'}};</script>
 <script src="__MATHJAX__"></script>
 <script src="__MERMAID__"></script>
-<script>window.addEventListener('load', function () {
-  if (window.mermaid) { try { mermaid.initialize({startOnLoad: true, theme: 'neutral'}); } catch (e) {} }
-});</script>
+<script>(function () {
+  /* Tema 'base' perche' e' l'unico che accetta colori propri: con quello di
+     serie la linea di un grafico usciva di un lilla cosi' pallido da non
+     vedersi sulla carta. Qui i colori sono quelli del documento, verde in
+     testa, seguiti da tinte ben distinte fra loro anche stampate.
+
+     Si configura SUBITO, appena la libreria e' caricata, e non all'evento
+     'load': a quell'evento Mermaid disegna da se' con la configurazione che
+     trova, e una configurazione data nello stesso momento arrivava tardi e
+     non veniva mai usata. */
+  var tinte = ['#128a4b', '#2563eb', '#d97706', '#9333ea', '#dc2626', '#0891b2',
+               '#65a30d', '#db2777'];
+  var variabili = {
+    fontFamily: "'Segoe UI', Calibri, Arial, sans-serif",
+    primaryColor: '#d8efe2', primaryTextColor: '#1b1b1b',
+    primaryBorderColor: '#128a4b', lineColor: '#0b6b3a',
+    pieStrokeColor: '#ffffff', pieOuterStrokeColor: '#d8efe2',
+    pieSectionTextColor: '#ffffff',
+    xyChart: {plotColorPalette: tinte.join(', ')}
+  };
+  tinte.forEach(function (c, i) { variabili['pie' + (i + 1)] = c; });
+  if (window.mermaid) { try { mermaid.initialize({startOnLoad: true, theme: 'base',
+                                                  themeVariables: variabili}); } catch (e) {} }
+})();</script>
 </head><body>
 <table class="pagewrap"><thead><tr><td></td></tr></thead>
 <tfoot><tr><td></td></tr></tfoot>
@@ -194,8 +215,7 @@ def _md_to_html(md: str) -> str:
     def _img(m):
         """Un'immagine di markdown diventa un tag HTML.
 
-        Il giro sul percorso serve ai fotogrammi estratti dal video, che sono
-        file sul disco. Un browser, in una pagina locale, non carica un
+        Il giro sul percorso serve alle immagini che sono file sul disco. Un browser, in una pagina locale, non carica un
         percorso scritto alla maniera di Windows: gli va dato nella forma degli
         indirizzi, e la conversione la fa la riga qui sotto.
 
@@ -384,6 +404,42 @@ def _find_browser() -> str | None:
         if c and os.path.isfile(c):
             return c
     return None
+def pagina_html(md_text: str, schermo: bool = False) -> str | None:
+    """La pagina HTML di un documento, con formule e grafici pronti a disegnarsi.
+
+    E' la stessa pagina che diventa il PDF, e la usa anche la finestra
+    «Leggi», che la mostra a schermo invece di stamparla: cosi' quello che si
+    legge dentro il programma e quello che si stampa non possono divergere.
+    Con 'schermo' la pagina prende una larghezza da lettura e i margini da
+    schermo invece di quelli da foglio.
+
+    None se le due librerie non ci sono e non si riescono a scaricare.
+    """
+    import pathlib
+    assets = _ensure_pdf_assets()
+    if not assets:
+        return None
+    mathjax, mermaid = assets
+    pagina = (_PDF_HTML_TEMPLATE
+              .replace("__MATHJAX__", pathlib.Path(mathjax).as_uri())
+              .replace("__MERMAID__", pathlib.Path(mermaid).as_uri())
+              .replace("__BODY__", _md_to_html(md_text)))
+    if schermo:
+        pagina = pagina.replace("</style>", _STILE_SCHERMO + "</style>", 1)
+    return pagina
+
+
+# A schermo il documento non e' un foglio: una colonna da lettura al centro,
+# senza le righe vuote che nel PDF fanno da margine di pagina.
+_STILE_SCHERMO = """
+  body { background: #eef1ef; }
+  table.pagewrap { max-width: 860px; margin: 24px auto; background: #fff;
+                   box-shadow: 0 2px 14px #0000001f; border-radius: 10px; }
+  table.pagewrap > thead > tr > td, table.pagewrap > tfoot > tr > td { height: 28px; }
+  table.pagewrap > tbody > tr > td { padding: 0 44px; }
+"""
+
+
 def build_pdf_rich(md_text: str, out_path: str) -> bool:
     """Genera un PDF con formule (MathJax) e mappe (Mermaid) DISEGNATE.
 
@@ -394,14 +450,9 @@ def build_pdf_rich(md_text: str, out_path: str) -> bool:
     browser = _find_browser()
     if not browser:
         return False
-    assets = _ensure_pdf_assets()
-    if not assets:
+    html_doc = pagina_html(md_text)
+    if html_doc is None:
         return False
-    mathjax, mermaid = assets
-    html_doc = (_PDF_HTML_TEMPLATE
-                .replace("__MATHJAX__", pathlib.Path(mathjax).as_uri())
-                .replace("__MERMAID__", pathlib.Path(mermaid).as_uri())
-                .replace("__BODY__", _md_to_html(md_text)))
     with tempfile.TemporaryDirectory(prefix="echoscript_pdf_", ignore_cleanup_errors=True) as td:
         html_path = os.path.join(td, "doc.html")
         with open(html_path, "w", encoding="utf-8") as f:

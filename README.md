@@ -89,15 +89,25 @@ Non serve installare Python né altro.
 
 Incolli un link di YouTube o scegli un file dal disco, e il programma:
 
-1. **legge cosa c'è dietro** (titolo, durata, copertina) e chiede conferma, così un link sbagliato si scopre prima di spendere mezz'ora;
+1. **legge cosa c'è dietro** appena incolli il link (titolo, durata, copertina) e ne apre l'anteprima in una finestra, così un link sbagliato si scopre prima di spendere mezz'ora;
 2. **scarica solo l'audio**, che pesa dieci volte meno del video;
 3. **lo trascrive**, sui server Groq o sul tuo computer;
-4. opzionalmente lo **traduce** in italiano, ne fa un **riassunto** pulito, e **legge quello che nel video si vede** e non si sente (codice, formule, grafici);
-5. **salva tutto** in quattro formati.
+4. opzionalmente lo **traduce** in italiano e ne fa un **riassunto** pulito, con **grafici** quando il video dà numeri confrontabili (statistiche, andamenti, valori di una funzione) e **commenti** dentro i blocchi di codice;
+5. **salva tutto** in cinque formati, Word compreso.
 
-Funziona anche su **playlist intere** e su **cartelle di file audio**, un elemento dopo l'altro.
+Funziona anche su **playlist intere** e su **cartelle di file audio**, un elemento dopo l'altro. E c'è una **coda**: incolla più link insieme (uno per riga), oppure incollane uno nuovo mentre un lavoro è in corso, e verranno trascritti in fila appena tocca a loro. Basta anche **Ctrl+V** in qualunque punto della finestra: se negli appunti c'è un link, si apre la sua anteprima.
+
+Mentre lavora mostra l'elenco delle fasi, ognuna con **la sua percentuale** e una stima del **tempo che manca** alla fine della fase. Un lavoro si può **annullare** in qualunque momento: si ferma al primo punto sicuro e quello che era fatto resta salvato. Se nel frattempo stavi usando altro, a fine lavoro arriva una **notifica di Windows**.
+
+A lavoro finito, **«Leggi»** apre il riassunto (o la trascrizione) in una finestra, con formule e grafici già disegnati. Il riassunto può essere **esteso, normale, breve o solo i punti chiave**.
+
+In **Locale**, prima di partire il programma controlla che Ollama sia acceso e che il modello sia scaricato, e se manca qualcosa ti dice il comando da lanciare. In **Cloud** avvisa prima se i crediti Groq rimasti non bastano per tutto l'audio.
+
+La sezione **Storico** tiene una tabella di tutto quello che hai trascritto: link, canale, video, durata, crediti usati, singolo o playlist, se è completo o a metà, con quale motore e quando.
 
 **Se qualcosa si interrompe** (rete, crediti finiti, finestra chiusa) il lavoro fatto fino a quel punto è salvato: riaprendo il programma e reincollando lo stesso link compare **«Riprendi»**, che riparte dal punto esatto invece che da capo.
+
+**Se i crediti Groq finiscono** il programma non resta ad aspettare: lo dice subito, con l'ora in cui tornano disponibili, e propone di finire sul computer. Aspetta da solo soltanto il limite «al minuto», che si libera in pochi secondi, e mentre aspetta mostra il conto alla rovescia.
 
 Oltre alla finestra c'è anche una **riga di comando** (`python cli/main.py`) che fa le stesse cose con dei menu nel terminale.
 
@@ -116,7 +126,7 @@ Oltre alla finestra c'è anche una **riga di comando** (`python cli/main.py`) ch
 | **Prima volta** | scarica il modello (da 150 MB a qualche GB) | niente da scaricare |
 | **Quando conviene** | audio privati, nessuna fretta, uso intensivo | video pubblici, poco tempo |
 
-Il motore scelto vale per tutto il lavoro: trascrizione, riassunto, traduzione e analisi visiva. Non si mescolano mai.
+Il motore scelto vale per tutto il lavoro: trascrizione, riassunto e traduzione. Non si mescolano mai.
 
 > 🔒 **Offline totale.** Con il motore locale e senza chiave Groq, l'intera catena gira sul tuo computer e nessun dato lo lascia. Servono [Ollama](https://ollama.com) installato e avviato e un modello scaricato, per esempio `ollama pull qwen2.5:7b`.
 
@@ -160,19 +170,12 @@ In **locale** si sceglie dal menu a ogni lavoro:
 
 Con la chiave Groq la **traduzione** passa invece da Google Translate, che è gratuito e non chiede una chiave sua. In locale riusa lo stesso modello del riassunto, così se ne scarica uno solo.
 
-### Analisi visiva
+### Grafici e commenti nel riassunto
 
-I modelli **multimodali** ricevono un fotogramma più il parlato di quel momento, e trascrivono quello che è scritto a schermo. Un modello di solo testo non può farlo.
+Sono due interruttori sotto «Crea riassunto», accesi di partenza:
 
-Sul cloud: `qwen/qwen3.6-27b` su Groq. In locale, dal menu:
-
-| Modello | Parametri | RAM | Punti di forza |
-|---|---|---|---|
-| `qwen2.5vl:3b` | 3,8 B | ~4 GB | piccolo ma con un OCR eccellente. Ideale con 8 GB |
-| `gemma3:4b` | 4,3 B | ~4 GB | nativamente multimodale, buon compromesso |
-| `qwen2.5vl:7b` | 8,3 B | ~7 GB | stesso OCR, più capacità di ragionare su ciò che vede |
-| `llama3.2-vision` | 11 B | ~9 GB | solido, ma più pesante |
-| `qwen2.5vl:32b` | 33 B | ~24 GB | la qualità più vicina al cloud, serve una workstation |
+- **Grafici.** Quando una sezione dà numeri che si capiscono meglio a colpo d'occhio (una statistica, percentuali di un totale, una serie nel tempo, i valori di una funzione in una dimostrazione), il riassunto aggiunge un grafico a barre, a linee o a torta. Solo con i numeri detti nel video o calcolabili esattamente dalle sue formule: se i dati sono vaghi il grafico non si fa. Nel PDF è disegnato, nel `.md` è un blocco Mermaid (GitHub, Obsidian e VS Code lo mostrano), nel `.txt` diventa un elenco di voci e valori.
+- **Commenti nel codice.** Il codice riportato nel riassunto arriva con brevi commenti sulle righe che non si spiegano da sole. Il codice resta quello detto: si aggiungono solo commenti.
 
 > **Come leggere la colonna RAM.** È quella che il modello occupa mentre gira, e va **sommata** a Windows e alle altre app aperte. Con 8 GB totali conviene restare sui modelli da ~4 GB; con 16 GB gira comodo tutto fino a ~10 GB. Se un modello non ci sta, Ollama usa il disco e diventa molto lento: meglio scendere di taglia.
 
@@ -187,21 +190,21 @@ results/
     │   ├── <Nome>.md          sezioni con minutaggio, prosa pulita
     │   ├── <Nome>.txt         testo puro, da incollare in un altro modello
     │   ├── <Nome>.json        segmenti con i tempi, per RAG e script
-    │   └── <Nome>.pdf         impaginato, con sommario cliccabile
+    │   ├── <Nome>.pdf         impaginato, con sommario cliccabile
+    │   └── <Nome>.docx        lo stesso testo in Word, da modificare
     ├── traduzioni/            se l'audio non era in italiano
-    ├── riassunti/             riassunto pulito, per sezione
-    └── analisi_visiva/        se attivi l'analisi visiva
-        └── frames/            i fotogrammi estratti
+    └── riassunti/             riassunto pulito, per sezione
 ```
 
-**Perché quattro formati.** Non è ridondanza: ognuno risolve un bisogno diverso.
+**Perché cinque formati.** Non è ridondanza: ognuno risolve un bisogno diverso.
 
 - **`.md`** per leggere e pubblicare: i minutaggi solo nei titoli, il corpo è prosa scorrevole.
 - **`.txt`** per darlo in pasto a un altro modello: niente tempi, niente formattazione.
 - **`.json`** per RAG e uso programmatico: metadati, capitoli e tutti i segmenti con i tempi.
 - **`.pdf`** per leggere offline, con i capitoli come segnalibri nel pannello laterale.
+- **`.docx`** per modificare il testo in Word, LibreOffice o Google Documenti. Le formule restano scritte in LaTeX e i grafici diventano un elenco di valori: disegnati li trovi nel PDF.
 
-**Il PDF viene generato sempre**, con due strategie. Quando ci sono formule, mappe o fotogrammi, la pagina viene impaginata da un **browser già presente sul sistema** (Edge su Windows): le formule sono disegnate davvero, non scritte. Niente LaTeX da installare. Se un browser non c'è, si ripiega su un PDF semplice che funziona sempre, anche offline.
+**Il PDF viene generato sempre**, con due strategie. Quando ci sono formule o grafici, la pagina viene impaginata da un **browser già presente sul sistema** (Edge su Windows): le formule sono disegnate davvero, non scritte. Niente LaTeX da installare. Se un browser non c'è, si ripiega su un PDF semplice che funziona sempre, anche offline.
 
 **Playlist.** I video finiscono in `results/<nome playlist>/`, con una sottocartella per ciascuno.
 
@@ -290,7 +293,7 @@ server/             il lavoro, diviso per mestiere
   services/         il direttore d'orchestra e la stima prima di partire
   sources/          da dove arriva l'audio: YouTube o un file sul disco
   transcription/    l'audio diventa parole: Groq oppure faster-whisper
-  enrichment/       riassunto, traduzione, analisi visiva
+  enrichment/       riassunto e traduzione
   export/           documento, PDF semplice, PDF ricco
   state/            parziali, crediti, fasi già fatte
   utils/            quello che serve a tutti e non appartiene a nessuno
@@ -325,13 +328,9 @@ Tutte le manopole si impostano da variabili d'ambiente o dal file `.env` accanto
 | `ECHOSCRIPT_OLLAMA_HOST` | `http://localhost:11434` | dove risponde Ollama |
 | `ECHOSCRIPT_OLLAMA_NUM_CTX` | `8192` | finestra di contesto: se è piccola il modello legge solo l'inizio |
 | `ECHOSCRIPT_SUMMARY_MAX_CHARS` | `12000` | oltre questa soglia una sezione si riassume a blocchi |
-| `ECHOSCRIPT_GROQ_VISION_MODEL` | `qwen/qwen3.6-27b` | quale modello che guarda le immagini, su Groq |
-| `ECHOSCRIPT_OLLAMA_VISION_MODEL` | `llama3.2-vision` | lo stesso, in locale |
-| `ECHOSCRIPT_VISION_SCENE` | `0.4` | quanto deve cambiare l'immagine per estrarre un fotogramma |
-| `ECHOSCRIPT_VISION_MAX_FRAMES` | `60` | tetto di fotogrammi per video, per costo e tempo |
-| `ECHOSCRIPT_SUMMARY_FRAMES` | `1` | mostra i fotogrammi anche nel riassunto |
-| `ECHOSCRIPT_CONCEPT_MAP` | `0` | chiedi anche una mappa dei concetti |
-| `ECHOSCRIPT_RICH_PDF` | `1` | PDF con formule e mappe disegnate (0 = solo quello semplice) |
+| `ECHOSCRIPT_SUMMARY_CHARTS` | `1` | grafici nel riassunto, quando i dati ci sono (valore di partenza dell'interruttore) |
+| `ECHOSCRIPT_SUMMARY_CODE_COMMENTS` | `1` | commenti nei blocchi di codice del riassunto (idem) |
+| `ECHOSCRIPT_RICH_PDF` | `1` | PDF con formule e grafici disegnati (0 = solo quello semplice) |
 
 > **GPU.** Il motore locale usa la scheda NVIDIA se la trova, altrimenti il processore. Per l'accelerazione installa PyTorch con CUDA, vedi `requirements.txt`.
 

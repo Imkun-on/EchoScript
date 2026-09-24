@@ -282,7 +282,6 @@ def has_resumable_state(meta: dict) -> bool:
 TRANS_SUBDIR = "trascrizioni"
 TRANSL_SUBDIR = "traduzioni"
 SUMMARY_SUBDIR = "riassunti"
-VISUAL_SUBDIR = "analisi_visiva"
 
 # Il pezzo che si aggiunge al nome del file del riassunto.
 SUMMARY_SUFFIX = "riassunto"
@@ -298,7 +297,6 @@ NOMI_VECCHI = {
     TRANS_SUBDIR: "transcriptions",
     TRANSL_SUBDIR: "translations",
     SUMMARY_SUBDIR: "summaries",
-    VISUAL_SUBDIR: "visual_analysis",
 }
 
 
@@ -306,7 +304,7 @@ def trans_subdir() -> str:
     """Il nome della sottocartella delle trascrizioni.
 
     E' una funzione e non il nome scritto direttamente nei punti che lo usano,
-    per una ragione che vale anche per le tre sorelle qui sotto: sono una
+    per una ragione che vale anche per le due sorelle qui sotto: sono una
     decina i posti che compongono quel percorso, e il giorno in cui la cartella
     cambiasse nome, cercarne dieci occorrenze in un programma intero e'
     esattamente il modo in cui se ne dimentica una.
@@ -330,15 +328,6 @@ def summary_subdir() -> str:
     spiegato in trans_subdir.
     """
     return SUMMARY_SUBDIR
-
-
-def visual_subdir() -> str:
-    """Il nome della sottocartella dell'analisi visiva.
-
-    Funzione e non costante scritta nei punti d'uso, per lo stesso motivo
-    spiegato in trans_subdir.
-    """
-    return VISUAL_SUBDIR
 
 
 def transcription_exists(out_root: str, title: str) -> bool:

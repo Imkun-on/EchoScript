@@ -1,17 +1,10 @@
 """Procurarsi l'audio, da YouTube o da un file che c'e' gia'.
 
-Quando serve anche il video
-    Solo se si e' chiesta l'analisi visiva, perche' li' servono i fotogrammi.
-    In tutti gli altri casi si prende solo l'audio.
-
-Perche' di regola solo l'audio
+Perche' solo l'audio
     Perche' trascrivere non ha bisogno d'altro, e la differenza di peso e'
     enorme: un'ora di video sono centinaia di megabyte, la stessa ora di audio
     compresso sono una ventina. Su una playlist di cinquanta video quella
     differenza e' fra un lavoro che finisce e uno che riempie il disco.
-
-    Il video intero si scarica solo quando si e' chiesta anche l'analisi
-    visiva, perche' li' servono i fotogrammi.
 
 Non stampa niente
     Riferisce quello che sta succedendo chiamando una funzione che gli viene
@@ -21,12 +14,10 @@ Non stampa niente
 from __future__ import annotations
 
 import os
-import subprocess
 
 import yt_dlp
 
 from server.config import settings
-from server.config.settings import VIDEO_EXTENSIONS, VISION_YT_MAX_HEIGHT
 from server.config.messages import msg
 from server.utils.contract import MediaError, _never_stop, _noop_progress
 from server.utils.text import _safe_filename
@@ -101,73 +92,3 @@ def download_audio(url: str, workdir: str, on_progress=_noop_progress,
         if fname.startswith("audio."):
             return os.path.join(workdir, fname)
     raise MediaError("File audio non trovato dopo il download.")
-
-
-def _has_video_stream(path: str) -> bool:
-    """Questo file ha delle immagini dentro, o e' solo audio?
-
-    Serve a non far partire l'analisi visiva su un mp3. Senza questo controllo
-    il programma estrarrebbe fotogrammi da qualcosa che non ne ha, si
-    ritroverebbe una cartella vuota e non saprebbe dire perche'.
-
-    Prima si guarda l'estensione, che costa niente ed e' giusta quasi sempre.
-    Solo se quella non basta si chiama ffprobe, che e' lento ma non sbaglia:
-    un file chiamato .mp4 puo' benissimo contenere solo audio.
-    """
-    if os.path.splitext(path)[1].lower() in VIDEO_EXTENSIONS:
-        return True
-    try:
-        out = subprocess.run(
-            ["ffprobe", "-v", "error", "-select_streams", "v:0",
-             "-show_entries", "stream=codec_type", "-of",
-             "default=noprint_wrappers=1:nokey=1", path],
-            capture_output=True, text=True, check=True)
-        return "video" in out.stdout
-    except Exception:
-        return False
-def download_video(url: str, workdir: str, on_progress=_noop_progress,
-                   should_stop=_never_stop) -> str:
-    """Scarica il VIDEO (capped a VISION_YT_MAX_HEIGHT) per l'analisi visiva.
-
-    A differenza di download_audio (solo audio), qui serve l'immagine: scarichiamo
-    un file muxed a risoluzione contenuta, da cui poi si estraggono SIA i
-    fotogrammi SIA l'audio per la trascrizione (un solo download). Versione senza
-    interfaccia: restituisce il percorso del video e solleva MediaError su
-    errore. Wrapper CLI: `_cli_download_video`."""
-    out_template = os.path.join(workdir, "video.%(ext)s")
-
-    def _hook(d: dict) -> None:
-        """Come il gemello dello scaricamento audio, ma per il video.
-
-        E' quasi identico e resta separato per una riga sola: il messaggio che
-        compare a schermo dice «scarico il video» invece di «scarico l'audio».
-        Unirli vorrebbe dire passarsi quel testo come argomento, che per due
-        righe non vale il giro.
-        """
-        if should_stop():
-            raise KeyboardInterrupt
-        if d["status"] == "downloading":
-            total = d.get("total_bytes") or d.get("total_bytes_estimate")
-            done = d.get("downloaded_bytes", 0)
-            on_progress("download", done, total, msg("dl_video"))
-        elif d["status"] == "finished":
-            on_progress("download", None, None, msg("prep_video"))
-
-    h = VISION_YT_MAX_HEIGHT
-    ydl_opts = {
-        # Video+audio muxed con altezza limitata; preferiamo mp4 per compatibilità.
-        "format": f"bestvideo[height<={h}]+bestaudio/best[height<={h}]/best",
-        "merge_output_format": "mp4",
-        "outtmpl": out_template,
-        "quiet": True, "no_warnings": True, "noprogress": True,
-        "progress_hooks": [_hook],
-    }
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-    except Exception as e:
-        raise MediaError(f"Errore nel download video: {e}")
-    for fname in os.listdir(workdir):
-        if fname.startswith("video."):
-            return os.path.join(workdir, fname)
-    raise MediaError("File video non trovato dopo il download.")

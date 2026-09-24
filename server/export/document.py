@@ -119,6 +119,55 @@ def _strip_md_bold(text: str) -> str:
     return re.sub(r"(?<![\w*])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![\w*])", r"\1", text)
 
 
+def grafico_in_testo(righe: list[str]) -> list[str]:
+    """Un grafico Mermaid detto a parole, per chi non lo puo' disegnare.
+
+    Il file di testo e il PDF di ripiego non sanno disegnare niente: lasciato
+    com'e', un grafico diventerebbe «xychart-beta», «x-axis [...]» e una fila
+    di numeri fra parentesi, cioe' sintassi. Qui diventa quello che il grafico
+    dice: il titolo, e una riga per ogni voce col suo valore.
+
+    Se il blocco non si riesce a leggere non si restituisce niente: il testo
+    intorno spiega gia' gli stessi dati, perche' le istruzioni del riassunto lo
+    chiedono.
+    """
+    testa = (righe[0] if righe else "").strip()
+    fuori: list[str] = []
+    if testa.startswith("pie"):
+        titolo = re.sub(r"^pie\s*(showData\s*)?(title\s*)?", "", testa).strip()
+        fuori.append(f"Grafico: {titolo}" if titolo else "Grafico:")
+        for r in righe[1:]:
+            m = re.match(r'^"([^"]+)"\s*:\s*(\S+)$', r.strip())
+            if m:
+                fuori.append(f"- {m.group(1)}: {m.group(2)}")
+    elif testa.startswith("xychart"):
+        titolo, etichette, unita, serie = "", [], "", []
+        for r in righe[1:]:
+            r = r.strip()
+            if r.startswith("title"):
+                titolo = r[5:].strip().strip('"')
+            elif r.startswith("x-axis"):
+                dentro = re.search(r"\[(.*)\]", r)
+                if dentro:
+                    etichette = [e.strip().strip('"') for e in dentro.group(1).split(",")]
+            elif r.startswith("y-axis"):
+                m = re.search(r'"([^"]+)"', r)
+                unita = m.group(1) if m else ""
+            else:
+                m = re.match(r"^(bar|line)\b[^\[]*\[(.*)\]$", r)
+                if m:
+                    serie.append([v.strip() for v in m.group(2).split(",")])
+        if not etichette or not serie:
+            return []
+        fuori.append(f"Grafico: {titolo}" if titolo else "Grafico:")
+        coda = f" ({unita})" if unita else ""
+        for i, nome in enumerate(etichette):
+            valori = [s[i] for s in serie if i < len(s)]
+            if valori:
+                fuori.append(f"- {nome}: {' / '.join(valori)}{coda}")
+    return fuori if len(fuori) > 1 else []
+
+
 def appiattisci_markdown(text: str, grassetto: bool = False) -> str:
     """Toglie dal riassunto i segni di markdown che chi legge non deve vedere.
 
@@ -136,7 +185,8 @@ def appiattisci_markdown(text: str, grassetto: bool = False) -> str:
         che interessa a chi legge. Le righe dei tre apici spariscono e il
         codice in mezzo resta dov'e': senza il riquadro grigio non si perde
         niente di importante, mentre una riga di soli apici in mezzo al testo
-        non vuol dire proprio nulla.
+        non vuol dire proprio nulla. I grafici invece non restano come
+        sintassi: diventano un elenco di voci e valori (grafico_in_testo).
 
     Il grassetto, che e' l'unica differenza fra i due usi
         Il file di testo lo vuole via, perche' gli asterischi sono rumore. Il
@@ -147,12 +197,25 @@ def appiattisci_markdown(text: str, grassetto: bool = False) -> str:
     if not text:
         return text
     righe = []
+    grafico = None          # le righe di un blocco mermaid, mentre lo si legge
     for riga in text.split("\n"):
         nuda = riga.strip()
+        if grafico is not None:
+            if nuda.startswith("```"):
+                righe.extend(grafico_in_testo(grafico))
+                grafico = None
+            else:
+                grafico.append(nuda)
+            continue
+        if nuda.startswith("```mermaid"):
+            grafico = []
+            continue
         if nuda.startswith("```"):        # apertura o chiusura di un blocco
             continue
         m = re.match(r"^(#{1,6})\s+(.+)$", nuda)
         righe.append(m.group(2) if m else riga)
+    if grafico:
+        righe.extend(grafico_in_testo(grafico))
     fuori = "\n".join(righe)
     return fuori if grassetto else _strip_md_bold(fuori)
 

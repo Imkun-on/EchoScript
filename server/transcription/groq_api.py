@@ -30,9 +30,18 @@ from groq import Groq
 from server.config import settings
 from server.config.messages import msg
 from server.config.settings import _USE_CONFIG, MAX_RETRIES, WORD_TIMESTAMPS
-from server.state.credits import record_rate_limits
+from server.state.credits import (
+    aggiungi_consumo, aspetta, attesa_breve, ora_di_ripresa, record_rate_limits,
+    registra_da_errore,
+)
 from server.utils.console import SYM_FAIL, console
 from server.utils.contract import GroqRateLimit, _is_rate_limit, _noop_progress
+
+
+# Quante attese brevi di fila si accettano sullo stesso blocco. Oltre, il
+# limite «al minuto» non si sta liberando davvero, e conviene fermarsi e dirlo
+# invece di continuare ad aspettare.
+_ATTESE_MASSIME = 3
 
 
 def _coerce(obj, key):
@@ -68,7 +77,8 @@ def _extract_words(result) -> list[dict]:
     return words
 def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
                       return_language: bool = False, language=_USE_CONFIG,
-                      want_words: bool | None = None, on_headers=None):
+                      want_words: bool | None = None, on_headers=None,
+                      on_attesa=None):
     """Send ONE audio chunk to Groq and return the list of its segments.
 
     Uses response_format='verbose_json' to receive, in addition to the text, the
@@ -88,7 +98,13 @@ def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
 
     If return_language=True, returns (segments, language) where 'language' is the
     ISO code Whisper auto-detected (e.g. 'en'/'it'), otherwise just the segments
-    (backward-compatible default for the CLI)."""
+    (backward-compatible default for the CLI).
+
+    Quando Groq rifiuta per limite: se l'attesa chiesta e' breve (il limite al
+    minuto) si aspetta e si riprova, chiamando 'on_attesa(secondi_rimasti)'
+    ogni secondo perche' chi guarda sappia cosa sta succedendo; se e' lunga
+    (crediti del giorno o dell'ora finiti) si solleva subito GroqRateLimit, con
+    l'ora di ripresa quando Groq la dice. Niente piu' attese mute."""
     lang_opt = settings.LANGUAGE if language is _USE_CONFIG else language
     words_on = WORD_TIMESTAMPS if want_words is None else want_words
     granularities = ["segment", "word"] if words_on else ["segment"]
@@ -113,7 +129,10 @@ def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
     """
         return [w for w in words if seg_start - 0.05 <= w["start"] < seg_end + 0.05]
 
-    for attempt in range(1, MAX_RETRIES + 1):
+    attempt = 0
+    attese = 0
+    while attempt < MAX_RETRIES:
+        attempt += 1
         try:
             with open(chunk_path, "rb") as f:
                 params = dict(
@@ -150,6 +169,9 @@ def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
                 else:
                     result = client.audio.transcriptions.create(**params)
             lang = getattr(result, "language", None)
+            # Il conto dei crediti di questo lavoro: Groq fattura la durata del
+            # blocco, con un minimo di dieci secondi per richiesta.
+            aggiungi_consumo(audio_s=max(10.0, float(getattr(result, "duration", 0) or 0)))
             # result.segments is a list of objects with .start, .end, .text
             segments = getattr(result, "segments", None)
             if segments is None:
@@ -168,10 +190,18 @@ def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
             raise
         except Exception as e:
             msg = str(e)
-            # Limite Groq (429 / token-al-giorno): inutile insistere, fermiamoci
-            # subito così chi chiama può salvare un checkpoint e riprendere dopo.
+            # Limite Groq (429): se e' quello al minuto si aspetta, a schermo;
+            # se sono finiti i crediti ci si ferma subito, così chi chiama può
+            # salvare un checkpoint e riprendere dopo.
             if _is_rate_limit(msg):
-                raise GroqRateLimit(msg)
+                registra_da_errore(settings.GROQ_MODEL, e)
+                breve = attesa_breve(e)
+                if breve is not None and attese < _ATTESE_MASSIME:
+                    attese += 1
+                    attempt -= 1          # aspettare il limite non e' un tentativo fallito
+                    aspetta(breve, on_attesa)
+                    continue
+                raise GroqRateLimit(msg, ora_di_ripresa(e))
             # Authentication/access errors (401/403): there is NO point retrying,
             # they do not resolve on their own. We stop immediately with a clear message.
             if "401" in msg or "403" in msg or "invalid_api_key" in msg:

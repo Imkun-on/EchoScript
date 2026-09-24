@@ -81,6 +81,9 @@ function cambiaSezione(nome, immediato) {
     SCELTE.motore = MOTORE_DI[nome];
     if (window.pywebview) window.pywebview.api.imposta({ motore: MOTORE_DI[nome] }, nome);
   }
+  // Lo storico si rilegge ogni volta che ci si entra: i lavori finiscono
+  // mentre si guarda altro, e una tabella ferma alla prima apertura mentirebbe.
+  if (nome === 'storico' && window.apriStorico) window.apriStorico();
 
   // Prima la sezione che se ne va sfuma e arretra, poi entra la nuova
   // dall'altro lato. Il ritardo e' quello dell'animazione di uscita, non un
@@ -177,8 +180,15 @@ ascolta('cambiaStato', (p, stato) => {
   testo.textContent = t(testo.dataset.t);
   p.q('icona-avvia').setAttribute('href', inCorso ? '#i-clessidra' : '#i-avvia');
 
-  p.tutti('.bottone.pieno, .bottone.contorno').forEach((b) => { b.disabled = inCorso; });
-  p.tutti('.campo, .interruttore input').forEach((c) => { c.disabled = inCorso; });
+  // Restano vivi solo i pezzi segnati «resta-attivo»: la riga del link (da
+  // cui si mette in coda il prossimo video), il riquadro che la apre, e
+  // «Annulla». Tutto il resto aspetta la fine del lavoro.
+  const libero = (e) => !e.closest('.resta-attivo');
+  p.tutti('.bottone.pieno, .bottone.contorno').filter(libero)
+    .forEach((b) => { b.disabled = inCorso; });
+  p.tutti('.campo, .interruttore input').filter(libero)
+    .forEach((c) => { c.disabled = inCorso; });
+  if (window.aggiornaTendine) window.aggiornaTendine();
 
   if (!inCorso) {
     p.piano = [];
@@ -196,7 +206,12 @@ ascolta('iniziaLavoro', (p, dati) => {
   p.piano = dati.piano || [];
   p.q('avanzamento').classList.add('visibile');
   p.q('barra').style.width = '0%';
-  p.q('avanz-pct').textContent = '0%';
+  p.q('avanz-pct').textContent = t('prog.working');
+  p.q('avanz-eta').textContent = '';
+  p.fase = null;
+  const annulla = p.q('annulla');
+  annulla.disabled = false;
+  annulla.querySelector('span').textContent = t('prog.cancel');
   p.q('avanz-fase').textContent = t('phase.default');
   p.q('avanz-dettaglio').textContent = '';
   p.q('racconto-testo').textContent = t('narr.info');
@@ -210,20 +225,58 @@ ascolta('iniziaLavoro', (p, dati) => {
   nota.textContent = dati.nota || '';
   nota.hidden = !dati.nota;
 
-  disegnaPassi(p, -1);
+  disegnaPassi(p, -1, null);
   aggiornaVoci();
 });
 
+/* Quanto manca alla fine della fase, da quanto ci ha messo finora.
+ *
+ * Si misura dal momento in cui la fase ha dato il suo primo numero, non da
+ * quando e' cominciata: il caricamento di un modello o la lettura delle
+ * informazioni stanno prima, non fanno avanzare niente, e falserebbero il
+ * conto. Si parte anche dalla quota raggiunta in quel momento, perche' una
+ * fase ripresa comincia gia' a meta'.
+ *
+ * Si tace finche' la stima non ha basi: nei primi secondi, o sotto il 3%,
+ * un numero cambierebbe a ogni blocco e varrebbe meno del silenzio. */
+function tempoRimanente(p, indice, quota) {
+  const adesso = performance.now();
+  if (!p.fase || p.fase.indice !== indice) p.fase = { indice, inizio: null, q0: 0 };
+  if (quota === null || quota >= 1) return '';
+  if (p.fase.inizio === null) { p.fase.inizio = adesso; p.fase.q0 = quota; return ''; }
+  const trascorso = (adesso - p.fase.inizio) / 1000;
+  const fatto = quota - p.fase.q0;
+  if (trascorso < 5 || fatto < 0.03) return '';
+  const secondi = (1 - quota) * trascorso / fatto;
+  return '· ' + (secondi < 60 ? t('prog.eta.sec')
+                              : t('prog.eta.min', { n: Math.round(secondi / 60) }));
+}
+
+/* Una frazione da 0 a 1 detta come percentuale, o «in corso» se non si sa. */
+function percento(quota) {
+  if (quota === null || quota === undefined) return t('prog.working');
+  return Math.round(Math.max(0, Math.min(1, quota)) * 100) + '%';
+}
+
 /* I passaggi: quelli fatti spuntati, quello in corso acceso, gli altri spenti.
- * E' la sola cosa che dice quanto manca alla FINE e non solo alla fase. */
-function disegnaPassi(p, corrente) {
+ * Ognuno porta la SUA percentuale: 100% quelli fatti, il numero vero quello in
+ * corso, niente quelli che devono ancora cominciare. E' l'elenco che dice
+ * quanto manca alla FINE; la barra dice quanto manca alla fine della fase. */
+function disegnaPassi(p, corrente, quota) {
   const box = p.q('passi');
   box.innerHTML = '';
+  // L'ultima fase arrivata al 100% vuol dire lavoro finito: anche lei spuntata.
+  const finito = quota === 1 && corrente === p.piano.length - 1;
   p.piano.forEach((fase, i) => {
-    const stato = i < corrente ? ' fatto' : (i === corrente ? ' corrente' : '');
+    const fatto = i < corrente || (finito && i === corrente);
+    const stato = fatto ? ' fatto' : (i === corrente ? ' corrente' : '');
     const passo = el('span', 'passo' + stato);
     passo.appendChild(el('span', 'pallino'));
     passo.appendChild(el('span', '', t('phase.' + fase)));
+    if (fatto) passo.appendChild(el('span', 'pct', '100%'));
+    else if (i === corrente && quota !== null && quota !== undefined) {
+      passo.appendChild(el('span', 'pct', percento(quota)));
+    }
     box.appendChild(passo);
   });
 }
@@ -233,30 +286,33 @@ function disegnaPassi(p, corrente) {
  *   fase       il nome della fase che il motore sta eseguendo;
  *   indice     la sua posizione nel piano (-1 se fuori piano);
  *   fasi       quante sono in tutto;
- *   globale    da 0 a 1, il riempimento della barra sull'INTERO lavoro, non
- *              sulla fase: e' Python a calcolarlo, perche' e' Python a sapere
- *              che una fase vale un quinto e non un mezzo;
+ *   quota      da 0 a 1, quanto e' stato fatto DI QUESTA FASE, oppure null
+ *              quando la fase non sa quanto le manca (carica un modello, legge
+ *              le informazioni): la barra resta ferma e al posto del numero
+ *              compare «in corso». Prima era la percentuale del lavoro intero,
+ *              che mescolava un download di un minuto con una trascrizione di
+ *              mezz'ora e non diceva niente di nessuno dei due;
  *   dettaglio  cosa sta lavorando in questo momento (un blocco, una sezione).
  */
-ascolta('avanzaLavoro', (p, fase, indice, fasi, globale, dettaglio) => {
-  if (globale !== null && globale !== undefined) {
-    p.q('barra').style.width = (Math.max(0, Math.min(1, globale)) * 100).toFixed(1) + '%';
-    p.q('avanz-pct').textContent = Math.round(globale * 100) + '%';
-  }
+ascolta('avanzaLavoro', (p, fase, indice, fasi, quota, dettaglio) => {
   const nome = TESTI['phase.' + fase] ? t('phase.' + fase) : t('phase.default');
   p.q('avanz-fase').textContent = nome;
   p.q('avanz-dettaglio').textContent = dettaglio || '';
 
   if (TESTI['narr.' + fase]) p.q('racconto-testo').textContent = t('narr.' + fase);
 
+  // Fuori piano cambia solo il testo: la barra e i passaggi restano quelli
+  // della fase in corso.
+  if (indice < 0) return;
+  const noto = quota !== null && quota !== undefined;
+  p.q('barra').style.width = (noto ? Math.max(0, Math.min(1, quota)) * 100 : 0).toFixed(1) + '%';
+  p.q('avanz-pct').textContent = percento(quota);
+  p.q('avanz-eta').textContent = tempoRimanente(p, indice, noto ? quota : null);
+
   const badge = p.q('badge-fase');
-  if (indice >= 0) {
-    badge.hidden = false;
-    badge.textContent = t('prog.phase', { i: indice + 1, n: fasi });
-    disegnaPassi(p, indice);
-  } else {
-    badge.hidden = true;
-  }
+  badge.hidden = false;
+  badge.textContent = t('prog.phase', { i: indice + 1, n: fasi });
+  disegnaPassi(p, indice, quota);
 });
 
 /* La playlist: quale video, di quanti. Il resto del pannello racconta gia' cosa
@@ -299,9 +355,9 @@ ascolta('erroreLavoro', (p, e) => {
  * cui si sceglie e' meta' del motivo per cui la stima esiste.
  *
  * La postazione da cui arriva la scelta viaggia insieme alla scelta, perche'
- * non tutte valgono per tutto il programma. I modelli si', sono le stesse sei
- * tendine da qualunque stanza le si guardi. La sorgente e i tre interruttori
- * no: appartengono alla stanza in cui sono stati toccati, e spuntare
+ * non tutte valgono per tutto il programma. I modelli si', sono le stesse
+ * quattro tendine da qualunque stanza le si guardi. La sorgente e gli
+ * interruttori no: appartengono alla stanza in cui sono stati toccati, e spuntare
  * «riassunto» in «Cloud» non deve spuntarlo anche di la'.
  *
  * Anche la stima torna indietro con l'indirizzo, ed e' il motivo per cui la si
@@ -439,7 +495,8 @@ function avvia() {
       // divergono: e' Python a tenerle, ed e' Python che le ha appena mandate.
       p.opz = {
         sorgente: SCELTE.sorgente, translate: SCELTE.translate,
-        summarize: SCELTE.summarize, visual: SCELTE.visual,
+        summarize: SCELTE.summarize, grafici: SCELTE.grafici,
+        commenti: SCELTE.commenti, dettaglio: SCELTE.dettaglio,
       };
       if (window.initMotore) window.initMotore(p, dati);
       if (window.initTrascrivi) window.initTrascrivi(p);
@@ -450,6 +507,7 @@ function avvia() {
     passoAvvio();                     // 4. le due sezioni sono pronte
 
     riempiTesti();
+    if (window.initStorico) window.initStorico();
     if (window.potenziaTendine) window.potenziaTendine();
     passoAvvio();                     // 5. ogni etichetta ha il suo testo
 
@@ -471,9 +529,25 @@ function avvia() {
     // che fa partire un lavoro che non si sta vedendo e' una trappola.
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey) || finestraAperta()) return;
+      if (!POSTI[SEZIONE]) return;           // nello storico non si avvia niente
       e.preventDefault();
       const avvia = posto().q('avvia');
       if (avvia && !avvia.disabled) avvia.click();
+    });
+
+    // Ctrl+V ovunque nella stanza, a finestra chiusa: se negli appunti c'e' un
+    // link, si apre direttamente la sua anteprima. Chi ha appena copiato un
+    // link da YouTube non deve prima cercare la casella in cui incollarlo.
+    // Dentro una casella di testo, invece, Ctrl+V fa quello che fa sempre.
+    document.addEventListener('paste', (e) => {
+      const dentro = e.target && e.target.closest && e.target.closest('input, textarea, select');
+      if (dentro || finestraAperta() || !POSTI[SEZIONE]) return;
+      const testo = ((e.clipboardData && e.clipboardData.getData('text')) || '').trim();
+      if (!/https?:\/\//i.test(testo) || !window.accettaTrascinato) return;
+      e.preventDefault();
+      const p = posto();
+      avvisa(t('src.pasted', { stanza: p.nome() }), 'ok');
+      window.accettaTrascinato(p, testo.split(/\s+/).join(' '));
     });
 
     // Trascinare un link o un file dentro la finestra: e' il gesto naturale, e

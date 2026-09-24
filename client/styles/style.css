@@ -385,6 +385,29 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
   transform: translateX(16px); background: var(--lume);
   box-shadow: 0 0 12px var(--iris);
 }
+/* Le due aggiunte al riassunto (grafici, commenti) stanno un passo a destra,
+ * sotto l'interruttore del riassunto: dipendono da lui, e a colpo d'occhio si
+ * deve vedere. Spento il riassunto restano grigie e non si toccano. */
+.interruttore.dipende { margin-left: 47px; }
+.interruttore.spento { opacity: .42; cursor: default; }
+.interruttore.spento:hover { color: var(--t1); }
+
+/* La riga sotto la casella del link. Prima c'era un bottone «Guarda cos'e'»;
+ * adesso il link si legge da solo, e questa riga dice che cosa sta
+ * succedendo: accesa mentre legge, spenta quando aspetta. */
+.nota-lettura {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 11px; color: var(--t2); margin-top: 6px; min-height: 16px;
+}
+.nota-lettura::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%; flex: 0 0 6px;
+  background: #8b7cff33;
+}
+.nota-lettura.attiva { color: var(--onda); }
+.nota-lettura.attiva::before {
+  background: var(--onda); box-shadow: 0 0 8px var(--onda);
+  animation: pulsa 1.2s ease-in-out infinite;
+}
 
 /* ── Bottoni ────────────────────────────────────────────────────────────── */
 
@@ -457,11 +480,13 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
   height: 6px; border-radius: 3px; overflow: hidden;
   background: var(--incavo); box-shadow: inset 0 1px 2px #00000059;
 }
-/* La barra dice sempre un numero vero: la larghezza e' la frazione che il
- * motore ha davvero portato a termine: blocchi trascritti, sezioni tradotte,
- * fotogrammi guardati. Non esiste uno stato «indeterminato» che va avanti e
- * indietro: quando un motore non sa quanto manca la barra sta ferma dov'e', e a
- * parlare e' la riga di testo sotto. */
+/* La barra dice sempre un numero vero, ed e' il numero della FASE in corso:
+ * la frazione che il motore ha davvero portato a termine qui (blocchi
+ * trascritti, sezioni tradotte o riassunte), da 0 a 100 e poi di nuovo da 0
+ * alla fase dopo. Quanto manca alla fine del lavoro lo dicono i passaggi qui
+ * sotto. Non esiste uno stato «indeterminato» che va avanti e indietro: quando
+ * un motore non sa quanto manca la barra sta ferma, al posto del numero c'e'
+ * «in corso», e a parlare e' la riga di testo sotto. */
 .cursa {
   height: 100%; width: 0; border-radius: 3px;
   background: linear-gradient(90deg, var(--iris), var(--onda));
@@ -497,6 +522,13 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 .passo.corrente .pallino {
   background: var(--onda); box-shadow: 0 0 10px var(--onda);
   animation: pulsa 1.2s ease-in-out infinite;
+}
+/* La percentuale di ogni passaggio, accanto al suo nome: 100% per quelli
+ * fatti, il numero vero per quello in corso, niente per quelli che devono
+ * ancora cominciare. */
+.passo .pct {
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: 10.5px; font-weight: 700; opacity: .85;
 }
 
 .racconto {
@@ -566,7 +598,7 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 /* Una riga del riepilogo: a cosa serve, e cosa si e' scelto.
  *
  * Il valore va a capo invece di essere troncato con i puntini: i nomi dei
- * modelli sono lunghi e si somigliano tutti (qwen2.5:7b, qwen2.5vl:7b), e
+ * modelli sono lunghi e si somigliano tutti (qwen2.5:7b, qwen3:8b), e
  * troncarli li renderebbe indistinguibili proprio dove serve distinguerli. */
 .carta-voce { display: flex; flex-direction: column; gap: 1px; }
 .carta-voce .chi {
@@ -579,12 +611,11 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 .azioni-avvio { justify-content: center; flex: 0 0 auto; margin-top: var(--s4); }
 .bottone.grande { padding: 12px 30px; font-size: 14px; }
 
-/* Dentro le finestre i tre menu vanno in colonna e non affiancati: una
- * finestra e' stretta, e tre tendine in fila diventerebbero tre fessure in cui
+/* Dentro le finestre i menu vanno in colonna e non affiancati: una
+ * finestra e' stretta, e due tendine in fila diventerebbero due fessure in cui
  * il nome del modello non ci sta. */
 .riga.incolonna { flex-direction: column; }
 .riga.incolonna .gruppo { flex: 1 1 auto; width: 100%; }
-.azioni-modulo { justify-content: flex-start; margin-top: var(--s3); }
 
 
 /* ── Elenchi ────────────────────────────────────────────────────────────── */
@@ -1042,16 +1073,6 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 .conteggio.neutro .pallino     { background: var(--t2); }
 .conteggio.attenzione .pallino { background: var(--giallo); }
 
-.blocco-visiva {
-  display: flex; align-items: center; gap: var(--s3);
-  border-radius: var(--r-m); padding: var(--s3);
-  background: #38d6ee14; border: 1px solid #38d6ee40;
-}
-.blocco-visiva .icona { width: 20px; height: 20px; color: var(--onda); flex: 0 0 20px; }
-.blocco-visiva .testo { flex: 1; min-width: 0; }
-.blocco-visiva .titolo { font-size: 13px; font-weight: 700; color: var(--t0); }
-.blocco-visiva .desc { font-size: 11.5px; color: var(--t2); }
-
 /* ── Menu a tendina della pagina ────────────────────────────────────────── */
 /* Il <select> vero resta nel documento, invisibile: continua a essere la fonte
  * della verita' per tutto il resto del programma. Quello che si vede e si
@@ -1222,7 +1243,7 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 .alone, .onde, .cursa, .sezione.attiva, .sezione.uscita { will-change: transform, opacity; }
 
 @media (max-width: 1120px) {
-  /* I tre menu dei modelli vanno in colonna: a 250 px l'uno il nome del
+  /* I menu dei modelli vanno in colonna: a 250 px l'uno il nome del
      modello e la sua descrizione finirebbero entrambi tagliati. */
   .sezione[data-sez="locale"] .riga .gruppo.largo,
   .sezione[data-sez="cloud"]  .riga .gruppo.largo { flex-basis: 100%; }
@@ -1233,8 +1254,106 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
  * decorazione, non deve dare fastidio a chi ne soffre. */
 @media (prefers-reduced-motion: reduce) {
   .alone, .onde, .spia.working, .passo.corrente .pallino,
-  .avvio-marchio rect { animation: none; }
+  .nota-lettura.attiva::before, .avvio-marchio rect { animation: none; }
   .sezione.attiva, .sezione.uscita, .finestra, .velo-finestra,
   .credito, .scheda-copertina, .avanzamento.visibile { animation: none; }
   * { transition-duration: .01ms !important; }
 }
+
+/* ── Annulla, tempo rimanente, «Leggi» ──────────────────────────────────── */
+
+.bottone.piccolo { padding: 5px 12px; font-size: 11.5px; gap: 6px; }
+.bottone.piccolo .icona { width: 13px; height: 13px; flex-basis: 13px; }
+/* Quanto manca alla fine della fase, accanto alla sua percentuale. */
+.avanz-eta { font-size: 11.5px; color: var(--t1); white-space: nowrap; }
+/* I documenti da aprire nel riepilogo: in fila, e vanno a capo se non ci stanno. */
+.riga-leggi { display: flex; flex-wrap: wrap; gap: var(--s2); }
+
+/* La tendina della misura del riassunto, rientrata come i due interruttori
+ * che dipendono dal riassunto, e grigia come loro quando il riassunto e' spento. */
+.gruppo.dipende { margin-left: 47px; max-width: 360px; }
+.gruppo.dipende.spento { opacity: .42; }
+
+/* ── La coda ────────────────────────────────────────────────────────────── */
+
+.coda-blocco { margin-top: var(--s4); }
+.coda-blocco .etichetta { display: block; margin-bottom: var(--s2); }
+.riga-video .togli {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; flex: 0 0 22px; border-radius: 6px;
+  background: transparent; border: 1px solid transparent; color: var(--t2); cursor: pointer;
+}
+.riga-video .togli .icona { width: 12px; height: 12px; }
+.riga-video .togli:hover { color: var(--rosso); border-color: #fb718559; background: #fb71851a; }
+
+/* ── Storico ────────────────────────────────────────────────────────────── */
+
+/* La voce nella barra laterale sta staccata dalle due stanze: non e' una
+ * postazione di lavoro, e' dove si guarda cosa e' stato fatto. */
+.voce-staccata { margin-top: var(--s4); }
+
+.sezione[data-sez="storico"] { overflow: hidden; }
+.sezione[data-sez="storico"] > .intestazione { flex: 0 0 auto; }
+.storico { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--s3); }
+.storico-barra { display: flex; align-items: center; gap: var(--s3); }
+.storico-cerca { width: 340px; max-width: 45%; }
+/* Scorre la tabella, non la pagina: l'intestazione con la ricerca resta
+ * sempre a portata. Scorre anche di lato, perche' le colonne sono dieci. */
+.storico-scorri { flex: 1; min-height: 0; overflow: auto; border-radius: var(--r-m); }
+
+.tabella-storico { width: 100%; border-collapse: collapse; font-size: 12px; }
+/* Tutto al centro della sua cella, in orizzontale e in verticale, con la
+ * stessa altezza di riga per ogni carattere: il testo a spaziatura fissa
+ * (durata, crediti, data) altrimenti scende rispetto al resto. */
+.tabella-storico th {
+  text-align: center !important; vertical-align: middle; line-height: 1.3;
+  position: sticky; top: 0; z-index: 1; text-align: left; white-space: nowrap;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .3px; text-transform: uppercase;
+  color: var(--t1); background: #14142c; padding: 9px 10px;
+  border-bottom: 1px solid var(--taglio);
+}
+.tabella-storico td {
+  text-align: center; vertical-align: middle; line-height: 1.3;
+  padding: 8px 10px; border-bottom: 1px solid var(--bordo);
+  color: var(--t0); vertical-align: middle;
+}
+.tabella-storico tbody tr:hover td { background: #8b7cff0d; }
+.tabella-storico .col-url { max-width: 230px; }
+.tabella-storico .col-url a {
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--onda); text-decoration: none;
+}
+.tabella-storico .col-url a:hover { text-decoration: underline; }
+.tabella-storico .col-canale {
+  max-width: 170px; color: var(--t1);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tabella-storico .col-titolo { min-width: 220px; max-width: 360px; font-weight: 600; }
+.tabella-storico .col-numero,
+.tabella-storico .col-data {
+  white-space: nowrap; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 11px;
+  color: var(--t1);
+}
+.tabella-storico .col-singolo { color: var(--t2); white-space: nowrap; }
+.tabella-storico .col-playlist { white-space: nowrap; color: var(--lume); cursor: help; }
+.tabella-storico .col-gesti { white-space: nowrap; }
+.gesto { vertical-align: middle; }
+.bollino { vertical-align: middle; }
+
+.bollino {
+  display: inline-block; white-space: nowrap; font-size: 10.5px; font-weight: 700;
+  border-radius: 999px; padding: 2px 9px; border: 1px solid transparent;
+}
+.bollino.ok         { color: var(--verde);  background: #34d3991a; border-color: #34d39959; }
+.bollino.attenzione { color: var(--giallo); background: #fbbf241a; border-color: #fbbf2459; }
+.bollino.locale     { color: var(--verde);  background: #34d39912; border-color: #34d39940; }
+.bollino.cloud      { color: var(--onda);   background: #38d6ee12; border-color: #38d6ee40; }
+
+.gesto {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; margin-left: 4px; border-radius: 7px; cursor: pointer;
+  background: transparent; color: var(--t1); border: 1px solid var(--bordo);
+  transition: color .15s, border-color .15s, background .15s;
+}
+.gesto .icona { width: 14px; height: 14px; }
+.gesto:hover { color: var(--lume); border-color: #7c6cff59; background: #7c6cff14; }

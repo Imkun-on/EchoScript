@@ -44,6 +44,8 @@ Perche' non dipende da nulla
 """
 from __future__ import annotations
 
+import threading
+
 
 class MediaError(Exception):
     """Errore nelle funzioni media condivise (download, split, trascrizione locale).
@@ -86,15 +88,49 @@ def chiedi_di_fermarsi() -> None:
     _fermare = True
 
 
+# Il pulsante «Annulla» della finestra, che e' uno per postazione.
+#
+# La bandierina qui sopra vale per tutto il programma, e va bene per il Ctrl+C
+# della riga di comando, dove il lavoro e' uno solo. Nella finestra no: le
+# postazioni sono due e possono lavorare insieme, e annullare in «Cloud» non
+# deve fermare quello che sta girando in «Locale». Quindi ogni lavoro si porta
+# il suo segnale, attaccato al thread in cui gira: chi lavora lo trova da se',
+# senza che nessuno glielo passi, esattamente come trova la sua postazione.
+_segnali = threading.local()
+
+
+def usa_segnale(evento) -> None:
+    """Da adesso, in questo thread, fermarsi() guarda anche questo evento.
+
+    La chiama chi fa partire un lavoro della finestra, come prima riga del
+    thread nuovo. 'evento' e' un threading.Event: alzarlo da un altro thread
+    (il clic su «Annulla») chiede a questo di fermarsi al prossimo punto sicuro.
+    """
+    _segnali.evento = evento
+
+
 def fermarsi() -> bool:
     """True se qualcuno ha chiesto di smettere.
 
     Va controllata nei punti in cui fermarsi e' sicuro: fra un blocco di audio
-    e il successivo, fra un fotogramma e l'altro. Non in mezzo a una scrittura
+    e il successivo, fra una sezione e l'altra. Non in mezzo a una scrittura
     su disco, perche' li' interrompersi lascia un file a meta' che poi nessuno
     capisce da dove sia uscito.
+
+    Risponde si' sia per il Ctrl+C della riga di comando sia per il pulsante
+    «Annulla» della postazione a cui appartiene il thread che chiede.
     """
-    return _fermare
+    evento = getattr(_segnali, "evento", None)
+    return _fermare or (evento is not None and evento.is_set())
+
+
+class Annullato(Exception):
+    """Il lavoro si e' fermato perche' qualcuno ha premuto «Annulla».
+
+    Non e' un guasto: chi la solleva ha gia' salvato il parziale (i blocchi
+    trascritti, le sezioni tradotte o riassunte), e «Riprendi» ripartira' da
+    li'. Chi la riceve lo dice con garbo, senza finestre rosse.
+    """
 
 
 def _never_stop() -> bool:  # pragma: no cover - trivial
@@ -109,7 +145,16 @@ class GroqRateLimit(Exception):
     """Sollevata quando Groq rifiuta per limite (429 / token-al-giorno).
 
     Permette a chi trascrive a blocchi di FERMARSI e salvare un checkpoint,
-    invece di restituire un risultato incompleto silenziosamente."""
+    invece di restituire un risultato incompleto silenziosamente.
+
+    'ripresa' e' l'ora in cui Groq dice che i crediti tornano («16:45»), se
+    l'ha detto: serve a scrivere nell'avviso un orario vero invece di un
+    generico «di norma domani»."""
+
+    def __init__(self, msg: str = "", ripresa: str | None = None):
+        """Il messaggio di Groq, e l'ora in cui si potra' riprovare."""
+        super().__init__(msg)
+        self.ripresa = ripresa
 
 
 class TranscriptionInterrupted(Exception):
@@ -131,7 +176,8 @@ class TranscriptionInterrupted(Exception):
         ``lang``      la lingua riconosciuta, che serve a riprendere coerenti
     """
 
-    def __init__(self, segments: list, done: int, total: int, lang):
+    def __init__(self, segments: list, done: int, total: int, lang,
+                 ripresa: str | None = None, annullato: bool = False):
         """Raccoglie il lavoro gia' fatto, perche' non vada perduto.
 
         La lingua riconosciuta viaggia insieme ai pezzi e non viene ricavata di
@@ -143,6 +189,9 @@ class TranscriptionInterrupted(Exception):
         self.done = done
         self.total = total
         self.lang = lang
+        self.ripresa = ripresa
+        # True quando a fermare i blocchi e' stato «Annulla» e non Groq.
+        self.annullato = annullato
         super().__init__(f"Trascrizione interrotta al blocco {done}/{total}")
 
 

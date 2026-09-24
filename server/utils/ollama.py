@@ -45,9 +45,9 @@ def _ollama_installed_models(timeout: float = 3) -> set[str] | None:
         return None
 
 def _ollama_has_model(name: str, installed: set[str]) -> bool:
-    """True se 'name' risulta scaricato. Con il tag esplicito (qwen2.5vl:3b) il
-    confronto è esatto; senza tag (llama3.2-vision) basta lo stesso nome base
-    (llama3.2-vision:latest conta)."""
+    """True se 'name' risulta scaricato. Con il tag esplicito (qwen3:4b) il
+    confronto è esatto; senza tag (mistral) basta lo stesso nome base
+    (mistral:latest conta)."""
     if ":" in name:
         return name in installed or name + ":latest" in installed
     return any(n.split(":")[0] == name for n in installed)

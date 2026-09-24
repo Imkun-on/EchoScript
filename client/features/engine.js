@@ -9,8 +9,8 @@
  *
  * Perche' le due terne non si possono mescolare nemmeno per sbaglio
  *     Non e' piu' una promessa scritta nei commenti: e' come e' fatta la
- *     pagina. La postazione «Locale» contiene soltanto i tre menu locali,
- *     perche' gli altri tre le vengono tolti nel momento in cui viene
+ *     pagina. La postazione «Locale» contiene soltanto i due menu locali,
+ *     perche' gli altri due le vengono tolti nel momento in cui viene
  *     costruita, e viceversa. Un modello di Groq dentro «Locale» non e'
  *     sconsigliato, non c'e' proprio.
  *
@@ -22,9 +22,8 @@
 /* Quali menu vivono in quale stanza. I nomi sono nudi, senza il prefisso della
  * postazione: ce lo mette p.q(), e chi scrive qui non deve pensarci. */
 const MENU_DI = {
-  locale: [['m-whisper', 'whisper'], ['m-ollama', 'ollama'], ['m-vision', 'vision']],
-  cloud:  [['m-groq', 'groq'], ['m-groq-testo', 'groq_testo'],
-           ['m-groq-vista', 'groq_vista']],
+  locale: [['m-whisper', 'whisper'], ['m-ollama', 'ollama']],
+  cloud:  [['m-groq', 'groq'], ['m-groq-testo', 'groq_testo']],
 };
 
 /* I cataloghi e la chiave sono del programma, non della postazione.
@@ -94,7 +93,7 @@ function etichetta(voce) {
 /* I ✓ dei modelli gia' scaricati arrivano in ritardo, perche' Python interroga
  * Ollama in sottofondo e resta muto se e' spento. Quando arrivano, i menu si
  * riscrivono da soli, e li riscrivono tutte e due le postazioni: il catalogo e'
- * uno solo ma i menu che lo mostrano sono sei, divisi in due stanze.
+ * uno solo ma i menu che lo mostrano sono quattro, divisi in due stanze.
  *
  * Questa non passa dallo smistamento perche' non appartiene a nessun lavoro:
  * e' una cosa che il programma viene a sapere, non una cosa che succede a una

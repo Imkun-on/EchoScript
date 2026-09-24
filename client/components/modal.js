@@ -119,11 +119,11 @@ function finestra(opzioni) {
    * buttato via insieme al resto, e da quel momento in poi non esiste piu'
    * nella pagina.
    *
-   * Succedeva davvero. Dentro la finestra del video c'e' il bottone «Guarda
-   * cos'e'»: premendolo il motore leggeva il link e rispondeva aprendo la
-   * finestra di conferma, cioe' chiamando questa funzione mentre il modulo del
-   * video era in prestito. Il modulo spariva, e la prima riga che andava a
-   * cercarsi un pezzo di quel modulo dava errore.
+   * Succede di continuo. Dentro la finestra del video si incolla il link, il
+   * motore lo legge da solo e risponde aprendo l'anteprima, cioe' chiamando
+   * questa funzione mentre il modulo del video e' in prestito. Senza questa
+   * riga il modulo sparirebbe, e la prima riga che andasse a cercarsi un pezzo
+   * di quel modulo darebbe errore.
    */
   if (velo.classList.contains('visibile')) chiudiFinestra();
 

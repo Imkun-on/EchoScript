@@ -169,7 +169,10 @@ Source: "{#Sorgente}\*"; DestDir: "{app}"; \
 ; [Code]): nel pacchetto non c'e', e infatti qui non lo si cerca sul disco.
 
 [Icons]
-Name: "{group}\{#NomeApp}";         Filename: "{app}\{#EseguibileApp}"; IconFilename: "{app}\_internal\assets\EchoScript.ico"
+; AppUserModelID: l'identita' con cui il programma si presenta a Windows. Deve
+; coincidere con APP_ID in server/utils/notifica.py, altrimenti le notifiche di
+; fine lavoro non compaiono: Windows non saprebbe a chi attribuirle.
+Name: "{group}\{#NomeApp}";         Filename: "{app}\{#EseguibileApp}"; IconFilename: "{app}\_internal\assets\EchoScript.ico"; AppUserModelID: "EchoScript.App"
 Name: "{group}\{cm:ApriRisultati}"; Filename: "{app}\results"
 Name: "{autodesktop}\{#NomeApp}";   Filename: "{app}\{#EseguibileApp}"; IconFilename: "{app}\_internal\assets\EchoScript.ico"; Tasks: desktopicon
 

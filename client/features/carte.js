@@ -40,10 +40,8 @@
 /* Le voci del riepilogo dei modelli, per stanza: quale scelta mostrare e con
  * che etichetta. Sono gli stessi nomi che Python usa nelle scelte. */
 const VOCI_MODELLI = {
-  locale: [['whisper', 'eng.model.whisper'], ['ollama', 'eng.model.ollama'],
-           ['vision', 'eng.model.vision']],
-  cloud:  [['groq', 'eng.model.groq'], ['groq_testo', 'eng.model.groqtesto'],
-           ['groq_vista', 'eng.model.groqvista']],
+  locale: [['whisper', 'eng.model.whisper'], ['ollama', 'eng.model.ollama']],
+  cloud:  [['groq', 'eng.model.groq'], ['groq_testo', 'eng.model.groqtesto']],
 };
 
 function initCarte(p) {
@@ -144,11 +142,23 @@ function aggiornaCartaVideo(p) {
 
   // Gli output aggiuntivi si elencano solo quando ce n'e' almeno uno acceso:
   // una riga che dice «nessuno» occuperebbe spazio per dire che non c'e'
-  // niente da dire.
-  const attivi = [['translate', 'opt.translate'], ['summarize', 'opt.summary'],
-                  ['visual', 'opt.visual']]
-    .filter(([k]) => p.opz[k]).map(([, k]) => t(k));
+  // niente da dire. Grafici e commenti contano solo col riassunto acceso,
+  // perche' senza non producono niente.
+  const conRiassunto = (k) => !!p.opz[k] && !!p.opz.summarize;
+  const attivi = [['translate', 'opt.translate', (k) => !!p.opz[k]],
+                  ['summarize', 'opt.summary', (k) => !!p.opz[k]],
+                  ['grafici', 'opt.charts', conRiassunto],
+                  ['commenti', 'opt.comments', conRiassunto]]
+    .filter(([k, , acceso]) => acceso(k)).map(([, k]) => t(k));
+  // La misura del riassunto, detta con la sua parola breve («Breve», «Punti
+  // chiave»): la spiegazione lunga sta nella tendina, qui basta ricordarla.
+  if (p.opz.summarize && p.opz.dettaglio && p.opz.dettaglio !== 'esteso') {
+    attivi.push(t('opt.detail.' + p.opz.dettaglio).split(' · ')[0]);
+  }
   if (attivi.length) box.appendChild(voce(t('opts.title'), attivi.join(' · ')));
+  if (p.coda && p.coda.length) {
+    box.appendChild(voce(t('coda.title'), t('coda.card', { n: p.coda.length })));
+  }
 }
 
 window.initCarte = initCarte;

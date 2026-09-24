@@ -24,17 +24,6 @@ pywebview>=5.0
 # pywebview usa WebKit di sistema e questa riga viene semplicemente ignorata).
 pythonnet>=3.0 ; sys_platform == "win32"
 
-# ANALISI VISIVA (opzionale): "legge" i fotogrammi di un video (codice, formule,
-# grafici, diagrammi) e li integra nel riassunto. NON richiede pacchetti pip in
-# piu' (i frame li estrae ffmpeg; il client Groq gia' presente gestisce le
-# immagini). Usa gli stessi due motori del resto del programma:
-#   - Groq (cloud): modello multimodale, default qwen/qwen3.6-27b. Niente da
-#     installare oltre alla chiave Groq.
-#   - Ollama (locale, offline): scarica un modello VISION, es:
-#         ollama pull llama3.2-vision
-# Variabili .env utili: ECHOSCRIPT_GROQ_VISION_MODEL, ECHOSCRIPT_OLLAMA_VISION_MODEL,
-# ECHOSCRIPT_VISION_SCENE (soglia stacco scena), ECHOSCRIPT_VISION_MAX_FRAMES.
-
 # PDF "RICCO" del riassunto (formule LaTeX + mappe Mermaid DISEGNATE): NON
 # richiede pacchetti pip ne' LaTeX di sistema. Genera un HTML (MathJax + Mermaid)
 # e lo stampa con un browser Chromium GIA' presente sul sistema (Edge su Windows

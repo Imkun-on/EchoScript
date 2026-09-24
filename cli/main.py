@@ -121,7 +121,7 @@ from server.utils.console import (
 #
 # ATTENZIONE alle due righe qui sotto, che non sono intercambiabili.
 #
-# La prima importa il MODULO. Serve per i sette valori che cambiano mentre il
+# La prima importa il MODULO. Serve per i cinque valori che cambiano mentre il
 # programma gira (quale modello Groq, quale modello Ollama, in che lingua), che
 # vanno letti come `settings.GROQ_MODEL` ogni volta che servono. Importandoli
 # per nome ci si porterebbe a casa una fotografia del valore al momento
@@ -132,13 +132,11 @@ from server.utils.console import (
 from server.config import paths, settings
 from server.config.settings import (
     AUDIO_BITRATE, AUDIO_EXTENSIONS, AUDIO_SAMPLE_RATE, BROWSER_PATH,
-    CHUNK_SECONDS, CONCEPT_MAP, GROQ_TEXT_MODELS, GROQ_TRANSCRIBE_MODELS,
-    GROQ_VISION_MODELS, LOCAL_COMPUTE_TYPE, LOCAL_DEVICE, LOCAL_MODELS,
+    CHUNK_SECONDS, GROQ_TEXT_MODELS, GROQ_TRANSCRIBE_MODELS,
+    LOCAL_COMPUTE_TYPE, LOCAL_DEVICE, LOCAL_MODELS,
     MAX_RETRIES, OLLAMA_HOST, OLLAMA_NUM_CTX, OLLAMA_TEXT_MODELS,
-    OLLAMA_VISION_MODELS, RICH_PDF, SUMMARY_FRAMES, SUMMARY_MAX_CHARS,
-    VIDEO_EXTENSIONS, VISION_FALLBACK_INTERVAL, VISION_FRAME_WIDTH,
-    VISION_MAX_FRAMES, VISION_MIN_GAP, VISION_SCENE_THRESHOLD,
-    VISION_YT_MAX_HEIGHT, WORD_TIMESTAMPS, _env_bool, _env_candidates,
+    RICH_PDF, SUMMARY_CHARTS, SUMMARY_MAX_CHARS,
+    WORD_TIMESTAMPS, _env_bool, _env_candidates,
     _env_int, _env_opt, _env_str, _load_env_file,
 )
 
@@ -253,11 +251,11 @@ from server.state.credits import (
 from server.state.jobs import (
     PIPELINE_STAGES, STAGE_DONE, STAGE_PARTIAL, STAGE_PENDING, STAGE_SKIP,
     NOMI_VECCHI, SUMMARY_SUBDIR, SUMMARY_SUFFIX, TRANSL_SUBDIR, TRANS_SUBDIR,
-    VISUAL_SUBDIR, _empty_state, delete_state, has_resumable_state,
+    _empty_state, delete_state, has_resumable_state,
     load_existing_transcript, load_existing_translation, load_state,
     resume_plan, resume_sections, save_state, stage_sections, stage_status,
     state_path, summary_subdir, trans_subdir, transcription_exists,
-    transl_subdir, update_stage, visual_subdir,
+    transl_subdir, update_stage,
 )
 
 # === TRANSCRIPTION BACKEND SELECTION ===
@@ -407,17 +405,17 @@ def choose_groq_model() -> str | None:
         console.print("[warning]Scelta non valida, riprova.[/warning]")
 
 
-def choose_ollama_model(kind: str) -> str | None:
-    """Pannello per scegliere il modello OLLAMA (locale): 'text' per il
-    riassunto/traduzione, 'vision' per l'analisi visiva dei fotogrammi.
+def choose_ollama_model(kind: str = "text") -> str | None:
+    """Pannello per scegliere il modello OLLAMA (locale) per riassunto e
+    traduzione. 'kind' e' rimasto dai tempi in cui c'era anche il modello che
+    guardava i fotogrammi, e vale sempre 'text'.
 
     Mostra i modelli consigliati con la RAM indicativa richiesta e segna con ✓
     quelli GIÀ scaricati in Ollama (letti da /api/tags; nessun segno se Ollama
     è spento). Si può anche digitare un nome qualunque (es. mistral:7b).
     Invio = modello attuale (da .env o default). None se si annulla."""
-    is_text = kind == "text"
-    catalog = OLLAMA_TEXT_MODELS if is_text else OLLAMA_VISION_MODELS
-    current = settings.OLLAMA_MODEL if is_text else settings.OLLAMA_VISION_MODEL
+    catalog = OLLAMA_TEXT_MODELS
+    current = settings.OLLAMA_MODEL
     installed = _ollama_installed_models()
 
     table = Table(show_header=True, box=None, expand=False, padding=(0, 2),
@@ -436,7 +434,7 @@ def choose_ollama_model(kind: str) -> str | None:
                       else "  [dim]↓ da scaricare[/dim]")
         table.add_row(key, f"{name}{marks}", ram, desc)
 
-    what = ("riassunto e traduzione" if is_text else "analisi visiva")
+    what = "riassunto e traduzione"
     console.print()
     console.print(Panel(
         table,
@@ -1012,17 +1010,24 @@ def transcribe(client: Groq, chunks: list[tuple[float, str]],
             # We update the description BEFORE the call: the rich spinner keeps
             # animating while waiting for Groq, so the user sees the i-th chunk.
             progress.update(task_id, description=f"Invio blocco {i + 1}/{n} a Groq (attendi)")
+            # Il limite al minuto si aspetta, ma dicendolo: la descrizione della
+            # barra diventa un conto alla rovescia invece di restare ferma.
+            attesa = (lambda sec, i=i: progress.update(
+                task_id, description=f"Limite al minuto di Groq: riprendo fra {sec} s"))
             try:
                 if i == start_index:
                     segments, lang = _transcribe_chunk(
-                        client, path, prompt=context, return_language=True)
+                        client, path, prompt=context, return_language=True,
+                        on_attesa=attesa)
                     detected = detected or lang
                 else:
-                    segments = _transcribe_chunk(client, path, prompt=context)
-            except GroqRateLimit:
+                    segments = _transcribe_chunk(client, path, prompt=context,
+                                                 on_attesa=attesa)
+            except GroqRateLimit as rl:
                 # Limite raggiunto: i blocchi 0..i-1 sono fatti. Trasportiamo il
                 # parziale a chi chiama per il checkpoint.
-                raise TranscriptionInterrupted(all_segments, i, n, detected)
+                raise TranscriptionInterrupted(all_segments, i, n, detected,
+                                               getattr(rl, "ripresa", None))
             for seg in segments:
                 # Timing correction: + the chunk's offset (segment AND its words).
                 seg["start"] += offset
@@ -1167,7 +1172,10 @@ def get_groq_client() -> Groq | None:
         return None
 
     try:
-        client = Groq(api_key=api_key)
+        # max_retries=0: le attese per i limiti le decide il programma e le
+        # dice a schermo (vedi credits.attesa_breve), invece di lasciarle al
+        # client, che riprovava da solo in silenzio.
+        client = Groq(api_key=api_key, max_retries=0)
     except Exception as e:
         console.print(f"[error]Impossibile inizializzare il client Groq: {e}[/error]")
         return None
@@ -1192,7 +1200,8 @@ def get_groq_client() -> Groq | None:
 
 # === MAIN FLOW ===
 
-def _print_ratelimit_notice(title: str, done_seconds: float, total_seconds: float) -> None:
+def _print_ratelimit_notice(title: str, done_seconds: float, total_seconds: float,
+                            ripresa: str | None = None) -> None:
     """Mostra un avviso elegante (non un errore) quando i crediti Groq finiscono.
 
     Riporta il MINUTAGGIO a cui la trascrizione si è fermata e ricorda che il
@@ -1201,11 +1210,12 @@ def _print_ratelimit_notice(title: str, done_seconds: float, total_seconds: floa
     if total_seconds:
         where += f" / {_format_timestamp(total_seconds)}"
     body = Text()
-    body.append("I crediti gratuiti Groq per oggi sono esauriti.\n\n", style="bold")
+    body.append("I crediti gratuiti Groq sono esauriti.\n\n", style="bold")
     body.append("La trascrizione si è fermata a ")
     body.append(where, style="bold bright_yellow")
     body.append(" ed è stata salvata automaticamente.\n\n")
-    body.append("Quando i crediti torneranno disponibili (di norma domani) riavvia "
+    quando = f"alle {ripresa}" if ripresa else "di norma domani"
+    body.append(f"Quando i crediti torneranno disponibili ({quando}) riavvia "
                 "con lo stesso video e scegli «Riprendi» per continuare da dove si "
                 "è interrotto.", style="dim")
     console.print()
@@ -1214,53 +1224,10 @@ def _print_ratelimit_notice(title: str, done_seconds: float, total_seconds: floa
                         title_align="left"))
 
 
-# === ANALISI VISIVA: estrazione fotogrammi + lettura con un modello vision ====
-
-# === temporaneo ==============================================================
-#
-# temporaneo
-from server.sources.download import (
-    _has_video_stream, download_video,
-)
-
-def _cli_download_video(url: str, workdir: str) -> str | None:
-    """Scarica il video mostrando una barra, e gestisce il Ctrl+C.
-
-    Come il gemello dell'audio. Si usa solo quando e' stata chiesta l'analisi
-    visiva, perche' e' l'unica cosa per cui servano i fotogrammi.
-    """
-    progress, _task, on_progress = _download_progress("Scarico video")
-    try:
-        with progress:
-            return download_video(url, workdir, on_progress,
-                                  should_stop=fermarsi)
-    except KeyboardInterrupt:
-        return None
-    except MediaError as e:
-        console.print(f"[error]{e}[/error]")
-        return None
-
-
-# === L'ANALISI VISIVA: sta in server/enrichment/vision.py ====================
-#
-# Leggere quello che nel video si VEDE e non si sente: codice, formule,
-# grafici, diagrammi. In certe lezioni e' meta' del contenuto.
-from server.enrichment.vision import (
-    _VISION_SYSTEM_PROMPT, _VISION_USER_PROMPT, _append_frames_to_sections,
-    _audio_context_near, _check_ollama_vision, _collapse_close_frames,
-    _dedup_visual_notes, _encode_image_b64, _fix_mermaid_arrows,
-    _is_empty_visual, _make_vision_analyzer, _merge_visual_into_sections,
-    _parse_showinfo_times, _split_md_blocks, _strip_mermaid_blocks,
-    _strip_think, _vision_groq, _vision_ollama, _vision_user_prompt,
-    analyze_video_visuals, extract_keyframes, load_visual_notes,
-    save_visual_notes,
-)
-
 def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
                   client, local_model: str | None,
                   resume_cp: dict | None = None,
-                  want_visual: bool = False,
-                  out_root: str | None = None) -> tuple[list[dict], list[dict]] | None:
+                  out_root: str | None = None) -> list[dict] | None:
     """Acquire the audio for ONE source and transcribe it.
 
     'source' is ('youtube', url) or ('local', filepath). For a local file there
@@ -1269,9 +1236,6 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
     il chiamante non salva una trascrizione incompleta). Returns the segments, or
     None on interruption / failure."""
     kind, ref = source
-    # L'analisi visiva ha senso solo su sorgenti con traccia video (YouTube o
-    # file video locali; un mp3 non ha fotogrammi).
-    do_visual = bool(want_visual) and (kind == "youtube" or _has_video_stream(ref))
 
     # Build the phase labels dynamically so "Fase x/y" is always correct.
     phase_names = []
@@ -1280,40 +1244,23 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
     if backend == "groq":
         phase_names.append("prepare")
     phase_names.append("transcribe")
-    if do_visual:
-        phase_names.append("visual")
     n = len(phase_names)
     step = {name: i + 1 for i, name in enumerate(phase_names)}
 
     # ignore_cleanup_errors: evita il PermissionError (WinError 32) su Windows se
     # l'audio temporaneo resta bloccato un istante da ffmpeg/whisper alla chiusura.
     with tempfile.TemporaryDirectory(prefix="echoscript_", ignore_cleanup_errors=True) as workdir:
-        # --- Acquire the audio (e, se richiesta l'analisi visiva, il video) ---
-        media_path = None  # file VIDEO da cui estrarre i fotogrammi (analisi visiva)
+        # --- Acquire the audio ---
         if kind == "youtube":
             console.print()
-            dl_label = "Download video" if do_visual else "Download audio"
-            console.rule(f"[phase]⬇ Fase {step['download']}/{n}: {dl_label}[/phase]", style="bright_blue")
-            if do_visual:
-                # Un solo download: dal video estraiamo SIA i fotogrammi SIA l'audio.
-                media_path = _cli_download_video(ref, workdir)
-                if media_path:
-                    audio_path = media_path
-                else:
-                    console.print("[warning]Download del video non riuscito: proseguo con il "
-                                  "solo audio (analisi visiva disattivata).[/warning]")
-                    do_visual = False
-                    audio_path = _cli_download_audio(ref, workdir)
-            else:
-                audio_path = _cli_download_audio(ref, workdir)
+            console.rule(f"[phase]⬇ Fase {step['download']}/{n}: Download audio[/phase]", style="bright_blue")
+            audio_path = _cli_download_audio(ref, workdir)
             if not audio_path or fermarsi():
                 console.print("[warning]Download non completato.[/warning]")
                 return None
         else:
             # Local file: feed it directly (ffmpeg/whisper read it in place).
             audio_path = ref
-            if do_visual:
-                media_path = ref
 
         # Duration: from metadata if present, otherwise probe the file with ffprobe.
         duration = meta["duration"] or _probe_duration(audio_path)
@@ -1351,7 +1298,8 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
                 done_s = ti.done * CHUNK_SECONDS
                 if duration:
                     done_s = min(done_s, duration)
-                _print_ratelimit_notice(meta["title"], done_s, duration)
+                _print_ratelimit_notice(meta["title"], done_s, duration,
+                                        getattr(ti, "ripresa", None))
                 # Si può completare SUBITO la parte mancante in locale (CPU/GPU),
                 # riusando l'audio già scaricato (nessun nuovo download).
                 ans = _prompt("Completo ora la parte mancante in locale?",
@@ -1395,30 +1343,11 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
         # Lingua dell'audio rilevata da Whisper (per la card di riepilogo).
         meta["detected_language"] = detected
 
-        # --- Analisi visiva (opzionale): "leggi" i fotogrammi del video ---
-        # Va fatta ORA, finché il file video esiste (per YouTube è nella cartella
-        # temporanea, cancellata all'uscita dal blocco `with`).
-        visual_notes: list[dict] = []
-        if do_visual and media_path and not fermarsi():
-            console.print()
-            console.rule(f"[phase]👁 Fase {step['visual']}/{n}: Analisi visiva (cosa si VEDE)[/phase]",
-                         style="bright_yellow")
-            # Cartella DEFINITIVA dei fotogrammi (li copiamo qui prima che il
-            # workdir temporaneo venga cancellato), così il documento li mostra.
-            frames_out_dir = None
-            if out_root:
-                frames_out_dir = os.path.join(
-                    cartella_video(out_root, meta["title"], meta.get("_num_playlist")),
-                    visual_subdir(), "frames")
-            visual_notes = analyze_video_visuals(media_path, duration, workdir, client,
-                                                 frames_out_dir=frames_out_dir,
-                                                 segments=segments)
-
     # (Here the temporary folder has already been deleted: the data we need
-    #  (segments and visual notes) is already in memory.)
+    #  (the segments) is already in memory.)
     if not segments:
         return None
-    return segments, visual_notes
+    return segments
 
 
 def _save_outputs(meta: dict, segments: list[dict], engine_label: str,
@@ -1599,6 +1528,9 @@ def translate_existing(out_root: str, title: str, target: str = "it",
                            engine_label=engine_label)
         if ok:
             created.append(os.path.relpath(f"{base}.pdf", video_dir).replace("\\", "/"))
+        # Anche in Word, per chi vuole correggere il testo.
+        if save_docx(meta, translated, f"{base}.docx", False, engine_label):
+            created.append(os.path.relpath(f"{base}.docx", video_dir).replace("\\", "/"))
 
     files = "  ".join(os.path.splitext(c.split('/')[-1])[1] for c in created)
     console.print()
@@ -1621,6 +1553,7 @@ def translate_existing(out_root: str, title: str, target: str = "it",
 # il programma parla solo italiano la seconda non la raggiungeva piu' nessuno,
 # quindi e' uscita insieme alla prima.
 from server.enrichment import summary
+from server.export.word import save_docx
 
 # === PDF "RICCO": HTML (MathJax + Mermaid) stampato da un browser headless =====
 
@@ -1676,14 +1609,6 @@ def summarize_existing(out_root: str, title: str, client=None,
     if not sections:
         return False
 
-    # Arricchimento visivo: se esistono note visive salvate (analisi dei
-    # fotogrammi), le fondiamo nelle sezioni per timestamp e attiveremo il prompt
-    # «visivo» (codice/formule/grafici/mappa concettuale nel riassunto).
-    visual_notes = load_visual_notes(out_root, title)
-    if visual_notes:
-        sections = _merge_visual_into_sections(sections, visual_notes)
-        console.print(f"  [dim]👁  Riassunto arricchito con {len(visual_notes)} contenuti visivi a schermo.[/dim]")
-
     # Resume: riprendi il riassunto dalle sezioni già fatte in una precedente
     # esecuzione (es. crediti Groq esauriti a metà). 'on_section' salva il
     # parziale dopo OGNI sezione, così non si rispendono crediti sul già fatto.
@@ -1711,11 +1636,6 @@ def summarize_existing(out_root: str, title: str, client=None,
         BarColumn(bar_width=40, style="bar.back", complete_style="bright_magenta", finished_style="bold magenta"),
         TaskProgressColumn(), console=console, expand=False,
     )
-    # Lingua del riassunto = lingua dell'interfaccia (la CLI passa "it"). Attiva il
-    # prompt «visivo» solo durante questo riassunto (reset nel finally), nella
-    # lingua giusta e con/senza mappa concettuale a seconda di CONCEPT_MAP.
-    summary.PROMPT_ATTIVO = (
-        summary.prompt_visivo(CONCEPT_MAP) if visual_notes else None)
     if done_secs:
         console.print(f"  [dim]↻ Riprendo il riassunto dalla sezione "
                       f"{len(done_secs) + 1}/{len(sections)}.[/dim]")
@@ -1730,23 +1650,19 @@ def summarize_existing(out_root: str, title: str, client=None,
         # Il parziale è già salvato da 'on_section': lo stato resta 'partial' e il
         # riassunto potrà riprendere da lì (anche in locale con Ollama).
         if _is_rate_limit(str(e)):
+            ripresa = getattr(e, "ripresa", None)
+            quando = f" I crediti tornano alle {ripresa}." if ripresa else ""
             console.print("[warning]Crediti Groq esauriti: riassunto interrotto e "
                           "salvato come parziale: potrai riprendere (anche in "
-                          "locale).[/warning]")
+                          f"locale).{quando}[/warning]")
         else:
             console.print(f"[error]Riassunto fallito: {e}[/error]")
         return False
-    finally:
-        globals()["_SUMMARY_PROMPT_OVERRIDE"] = None
-        globals()["_SUMMARY_LANG"] = "it"
 
-    # Pulizia diagrammi: corregge le frecce Mermaid e, se la mappa concettuale è
-    # disattivata, rimuove eventuali blocchi mermaid sfuggiti al modello.
+    # Pulizia diagrammi: tiene i grafici ammessi (ripuliti dagli errori tipici)
+    # e toglie ogni altro blocco mermaid sfuggito al modello.
     for sec in summarized:
-        txt = _fix_mermaid_arrows(sec.get("text", ""))
-        if not CONCEPT_MAP:
-            txt = _strip_mermaid_blocks(txt)
-        sec["text"] = txt
+        sec["text"] = summary._pulisci_diagrammi(sec.get("text", ""), SUMMARY_CHARTS)
 
     created: list[str] = []
 
@@ -1760,28 +1676,19 @@ def summarize_existing(out_root: str, title: str, client=None,
         """
         write_text_file(path, content, created, video_dir)
 
-    # Fotogrammi nel riassunto: aggiungiamo i frame (per timestamp) alle sezioni.
-    # Sono salvati in analisi_visiva/frames/: link RELATIVO per il .md (portabile)
-    # e ASSOLUTO per il PDF (il browser deve trovarli). Costo Groq aggiuntivo: 0
-    # (i frame esistono già, nessuna nuova chiamata al modello vision).
-    frame_notes = [n for n in visual_notes if n.get("image")] if SUMMARY_FRAMES else []
-    sections_md, sections_pdf = summarized, summarized
-    if frame_notes:
-        frames_dir = os.path.join(video_dir, visual_subdir(), "frames")
-        rel_prefix = f"../{visual_subdir()}/frames/"
-        sections_md = _append_frames_to_sections(summarized, frame_notes, lambda img: rel_prefix + img)
-        sections_pdf = _append_frames_to_sections(summarized, frame_notes,
-                                                  lambda img: os.path.join(frames_dir, img))
-
-    # Il riassunto è testo pulito: niente timestamp. Il .txt resta senza immagini.
-    _save(f"{base}.md", build_md(meta["title"], meta, engine_label, sections_md, with_timestamps=False))
+    # Il riassunto è testo pulito: niente timestamp. Nel .txt i grafici
+    # diventano elenchi di voci e valori.
+    _save(f"{base}.md", build_md(meta["title"], meta, engine_label, summarized, with_timestamps=False))
     _save(f"{base}.txt", build_txt(meta["title"], meta, summarized, markdown=True))
     if do_export:
-        with console.status("[info]Creo il PDF (formule, mappe e fotogrammi)...[/info]", spinner="dots"):
-            ok = _save_pdf(meta, sections_pdf, f"{base}.pdf", with_timestamps=False,
+        with console.status("[info]Creo il PDF (formule e grafici)...[/info]", spinner="dots"):
+            ok = _save_pdf(meta, summarized, f"{base}.pdf", with_timestamps=False,
                            engine_label=engine_label, markdown=True)
         if ok:
             created.append(os.path.relpath(f"{base}.pdf", video_dir).replace("\\", "/"))
+        # Anche in Word, per chi vuole correggere il testo.
+        if save_docx(meta, summarized, f"{base}.docx", False, engine_label):
+            created.append(os.path.relpath(f"{base}.docx", video_dir).replace("\\", "/"))
 
     files = "  ".join(os.path.splitext(c.split('/')[-1])[1] for c in created)
     console.print()
@@ -1936,29 +1843,6 @@ def run() -> None:
     if al:
         settings.LANGUAGE = al
 
-    # --- Analisi visiva opzionale (solo se la sorgente ha dei fotogrammi) ---
-    has_video_source = (source_kind == "youtube") or any(
-        kind == "local" and os.path.splitext(ref)[1].lower() in VIDEO_EXTENSIONS
-        for _, (kind, ref) in jobs)
-    want_visual = False
-    if has_video_source:
-        console.print()
-        console.print("  [bold bright_yellow]👁  Analisi visiva del video (sperimentale)[/bold bright_yellow]")
-        console.print("  [dim]Oltre all'audio, EchoScript può «guardare» i fotogrammi ed estrarre ciò che è[/dim]")
-        console.print("  [dim]scritto a schermo (codice, formule, grafici, diagrammi) per includerlo nel[/dim]")
-        console.print("  [dim]riassunto. È più lento e, con Groq, consuma crediti per ogni fotogramma.[/dim]")
-        v_eng = "Groq cloud" if backend == "groq" else "Ollama locale"
-        want_visual = _confirm(f"Attivo l'analisi visiva? (motore: {v_eng})", accent="bright_yellow")
-        # In locale la vision passa da Ollama: si sceglie qui il modello.
-        # Annullare il pannello disattiva SOLO l'analisi visiva, non la run.
-        if want_visual and backend != "groq":
-            vm = choose_ollama_model("vision")
-            if not vm:
-                want_visual = False
-                console.print("  [dim]Analisi visiva disattivata.[/dim]")
-            else:
-                settings.OLLAMA_VISION_MODEL = vm
-
     # We initialize the Groq client only if it is really needed (cloud backend),
     # and only after the user's confirmation.
     client = None
@@ -2086,12 +1970,11 @@ def run() -> None:
             init_run_state(meta, backend, want_translate=also_translate,
                            want_summary=also_translate)
 
-        result = _run_pipeline(meta, source, backend, client, local_model,
-                               resume_cp, want_visual, out_root)
-        if not result or not result[0]:
+        segments = _run_pipeline(meta, source, backend, client, local_model,
+                                 resume_cp, out_root)
+        if not segments:
             # _run_pipeline ha già spiegato il motivo (interruzione/limite o errore).
             continue
-        segments, visual_notes = result
         # Se si è completato in locale dopo il limite Groq, l'etichetta motore è
         # stata aggiornata (Groq + Locale); altrimenti vale quella scelta a monte.
         label = meta.pop("engine_label_override", engine_label)
@@ -2102,12 +1985,6 @@ def run() -> None:
         update_stage(meta, "transcription", status=STAGE_DONE)
         if _is_italian(meta.get("detected_language")):
             update_stage(meta, "translation", status=STAGE_SKIP)
-        # Analisi visiva: salva le note (json + md) accanto alla trascrizione, così
-        # il riassunto (anche se rigenerato in seguito) le ritrova e le integra.
-        if visual_notes:
-            v_label = (f"Groq · {settings.GROQ_VISION_MODEL}" if client is not None
-                       else f"Ollama · {settings.OLLAMA_VISION_MODEL}")
-            save_visual_notes(out_root, meta, visual_notes, v_label, do_export)
         # Traduzione automatica dopo una trascrizione COMPLETATA (rilegge il .json
         # appena scritto). Si arriva qui solo se _run_pipeline ha restituito i
         # segmenti, cioè a trascrizione al 100%: i parziali da crediti esauriti

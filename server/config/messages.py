@@ -45,8 +45,6 @@ _RUNTIME_MSGS = {
     "dl_audio":       "Scarico audio",
     "extract_audio":  "Estraggo audio",
     "convert_audio":  "Converto audio in m4a",
-    "dl_video":       "Scarico video",
-    "prep_video":     "Preparo il video",
     "read_audio":     "Leggo il file audio",
     "read_info":      "Leggo le informazioni del video",
     # trascrizione
@@ -75,24 +73,9 @@ _RUNTIME_MSGS = {
     "saving_files":   "Salvo i file",
     "creating_pdf":   "Creo il PDF",
     "trans_pdf_fail": "PDF della trascrizione non creato: {e}",
-    # analisi visiva
-    "vis_unavail":    "Analisi visiva non disponibile: {e}",
-    "vis_detect":     "Individuo i fotogrammi chiave (cambi scena)…",
-    "vis_noframes":   "Nessun fotogramma significativo individuato",
-    "vis_toanalyze":  "{n} fotogrammi da analizzare ({label})",
-    "vis_ratelimit":  "Crediti Groq esauriti durante l'analisi visiva",
-    "vis_analyzing":  "Analizzo fotogramma {i}/{n}",
-    "vis_extracted":  "{k} contenuti visivi estratti su {n} fotogrammi",
-    "vis_skipped":    "Analisi visiva saltata: il video non era disponibile (sorgente solo-audio o download video non riuscito).",
-    "vis_incomplete": "Analisi visiva non completata: {e}",
-    # motivi di fallimento dell'analisi visiva (_visual_failure_reason)
-    "vfr_ratelimit":  "Analisi visiva interrotta: crediti {eng} esauriti. I crediti del modello vision sono SEPARATI da quelli di trascrizione/riassunto. Riprova quando si azzerano (vedi «crediti») o usa un modello vision locale via Ollama.",
-    "vfr_eng_groq":   "Groq (qwen vision)",
-    "vfr_eng_other":  "del modello vision",
-    "vfr_noframes":   "Analisi visiva: nessun fotogramma significativo individuato nel video.",
-    "vfr_allerrors":  "Analisi visiva non riuscita: il modello vision ha restituito errore su tutti i {n} fotogrammi ({err}).",
-    "vfr_notech":     "Analisi visiva: nessun contenuto tecnico (codice/formule/grafici) rilevato nei {n} fotogrammi analizzati.",
-    "vfr_unknown_err":"errore sconosciuto",
+    # crediti Groq: attese brevi e crediti finiti
+    "wait_minute":    "Limite al minuto di Groq raggiunto: riprendo fra {s} s",
+    "sum_ratelimit_at": "Crediti Groq del riassunto esauriti: tornano alle {ora}. Riassunto salvato come parziale, riprendibile (anche in locale).",
 }
 
 

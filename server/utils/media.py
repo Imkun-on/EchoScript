@@ -25,12 +25,17 @@ def _is_local(meta: dict) -> bool:
     """
     return meta.get("source") == "local"
 
-def _lang_name(code: str | None) -> str | None:
+def _lang_name(code: str | None, lang: str = "it") -> str | None:
     """Nome di una lingua, in italiano (default) o in inglese ('lang="en"').
 
     Accetta sia i codici ISO (faster-whisper: 'en') sia i nomi interi di Whisper
-    (Groq: 'english'). None se assente. Il parametro 'lang' serve alla GUI in
-    inglese, che vuole i nomi lingua in inglese ('English' invece di 'Inglese')."""
+    (Groq: 'english'). None se assente.
+
+    Il secondo argomento c'era, poi era stato tolto quando l'interfaccia e'
+    rimasta solo in italiano; ma la scheda del video continuava a passarlo, e
+    ogni link YouTube si fermava con «_lang_name() takes 1 positional argument
+    but 2 were given». Si tiene, con l'italiano di ripiego, perche' costa una
+    riga ed evita che la stessa chiamata torni a rompersi."""
     if not code:
         return None
     c = str(code).split("-")[0].strip().lower()
@@ -39,7 +44,9 @@ def _lang_name(code: str | None) -> str | None:
     c = full.get(c, c)
     names_it = {"it": "Italiano", "en": "Inglese", "es": "Spagnolo",
                 "fr": "Francese", "de": "Tedesco"}
-    names = names_it
+    names_en = {"it": "Italian", "en": "English", "es": "Spanish",
+                "fr": "French", "de": "German"}
+    names = names_en if lang == "en" else names_it
     return names.get(c, str(code).upper())
 
 def _is_italian(code: str | None) -> bool:

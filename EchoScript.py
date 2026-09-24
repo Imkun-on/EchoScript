@@ -68,6 +68,7 @@ from server.config import i18n
 from server.config.paths import risorsa as _risorsa
 from server.config.strings import TESTI
 from server.controllers import api, bridge
+from server.utils import notifica
 
 i18n.register(TESTI)
 
@@ -139,6 +140,10 @@ def main() -> None:
     # chiude la finestra vuole che il programma finisca, non che aspetti la
     # fine di un import.
     threading.Thread(target=api.carica_motore, daemon=True).start()
+
+    # Prima di aprire la finestra: dire a Windows che questo processo e'
+    # EchoScript. Serve alle notifiche di fine lavoro (vedi utils/notifica.py).
+    notifica.dichiara_identita()
 
     finestra = webview.create_window(
         'EchoScript',
