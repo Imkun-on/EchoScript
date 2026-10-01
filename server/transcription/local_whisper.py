@@ -29,9 +29,7 @@ from server.state.checkpoints import (
     LOCAL_CHECKPOINT_EVERY, _local_resume_point, _trim_audio,
     delete_local_checkpoint, save_local_checkpoint,
 )
-from server.utils.console import console
 from server.utils.contract import MediaError, _never_stop, _noop_progress
-from server.utils.ffmpeg import _probe_duration
 from server.utils.text import _format_timestamp
 
 

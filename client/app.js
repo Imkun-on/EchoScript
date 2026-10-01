@@ -81,9 +81,6 @@ function cambiaSezione(nome, immediato) {
     SCELTE.motore = MOTORE_DI[nome];
     if (window.pywebview) window.pywebview.api.imposta({ motore: MOTORE_DI[nome] }, nome);
   }
-  // Lo storico si rilegge ogni volta che ci si entra: i lavori finiscono
-  // mentre si guarda altro, e una tabella ferma alla prima apertura mentirebbe.
-  if (nome === 'storico' && window.apriStorico) window.apriStorico();
 
   // Prima la sezione che se ne va sfuma e arretra, poi entra la nuova
   // dall'altro lato. Il ritardo e' quello dell'animazione di uscita, non un
@@ -456,6 +453,25 @@ function togliVelo() {
   }, resta);
 }
 
+/* La spia sotto il marchio: dice se YouTube vede l'IP di casa o quello di
+ * Tor. Si interroga Python ogni pochi secondi, sempre: Tor puo' cadere e
+ * ripartire anche a meta' sessione, e la spia deve seguirlo. */
+function sorvegliaTor() {
+  const spia = document.getElementById('spia-tor');
+  if (!spia) return;
+  const giro = async () => {
+    try {
+      const s = await window.pywebview.api.stato_tor();
+      const fase = s.fase === 'pronto' ? 'pronto' : s.fase === 'errore' ? 'errore' : 'avvio';
+      spia.dataset.fase = fase;
+      spia.querySelector('.spia-tor-testo').textContent = t('tor.' + fase);
+      spia.title = fase === 'errore' ? s.errore : t('tor.spiega');
+    } catch (_) { /* il ponte non risponde: si riprova al giro dopo */ }
+    setTimeout(giro, 3000);
+  };
+  giro();
+}
+
 function avvia() {
   /* La barra comincia a muoversi subito, prima ancora che ci sia qualcosa da
    * raccontare. Il primo traguardo e' piccolo di proposito: serve solo a dare
@@ -507,7 +523,7 @@ function avvia() {
     passoAvvio();                     // 4. le due sezioni sono pronte
 
     riempiTesti();
-    if (window.initStorico) window.initStorico();
+    sorvegliaTor();
     if (window.potenziaTendine) window.potenziaTendine();
     passoAvvio();                     // 5. ogni etichetta ha il suo testo
 
@@ -529,7 +545,7 @@ function avvia() {
     // che fa partire un lavoro che non si sta vedendo e' una trappola.
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey) || finestraAperta()) return;
-      if (!POSTI[SEZIONE]) return;           // nello storico non si avvia niente
+      if (!POSTI[SEZIONE]) return;           // fuori da una postazione non si avvia niente
       e.preventDefault();
       const avvia = posto().q('avvia');
       if (avvia && !avvia.disabled) avvia.click();

@@ -16,9 +16,9 @@ fpdf2>=2.7
 # salvata in italiano via Google Translate. Serve solo per l'opzione "traduci".
 deep-translator>=1.11
 
-# INTERFACCIA GRAFICA (EchoScriptApp.py): una pagina web (web/) mostrata dentro
+# INTERFACCIA GRAFICA (EchoScript.py): una pagina web (client/) mostrata dentro
 # il WebView che Windows ha gia' installato. Niente motore grafico da scaricare.
-# Avvio: python EchoScriptApp.py
+# Avvio: python EchoScript.py
 pywebview>=5.0
 # Su Windows serve anche il ponte .NET verso WebView2 (su macOS e Linux
 # pywebview usa WebKit di sistema e questa riga viene semplicemente ignorata).
@@ -31,6 +31,15 @@ pythonnet>=3.0 ; sys_platform == "win32"
 # scaricate UNA volta in cache locale (.pdfassets/), poi funziona anche offline.
 # Se manca il browser o la rete la prima volta, ripiega sul PDF base (fpdf2).
 # Disattivabile con ECHOSCRIPT_RICH_PDF=0; browser specifico con ECHOSCRIPT_BROWSER.
+
+# Disegno delle MOLECOLE nei riassunti di chimica (modello 3D a sfere e
+# bastoncini, formula a scheletro dei composti organici). Senza, i blocchi
+# delle molecole si tolgono e il resto del riassunto resta com'e'.
+rdkit>=2024.3
+# Controllo della struttura dal nome IUPAC (OPSIN, licenza MIT). Contiene il
+# file .jar di OPSIN; lo usa solo se sul computer c'e' Java (8 o piu'
+# recente). Senza Java resta il controllo con la formula.
+py2opsin>=1.0
 
 # (OPZIONALE) Accelerazione GPU del backend locale: installa PyTorch con CUDA
 # per far girare faster-whisper su GPU (5-20x piu' veloce). Senza, gira su CPU.

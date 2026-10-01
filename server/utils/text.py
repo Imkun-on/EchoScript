@@ -76,13 +76,31 @@ def _format_upload_date(raw) -> str:
         return str(raw)
 
 
-def _safe_filename(name: str) -> str:
-    """Clean up a title so that it is a valid file name on Windows.
+# I nomi che Windows riserva ai dispositivi: un file che si chiama cosi' (anche
+# con un'estensione, «CON.txt») non si puo' creare.
+_NOMI_RISERVATI = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
+                   *(f"LPT{i}" for i in range(1, 10))}
 
-    Replaces the forbidden characters (\\ / : * ? \" < > |) with an underscore and
-    shortens overly long titles, so as not to break the filesystem."""
-    name = re.sub(r'[<>:"/\\|?*]', "_", name)
-    return name.strip()[:120] or "trascrizione"
+
+def _safe_filename(name: str) -> str:
+    """Un titolo trasformato in un nome di file valido su Windows.
+
+    I caratteri vietati (\\ / : * ? \" < > | e quelli di controllo) diventano un
+    trattino basso, e i titoli troppo lunghi si accorciano.
+
+    Via anche gli spazi e i punti in fondo. Windows non li vuole alla fine di
+    un nome, e non lo dice: quando crea il file li toglie da solo, ma solo in
+    certi casi, e cosi' la stessa cartella veniva creata con un nome e cercata
+    con un altro. Un titolo che finiva con un punto («... passo passo .») dava
+    una cartella che il programma non riusciva piu' a riaprire. Il taglio a
+    120 caratteri viene prima, perche' anche lui puo' lasciare uno spazio in
+    fondo.
+    """
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name)
+    name = name.strip()[:120].rstrip(" .")
+    if name.split(".")[0].strip().upper() in _NOMI_RISERVATI:
+        name = "_" + name
+    return name or "trascrizione"
 
 
 def numero_playlist(posizione: int, quanti: int) -> str:

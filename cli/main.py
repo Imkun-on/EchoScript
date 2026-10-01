@@ -54,25 +54,20 @@ if _RADICE not in _sys.path:
 
 # --- Python standard library (already included, no installation) ---
 import os                                          # environment variables, paths, files
-import re                                          # regular expressions (file name cleanup)
 import json                                        # export in .json format (for RAG/other LLMs)
 import sys                                         # clean exit from the program
 import signal                                      # intercept Ctrl+C
-import time                                        # brevi attese: retry di scrittura, backoff
 import shutil                                      # find the ffmpeg executable in PATH
 import tempfile                                    # temporary folder for the audio
-import subprocess                                  # launch ffmpeg/ffprobe as external processes
-from datetime import datetime, timedelta           # format the publication date / limit resets
 
 # --- External libraries (see requirements.txt) ---
-import yt_dlp                                       # downloads audio and metadata from YouTube
 from groq import Groq                               # official Groq API client (Whisper)
 
 # --- "rich": the library that draws the colored interface in the terminal ---
 from rich.align import Align                        # center the banner
-from rich.box import DOUBLE, ROUNDED, HEAVY         # border styles for the boxes
+from rich.box import DOUBLE, ROUNDED         # border styles for the boxes
 from rich.columns import Columns                    # to place several boxes side by side (cards)
-from rich.console import Console, Group             # console + grouping several elements
+from rich.console import Group             # console + grouping several elements
 from rich.panel import Panel                        # the "boxes" with border and title
 from rich.rule import Rule                          # elegant divider lines
 from rich.progress import (                         # the progress bars and their columns
@@ -83,7 +78,6 @@ from rich.progress import (                         # the progress bars and thei
 from rich.style import Style                        # colors/bold (banner gradient)
 from rich.table import Table                        # tables (video info card)
 from rich.text import Text                          # text with multiple styles
-from rich.theme import Theme                        # palette of reusable styles (info, error, ...)
 
 # On Windows the default output may be cp1252, which cannot encode the symbols/
 # emoji used in the interface (✓ ✗ ✂ ✎ ...). We force UTF-8 so the program never
@@ -108,9 +102,7 @@ if getattr(sys, "frozen", False):
 # finestra, e' la finestra a dirottare l'uscita standard e a raccogliere queste
 # righe per il diario. Chi scrive il codice del motore non deve sapere chi lo
 # sta guardando.
-from server.utils.console import (
-    SYM_ARROW, SYM_DOT, SYM_FAIL, SYM_OK, console,
-)
+from server.utils.console import SYM_OK, console
 
 # === LE MANOPOLE: stanno in server/config/settings.py ========================
 #
@@ -129,15 +121,10 @@ from server.utils.console import (
 # nessun avviso, e il programma che usa il modello sbagliato.
 #
 # La seconda importa per nome tutto il resto, che dopo l'avvio non cambia mai.
-from server.config import paths, settings
+from server.config import settings
 from server.config.settings import (
-    AUDIO_BITRATE, AUDIO_EXTENSIONS, AUDIO_SAMPLE_RATE, BROWSER_PATH,
-    CHUNK_SECONDS, GROQ_TEXT_MODELS, GROQ_TRANSCRIBE_MODELS,
-    LOCAL_COMPUTE_TYPE, LOCAL_DEVICE, LOCAL_MODELS,
-    MAX_RETRIES, OLLAMA_HOST, OLLAMA_NUM_CTX, OLLAMA_TEXT_MODELS,
-    RICH_PDF, SUMMARY_CHARTS, SUMMARY_MAX_CHARS,
-    WORD_TIMESTAMPS, _env_bool, _env_candidates,
-    _env_int, _env_opt, _env_str, _load_env_file,
+    AUDIO_EXTENSIONS, CHUNK_SECONDS, LOCAL_MODELS, OLLAMA_TEXT_MODELS,
+    SUMMARY_CHARTS, _env_str
 )
 
 # === GRACEFUL SHUTDOWN ===
@@ -218,17 +205,12 @@ from server.utils.text import (
 # chi le sta guardando, e le due richiamate di riserva che permettono di
 # riferire l'avanzamento anche quando non sta ascoltando nessuno.
 # Domande sul materiale: da dove arriva, in che lingua parla.
-from server.utils.media import (
-    _is_italian, _is_local, _is_same_language, _lang_code, _lang_name,
-)
+from server.utils.media import _is_italian, _lang_name
 # Le tre domande che si fanno a Ollama prima di cominciare.
-from server.utils.ollama import (
-    _check_ollama, _ollama_has_model, _ollama_installed_models,
-)
+from server.utils.ollama import _ollama_has_model, _ollama_installed_models
 from server.utils.contract import (
-    chiedi_di_fermarsi, fermarsi,
-    GroqRateLimit, MediaError, TranscriptionInterrupted, _is_rate_limit,
-    _never_stop, _noop_progress,
+    chiedi_di_fermarsi, fermarsi, GroqRateLimit, MediaError,
+    TranscriptionInterrupted, _is_rate_limit
 )
 
 # === STATO E PARZIALI: stanno in server/state/ ===============================
@@ -238,24 +220,15 @@ from server.utils.contract import (
 # gia' fatte di un lavoro. Stavano insieme solo perche' tutte e tre scrivono
 # su disco, che non e' un motivo per stare nello stesso file.
 from server.state.checkpoints import (
-    LOCAL_CHECKPOINT_EVERY, _checkpoint_key, _checkpoints_dir,
-    _local_resume_point, _trim_audio, checkpoint_path, delete_checkpoint,
-    delete_local_checkpoint, load_checkpoint, load_local_checkpoint,
-    local_checkpoint_path, save_checkpoint, save_local_checkpoint,
-)
-from server.state.credits import (
-    _RATE_LIMIT_CACHE, _RATE_LIMIT_UNITS, _rate_limit_num,
-    _rate_limit_reset_seconds, cached_rate_limits, parse_ratelimit_headers,
-    ratelimit_groups, record_rate_limits,
+    _local_resume_point, delete_checkpoint, delete_local_checkpoint,
+    load_checkpoint, load_local_checkpoint, save_checkpoint
 )
 from server.state.jobs import (
-    PIPELINE_STAGES, STAGE_DONE, STAGE_PARTIAL, STAGE_PENDING, STAGE_SKIP,
-    NOMI_VECCHI, SUMMARY_SUBDIR, SUMMARY_SUFFIX, TRANSL_SUBDIR, TRANS_SUBDIR,
-    _empty_state, delete_state, has_resumable_state,
-    load_existing_transcript, load_existing_translation, load_state,
-    resume_plan, resume_sections, save_state, stage_sections, stage_status,
-    state_path, summary_subdir, trans_subdir, transcription_exists,
-    transl_subdir, update_stage,
+    STAGE_DONE, STAGE_PARTIAL, STAGE_PENDING, STAGE_SKIP, NOMI_VECCHI,
+    SUMMARY_SUFFIX, TRANS_SUBDIR, _empty_state, delete_state, has_resumable_state,
+    load_existing_transcript, load_existing_translation, load_state, resume_plan,
+    resume_sections, save_state, stage_status, summary_subdir, trans_subdir,
+    transcription_exists, transl_subdir, update_stage
 )
 
 # === TRANSCRIPTION BACKEND SELECTION ===
@@ -527,9 +500,7 @@ def choose_existing_action(title: str, can_resume: bool = False,
 # === temporaneo ==============================================================
 #
 # temporaneo
-from server.state.jobs import (
-    STAGE_LABELS_IT, resume_info_text,
-)
+from server.state.jobs import resume_info_text
 
 def init_run_state(meta: dict, backend: str, want_translate: bool,
                    want_summary: bool) -> dict:
@@ -755,9 +726,7 @@ def _confirm(label: str, accent: str = "bright_blue") -> bool:
 # === I METADATI: stanno in server/sources/metadata.py ========================
 #
 # Cosa c'e' dietro un link o dentro un file, prima di scaricare niente.
-from server.sources.metadata import (
-    _best_thumbnail, get_playlist_info, get_video_info, local_file_meta,
-)
+from server.sources.metadata import get_playlist_info, get_video_info, local_file_meta
 
 # --- Wrapper CLI dei metadati ------------------------------------------------
 # Le funzioni core qui sopra sollevano MediaError; la CLI preferisce lavorare
@@ -790,12 +759,6 @@ def _cli_get_playlist_info(url: str) -> dict | None:
         return None
 
 
-# === I MESSAGGI DI AVANZAMENTO: stanno in server/config/messages.py ==========
-#
-# Le righe che compaiono nel diario mentre il programma lavora. Erano in due
-# lingue perche' il motore doveva parlare la lingua dell'interfaccia; adesso
-# ce n'e' una sola, e `msg` non ha piu' bisogno di sapere in quale scrivere.
-from server.config.messages import _RUNTIME_MSGS, msg    # noqa: F401
 
 
 
@@ -967,9 +930,7 @@ def _cli_split_audio(audio_path: str, duration: float, workdir: str) -> list[tup
 #
 # Un blocco di audio alla volta verso i server di Groq, e cosa fare quando
 # la risposta e' «hai finito i crediti per oggi», che non e' un guasto.
-from server.transcription.groq_api import (
-    _coerce, _extract_words, _transcribe_chunk,
-)
+from server.transcription.groq_api import _transcribe_chunk
 
 def transcribe(client: Groq, chunks: list[tuple[float, str]],
                start_index: int = 0, prior_segments: list | None = None,
@@ -1111,28 +1072,19 @@ def _cli_transcribe_local(model_name: str, audio_path: str, duration: float,
 # Markdown, testo semplice e json: lo stesso contenuto per tre destinatari
 # diversi. Non stampano niente, quindi si sono spostate senza toccare una riga.
 from server.export.document import (
-    _build_sections, _md_header, _strip_md_bold, build_md,
-    build_transcript_json, build_txt,
+    _build_sections, build_md, build_transcript_json, build_txt
 )
 
 # === IL PDF SEMPLICE: sta in server/export/pdf_basic.py ======================
 #
 # Quello che funziona sempre, senza rete e senza browser: e' la rete di
 # sicurezza del PDF ricco.
-from server.export.pdf_basic import (
-    _section_heading, build_pdf,
-)
 
 # === LA TRADUZIONE: sta in server/enrichment/translation.py ==================
 #
 # Google Translate in nuvola oppure Ollama in locale, piu' il lavoro di
 # proteggere gli anglicismi perche' non vengano tradotti alla lettera.
-from server.enrichment.translation import (
-    _ANGLICISMS, _ANGLICISM_RE, _ANGLICISM_TOKEN_RE, _TRANSLATE_MAX_CHARS,
-    _make_translator, _protect_anglicisms, _restore_anglicisms,
-    _split_for_translation, _translate_engine_label, _translate_ollama,
-    _translate_text, translate_sections,
-)
+from server.enrichment.translation import _translate_engine_label, translate_sections
 
 # === API KEY ===
 
@@ -1561,19 +1513,12 @@ from server.export.word import save_docx
 #
 # Formule e mappe disegnate davvero, stampando una pagina web con un browser
 # che sul computer c'e' gia'. Se manca, si ripiega sul PDF semplice.
-from server.export.pdf_rich import (
-    PDF_ASSETS_DIR, _PDF_ASSET_URLS, _PDF_HTML_TEMPLATE, _ensure_pdf_assets,
-    _find_browser, _md_inline_to_html, _md_to_html, _save_pdf,
-    build_pdf_rich,
-)
+from server.export.pdf_rich import _save_pdf
 
 # === IL RIASSUNTO, IL LAVORO =================================================
 #
 # temporaneo
-from server.enrichment.summary import (
-    _groq_chat_capture, _make_summarizer, _summarize_groq, _summarize_long,
-    _summarize_ollama, _summary_user_prompt, summarize_sections,
-)
+from server.enrichment.summary import _make_summarizer, summarize_sections
 
 
 def summarize_existing(out_root: str, title: str, client=None,
@@ -1712,9 +1657,7 @@ def summarize_existing(out_root: str, title: str, client=None,
 #
 # Quanto costera' e quanto ci vorra', detto quando c'e' ancora tempo per
 # cambiare idea.
-from server.services.estimate import (
-    GROQ_PRICE_PER_HOUR, _LOCAL_REALTIME_CPU, estimate_job,
-)
+from server.services.estimate import estimate_job
 
 def run() -> None:
     """Orchestration: choose the engine and the SOURCE (YouTube URL or local
@@ -2014,7 +1957,7 @@ from server.utils.ffmpeg import (
 )
 
 # === MAIN ===
-# Entry point: executed only if you run "python transcriber.py"
+# Entry point: executed only if you run "python cli/main.py"
 # directly (not when the file is imported by another script).
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, _signal_handler)  # clean Ctrl+C handling

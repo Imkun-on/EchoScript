@@ -42,8 +42,8 @@ from server.state import checkpoints, credits, jobs
 from server.transcription import audio, groq_api, local_whisper
 from server.utils import contract, ffmpeg, media
 
-# La radice del progetto deve essere raggiungibile, altrimenti `import
-# transcriber` qui sotto non trova niente.
+# La radice del progetto deve essere raggiungibile, altrimenti gli import dei
+# moduli del progetto non trovano niente.
 #
 # Si chiede a paths invece di contare le cartelle sopra questo file, e non e'
 # pignoleria: contandole, la riga si romperebbe in silenzio il giorno in cui
@@ -71,9 +71,10 @@ class EngineError(Exception):
 
 
 def _shared(fn, *args, **kwargs):
-    """Chiama una funzione media condivisa di transcriber.py traducendone l'errore.
+    """Chiama una funzione di base di server/ traducendone l'errore.
 
-    Le funzioni core stanno in transcriber.py (che il motore importa già) e
+    Le funzioni di base (metadata, download, audio, local_whisper) stanno nei
+    loro moduli e
     segnalano i guasti con contract.MediaError. La GUI però cattura EngineError: qui
     la riavvolgiamo, così il contratto verso l'alto non cambia."""
     try:
@@ -133,28 +134,6 @@ class CreditiEsauriti(EngineError):
         super().__init__(
             f"I crediti Groq sono esauriti e tornano alle {ripresa}. Il lavoro "
             "non è partito: riprova a quell'ora, oppure trascrivi in «Locale».")
-
-
-def _friendly_groq_error(e: Exception) -> str:
-    """Traduce un errore di Groq in una frase che significhi qualcosa.
-
-    Gli errori che arrivano dalla rete sono scritti per chi sviluppa: parlano
-    di codici, di nomi di campi, a volte contengono mezzo documento json. Chi
-    sta usando il programma da quella roba non ricava nessuna decisione.
-
-    Qui si riconoscono i tre casi che capitano davvero e si dice cosa fare:
-    i crediti sono finiti (torna piu' tardi), la chiave e' sbagliata
-    (controllala), non c'e' rete (guarda la connessione). Tutto il resto passa
-    cosi' com'e', perche' inventare una spiegazione generica per un errore che
-    non si e' riconosciuto e' peggio che mostrarlo grezzo.
-    """
-    msg = str(e)
-    if "429" in msg or "rate_limit" in msg or "tokens per day" in msg.lower():
-        return ("limite giornaliero Groq raggiunto per la trascrizione. "
-                "Riprova più tardi (quando tornano i crediti gratuiti).")
-    if "401" in msg or "invalid_api_key" in msg:
-        return "chiave Groq non valida."
-    return msg
 
 
 # A progress callback has the signature:
@@ -229,7 +208,7 @@ def _L(key: str, **fmt) -> str:
 
 
 # === VIDEO METADATA ===
-# get_video_info / get_playlist_info vivono in transcriber.py (funzioni core,
+# get_video_info / get_playlist_info vivono in server/sources/metadata.py (funzioni di base,
 # senza interfaccia) e sono usate identiche da CLI e GUI: qui restano solo i
 # ponti che traducono contract.MediaError in EngineError.
 
@@ -423,90 +402,8 @@ def stima_crediti(durata: float, api_key: str | None = None) -> dict | None:
     return {"restano": restano, "serve": durata, "ripresa": ripresa}
 
 
-def get_cached_credits() -> list[dict]:
-    """Crediti Groq residui PER MODELLO, letti dalla cache che le richieste reali
-    (trascrizione/riassunto) hanno già popolato, quindi a COSTO
-    ZERO: questa funzione NON contatta Groq, non consuma alcun credito.
-
-    Restituisce una lista (vuota finché non è stata fatta almeno una chiamata
-    Groq in questa sessione) ordinata trascrizione → riassunto, ognuna:
-    {model, role, checked_at, items: [{kind, remaining, limit, reset_seconds,
-    reset_at_iso}]}. 'reset_seconds' è ricalcolato ADESSO dal momento assoluto di
-    azzeramento salvato in cache, così resta corretto anche a distanza di ore."""
-    now = _datetime.now()
-    # I due modelli Groq usati dall'app, SEMPRE elencati (anche se non ancora
-    # chiamati in questa sessione): così il pannello crediti mostra tutti i modelli
-    # e non solo quelli già interrogati. 'used' distingue i due casi per la GUI.
-    known = [
-        (settings.GROQ_MODEL, "transcription", 0),
-        (settings.GROQ_SUMMARY_MODEL, "summary", 1),
-    ]
-    known_models = {m for m, _, _ in known}
-    cache_by_model = {snap.get("model", ""): snap for snap in credits.cached_rate_limits()}
-
-    def _items_from(snap: dict) -> list[dict]:
-        """Da una fotografia dei limiti alle righe da mostrare nel pannello.
-
-        Il conto di quanto manca al ripristino si rifa' adesso e non si legge
-        com'era: quella fotografia puo' essere stata presa mezz'ora fa, e
-        mostrare «fra due ore» quando ne mancano una e mezza sarebbe peggio che
-        non dire niente.
-        """
-        items: list[dict] = []
-        for it in snap.get("items", []):
-            rem_s = None
-            if it.get("reset_at_iso"):
-                try:
-                    reset_at = _datetime.fromisoformat(it["reset_at_iso"])
-                    rem_s = max(0.0, (reset_at - now).total_seconds())
-                except Exception:
-                    rem_s = None
-            # 'used' = crediti consumati = limite - rimanenti (quando entrambi noti).
-            rem, lim = it.get("remaining"), it.get("limit")
-            used_val = (lim - rem) if (rem is not None and lim is not None) else None
-            items.append({
-                "kind": it.get("kind"),
-                "remaining": rem,
-                "limit": lim,
-                "used": used_val,
-                "reset_seconds": rem_s,
-                "reset_at_iso": it.get("reset_at_iso"),
-            })
-        return items
-
-    def _checked(snap: dict) -> str:
-        """L'ora in cui quei numeri sono stati letti l'ultima volta.
-
-        Serve a far capire quanto sono freschi. Se la data salvata non si
-        riesce a leggere si mette l'ora attuale: e' impreciso, ma una riga
-        vuota o un errore in un pannello informativo sarebbero peggio.
-        """
-        try:
-            return _datetime.fromisoformat(snap["checked_at_iso"]).strftime("%H:%M")
-        except Exception:
-            return now.strftime("%H:%M")
-
-    out: list[dict] = []
-    for model, role, order in known:
-        snap = cache_by_model.get(model)
-        out.append({
-            "model": model, "role": role, "_order": order,
-            "used": bool(snap),
-            "checked_at": _checked(snap) if snap else None,
-            "items": _items_from(snap) if snap else [],
-        })
-    # Eventuali altri modelli in cache non fra i due noti (raro): in coda.
-    for model, snap in cache_by_model.items():
-        if model in known_models:
-            continue
-        out.append({"model": model, "role": "other", "_order": 9, "used": True,
-                    "checked_at": _checked(snap), "items": _items_from(snap)})
-    out.sort(key=lambda d: d.get("_order", 9))
-    return out
-
-
 # === AUDIO/VIDEO DOWNLOAD ===
-# Anche questi sono ponti: la logica yt-dlp sta in transcriber.py. Passiamo la
+# Anche questi sono ponti: la logica yt-dlp sta in server/sources/download.py. Passiamo la
 # lingua del motore cosi' i testi di avanzamento arrivano gia' tradotti.
 
 def _fermati_se_richiesto() -> None:
@@ -664,18 +561,6 @@ def _salva_word(meta: dict, sections: list[dict], percorso: str, with_timestamps
 
 
 # === HIGH-LEVEL ORCHESTRATION ===
-
-def video_meta(source: str, options: dict, on_progress=_noop) -> dict:
-    """Solo i metadati della sorgente (senza scaricare/trascrivere).
-
-    Serve alla GUI per controllare PRIMA di trascrivere se il video è già stato
-    trascritto o se esiste un checkpoint parziale."""
-    if options.get("source_kind", "youtube") == "local":
-        if not os.path.isfile(source):
-            raise EngineError(f"File non trovato: {source}")
-        return metadata.local_file_meta(source)
-    return get_video_info(source)
-
 
 def transcribe_only(source: str, options: dict, on_progress=_noop, resume: bool = False):
     """PHASE 1: download/read + transcribe ONE source, returning data IN MEMORY.
@@ -1323,14 +1208,9 @@ def resume_hint(meta: dict, out_root: str, lang: str = "it") -> str:
     abbastanza: riprendere da una traduzione quasi finita e riprendere da una
     trascrizione appena cominciata sono due decisioni diverse, e senza questo
     testo si somigliano.
+
+    'lang' resta per chi la chiama, ma non serve piu': il testo e' solo in
+    italiano, e resume_info_text non chiede la lingua.
     """
-    return jobs.resume_info_text(dict(meta), lang)
+    return jobs.resume_info_text(dict(meta))
 
-
-def process(url: str, options: dict, on_progress=_noop, out_root: str = RESULTS_DIR) -> dict:
-    """Convenience: run BOTH phases in one go (used by tests / non-interactive).
-
-    The GUI instead calls transcribe_only() and then save_results() so it can
-    ask the user where to save in between."""
-    meta, segments, engine_label, client = transcribe_only(url, options, on_progress)
-    return save_results(meta, segments, engine_label, options, out_root, client, on_progress)

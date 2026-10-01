@@ -147,30 +147,56 @@ html, body {
   backdrop-filter: blur(10px);
 }
 
-/* Il marchio: il disegno sopra, il nome sotto, tutto in colonna e centrato.
+/* Il marchio: il simbolo sopra, sotto il nome e sotto ancora il motto, tutto
+ * in colonna e centrato.
  *
- * E' lo stesso disegno dell'icona sul desktop, e sta li' per quello: chi ha
+ * E' lo stesso simbolo dell'icona sul desktop, e sta li' per quello: chi ha
  * appena fatto doppio clic ritrova la stessa cosa dentro la finestra, e capisce
  * di essere nel posto giusto senza dover leggere. */
 .marchio {
   display: flex; flex-direction: column; align-items: center;
-  gap: var(--s2); margin-bottom: var(--s6);
+  gap: var(--s2); margin-bottom: var(--s6); text-align: center;
 }
+/* L'immagine porta gia' con se' il suo alone, che occupa il bordo del
+ * ritaglio: i margini negativi lo lasciano sbordare, cosi' a contare come
+ * ingombro e' il simbolo e non la luce che ha intorno. */
 .marchio-icona {
-  width: 56px; height: 56px; color: var(--iris);
-  filter: drop-shadow(0 0 16px #7c6cff59);
+  width: 86px; max-width: 100%; height: auto; margin: -8px 0 -8px;
+  user-select: none; -webkit-user-drag: none;
 }
-/* Le tre barre di livello e le tre righe scritte prendono due colori diversi:
- * e' il verso del programma, dal parlato allo scritto, e distinguerli lo rende
- * leggibile anche a 56 pixel. */
-.marchio-icona .alta { fill: var(--lume); }
-.marchio-icona .riga { fill: var(--onda); }
-.logo {
-  font-size: 21px; font-weight: 800; letter-spacing: -.3px; line-height: 1.1;
-  background: linear-gradient(103deg, #fff 6%, var(--lume) 44%, var(--onda) 98%);
+/* Il nome a due colori, come sul foglio del marchio: «Echo» bianco e «Script»
+ * che va dal ciano al viola. E' testo e non un pezzo dell'immagine, cosi'
+ * resta nitido a qualunque ingrandimento. */
+.logo, .avvio-nome {
+  font-family: 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
+  font-weight: 800; letter-spacing: -.4px; line-height: 1.1; color: #fff;
+}
+.logo span, .avvio-nome span {
+  background: linear-gradient(90deg, #2bd4f5, #3d8bff 55%, #9b6bff);
   -webkit-background-clip: text; background-clip: text; color: transparent;
-  filter: drop-shadow(0 0 22px #7c6cff4d);
 }
+.logo { font-size: 25px; filter: drop-shadow(0 0 22px #3d8bff40); }
+.motto {
+  margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--t1);
+  letter-spacing: .1px; text-wrap: balance;
+}
+
+/* La spia sotto il motto: gialla e pulsante mentre Tor si collega, verde
+ * quando l'IP e' nascosto, rossa se Tor non si raggiunge. */
+.spia-tor {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: var(--s1);
+  padding: 2px 9px; border-radius: 999px; cursor: default;
+  font-size: 10.5px; font-weight: 600;
+  color: var(--t1); background: #8b7cff0f; border: 1px solid var(--bordo);
+}
+.spia-tor-punto { width: 6px; height: 6px; border-radius: 50%; background: var(--t2); }
+.spia-tor[data-fase="avvio"] .spia-tor-punto {
+  background: var(--giallo); animation: pulsa 1.2s ease-in-out infinite;
+}
+.spia-tor[data-fase="pronto"] { color: var(--verde); border-color: #34d39940; background: #34d3990f; }
+.spia-tor[data-fase="pronto"] .spia-tor-punto { background: var(--verde); box-shadow: 0 0 8px var(--verde); }
+.spia-tor[data-fase="errore"] { color: var(--rosso); border-color: #fb718559; background: #fb718514; }
+.spia-tor[data-fase="errore"] .spia-tor-punto { background: var(--rosso); }
 
 .menu { display: flex; flex-direction: column; gap: var(--s1); }
 .voce {
@@ -1172,45 +1198,18 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 
 .avvio-blocco { display: grid; justify-items: center; gap: var(--s4); }
 
+/* Il simbolo respira piano: e' l'unica cosa, insieme alla barra, che dice
+ * che il programma sta lavorando e non si e' piantato. */
 .avvio-marchio {
-  width: 104px; height: 104px; color: var(--iris);
-  filter: drop-shadow(0 0 16px #7c6cff66);
+  width: 216px; height: auto; user-select: none; -webkit-user-drag: none;
+  animation: fiato 2.6s ease-in-out infinite;
 }
-/* Le barre si muovono come un livello audio: e' l'unica cosa che dice che il
- * programma sta lavorando e non si e' piantato. */
-.avvio-marchio .b1, .avvio-marchio .b2, .avvio-marchio .b3 {
-  transform-box: fill-box; transform-origin: center;
-  animation: livello 1.15s ease-in-out infinite;
-}
-.avvio-marchio .b1 { animation-delay: -.90s; }
-.avvio-marchio .b2 { animation-delay: -.45s; fill: var(--lume); }
-.avvio-marchio .b3 { animation-delay: -.15s; }
-
-/* Le righe si scrivono una volta sola, da sinistra e una dopo l'altra: e' il
- * verso in cui va il lavoro, dal parlato allo scritto. In ciclo sarebbero una
- * scritta che si cancella da sola, che non e' cio' che il programma fa. */
-.avvio-marchio .r1, .avvio-marchio .r2, .avvio-marchio .r3 {
-  transform-box: fill-box; transform-origin: left center;
-  fill: var(--onda);
-  animation: scrittura .5s var(--molla) both;
-}
-.avvio-marchio .r1 { animation-delay: .12s; }
-.avvio-marchio .r2 { animation-delay: .30s; }
-.avvio-marchio .r3 { animation-delay: .48s; }
-
-@keyframes livello {
-  0%, 100% { transform: scaleY(.38); }
-  50%      { transform: scaleY(1); }
-}
-@keyframes scrittura {
-  from { transform: scaleX(0); opacity: 0; }
-  to   { transform: scaleX(1); opacity: 1; }
+@keyframes fiato {
+  0%, 100% { transform: scale(.97); opacity: .86; }
+  50%      { transform: scale(1.02); opacity: 1; }
 }
 
-.avvio-nome {
-  font-size: 26px; font-weight: 700; letter-spacing: .5px;
-  color: var(--t0); text-shadow: 0 0 18px #7c6cff40;
-}
+.avvio-nome { font-size: 30px; margin-top: calc(var(--s5) * -1); }
 
 .avvio-barra {
   width: 190px; height: 3px; border-radius: 2px;
@@ -1254,7 +1253,8 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
  * decorazione, non deve dare fastidio a chi ne soffre. */
 @media (prefers-reduced-motion: reduce) {
   .alone, .onde, .spia.working, .passo.corrente .pallino,
-  .nota-lettura.attiva::before, .avvio-marchio rect { animation: none; }
+  .nota-lettura.attiva::before, .avvio-marchio,
+  .spia-tor .spia-tor-punto { animation: none; }
   .sezione.attiva, .sezione.uscita, .finestra, .velo-finestra,
   .credito, .scheda-copertina, .avanzamento.visibile { animation: none; }
   * { transition-duration: .01ms !important; }
@@ -1285,75 +1285,3 @@ select.campo { cursor: pointer; appearance: none; padding-right: 30px; }
 }
 .riga-video .togli .icona { width: 12px; height: 12px; }
 .riga-video .togli:hover { color: var(--rosso); border-color: #fb718559; background: #fb71851a; }
-
-/* ── Storico ────────────────────────────────────────────────────────────── */
-
-/* La voce nella barra laterale sta staccata dalle due stanze: non e' una
- * postazione di lavoro, e' dove si guarda cosa e' stato fatto. */
-.voce-staccata { margin-top: var(--s4); }
-
-.sezione[data-sez="storico"] { overflow: hidden; }
-.sezione[data-sez="storico"] > .intestazione { flex: 0 0 auto; }
-.storico { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--s3); }
-.storico-barra { display: flex; align-items: center; gap: var(--s3); }
-.storico-cerca { width: 340px; max-width: 45%; }
-/* Scorre la tabella, non la pagina: l'intestazione con la ricerca resta
- * sempre a portata. Scorre anche di lato, perche' le colonne sono dieci. */
-.storico-scorri { flex: 1; min-height: 0; overflow: auto; border-radius: var(--r-m); }
-
-.tabella-storico { width: 100%; border-collapse: collapse; font-size: 12px; }
-/* Tutto al centro della sua cella, in orizzontale e in verticale, con la
- * stessa altezza di riga per ogni carattere: il testo a spaziatura fissa
- * (durata, crediti, data) altrimenti scende rispetto al resto. */
-.tabella-storico th {
-  text-align: center !important; vertical-align: middle; line-height: 1.3;
-  position: sticky; top: 0; z-index: 1; text-align: left; white-space: nowrap;
-  font-size: 10.5px; font-weight: 700; letter-spacing: .3px; text-transform: uppercase;
-  color: var(--t1); background: #14142c; padding: 9px 10px;
-  border-bottom: 1px solid var(--taglio);
-}
-.tabella-storico td {
-  text-align: center; vertical-align: middle; line-height: 1.3;
-  padding: 8px 10px; border-bottom: 1px solid var(--bordo);
-  color: var(--t0); vertical-align: middle;
-}
-.tabella-storico tbody tr:hover td { background: #8b7cff0d; }
-.tabella-storico .col-url { max-width: 230px; }
-.tabella-storico .col-url a {
-  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  color: var(--onda); text-decoration: none;
-}
-.tabella-storico .col-url a:hover { text-decoration: underline; }
-.tabella-storico .col-canale {
-  max-width: 170px; color: var(--t1);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.tabella-storico .col-titolo { min-width: 220px; max-width: 360px; font-weight: 600; }
-.tabella-storico .col-numero,
-.tabella-storico .col-data {
-  white-space: nowrap; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 11px;
-  color: var(--t1);
-}
-.tabella-storico .col-singolo { color: var(--t2); white-space: nowrap; }
-.tabella-storico .col-playlist { white-space: nowrap; color: var(--lume); cursor: help; }
-.tabella-storico .col-gesti { white-space: nowrap; }
-.gesto { vertical-align: middle; }
-.bollino { vertical-align: middle; }
-
-.bollino {
-  display: inline-block; white-space: nowrap; font-size: 10.5px; font-weight: 700;
-  border-radius: 999px; padding: 2px 9px; border: 1px solid transparent;
-}
-.bollino.ok         { color: var(--verde);  background: #34d3991a; border-color: #34d39959; }
-.bollino.attenzione { color: var(--giallo); background: #fbbf241a; border-color: #fbbf2459; }
-.bollino.locale     { color: var(--verde);  background: #34d39912; border-color: #34d39940; }
-.bollino.cloud      { color: var(--onda);   background: #38d6ee12; border-color: #38d6ee40; }
-
-.gesto {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; margin-left: 4px; border-radius: 7px; cursor: pointer;
-  background: transparent; color: var(--t1); border: 1px solid var(--bordo);
-  transition: color .15s, border-color .15s, background .15s;
-}
-.gesto .icona { width: 14px; height: 14px; }
-.gesto:hover { color: var(--lume); border-color: #7c6cff59; background: #7c6cff14; }

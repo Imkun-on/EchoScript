@@ -123,6 +123,9 @@ def _paragrafo(contenuto: str, stile: str | None = None) -> str:
 def _corpo(md: str) -> str:
     """Dal markdown del documento ai paragrafi di Word."""
     fuori: list[str] = []
+    if "```molecola" in md:
+        from server.export import molecola
+        molecola.prepara(md)        # tutti i nomi a OPSIN in una volta, non blocco per blocco
     righe = md.split("\n")
     i = 0
     while i < len(righe):
@@ -137,8 +140,8 @@ def _corpo(md: str) -> str:
                 blocco.append(righe[i])
                 i += 1
             i += 1
-            if lingua == "mermaid":
-                for voce in document.grafico_in_testo([b.strip() for b in blocco]):
+            if lingua in document.DISEGNI:
+                for voce in document._grafico_a_parole(lingua, [b.strip() for b in blocco]):
                     if voce.startswith("- "):
                         fuori.append(_paragrafo(_run("•\t") + _in_linea(voce[2:]), "Elenco"))
                     else:

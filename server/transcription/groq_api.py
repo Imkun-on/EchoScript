@@ -28,14 +28,13 @@ import time
 from groq import Groq
 
 from server.config import settings
-from server.config.messages import msg
 from server.config.settings import _USE_CONFIG, MAX_RETRIES, WORD_TIMESTAMPS
 from server.state.credits import (
     aggiungi_consumo, aspetta, attesa_breve, ora_di_ripresa, record_rate_limits,
     registra_da_errore,
 )
-from server.utils.console import SYM_FAIL, console
-from server.utils.contract import GroqRateLimit, _is_rate_limit, _noop_progress
+from server.utils.console import console
+from server.utils.contract import GroqRateLimit, _is_rate_limit
 
 
 # Quante attese brevi di fila si accettano sullo stesso blocco. Oltre, il
@@ -126,8 +125,13 @@ def _transcribe_chunk(client: Groq, chunk_path: str, prompt: str = "",
     approssimazione: i tempi delle frasi e quelli delle parole arrivano da due
     conteggi diversi e non combaciano mai al millesimo. Senza quel margine, la
     prima parola di ogni frase finirebbe regolarmente fuori.
+
+    Proprio per quel margine una parola al confine puo' finire in due frasi, e
+    per questo ognuna riceve una COPIA. Con lo stesso oggetto condiviso, chi
+    poi sposta i tempi del blocco al suo posto nel video lo spostava due volte,
+    e quella parola finiva dieci minuti piu' avanti del vero.
     """
-        return [w for w in words if seg_start - 0.05 <= w["start"] < seg_end + 0.05]
+        return [dict(w) for w in words if seg_start - 0.05 <= w["start"] < seg_end + 0.05]
 
     attempt = 0
     attese = 0

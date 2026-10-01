@@ -21,13 +21,11 @@ Non stampa niente, di proposito
 from __future__ import annotations
 
 import json
-import os
 import re
 
 from server.utils.media import _is_local
 from server.utils.text import (
-    _format_duration, _format_timestamp, _format_upload_date, _format_views,
-    _safe_filename,
+    _format_duration, _format_timestamp, _format_upload_date, _format_views
 )
 
 
@@ -168,6 +166,29 @@ def grafico_in_testo(righe: list[str]) -> list[str]:
     return fuori if len(fuori) > 1 else []
 
 
+# I blocchi che sono un disegno e non codice: nel testo e nel Word non restano
+# come sintassi, diventano poche righe che dicono che cosa c'era disegnato.
+DISEGNI = ("mermaid", "piano", "spazio", "molecola", "reazione", "orbitali",
+           "titolazione", "energia", "reticolo", "tavola")
+
+
+def _grafico_a_parole(tipo: str, righe: list[str]) -> list[str]:
+    """Un grafico (mermaid) o un piano cartesiano detto a parole."""
+    if tipo in ("reazione", "orbitali", "titolazione", "energia", "reticolo", "tavola"):
+        from server.export import chimica
+        return chimica.in_testo(tipo, "\n".join(righe))
+    if tipo == "piano":
+        from server.export import piano
+        return piano.in_testo("\n".join(righe))
+    if tipo == "spazio":
+        from server.export import spazio
+        return spazio.in_testo("\n".join(righe))
+    if tipo == "molecola":
+        from server.export import molecola
+        return molecola.in_testo("\n".join(righe))
+    return grafico_in_testo(righe)
+
+
 def appiattisci_markdown(text: str, grassetto: bool = False) -> str:
     """Toglie dal riassunto i segni di markdown che chi legge non deve vedere.
 
@@ -196,26 +217,30 @@ def appiattisci_markdown(text: str, grassetto: bool = False) -> str:
     """
     if not text:
         return text
+    if "```molecola" in text:
+        from server.export import molecola
+        molecola.prepara(text)      # tutti i nomi a OPSIN in una volta, non blocco per blocco
     righe = []
-    grafico = None          # le righe di un blocco mermaid, mentre lo si legge
+    grafico = None          # le righe di un blocco mermaid o piano, mentre lo si legge
+    tipo = ""
     for riga in text.split("\n"):
         nuda = riga.strip()
         if grafico is not None:
             if nuda.startswith("```"):
-                righe.extend(grafico_in_testo(grafico))
+                righe.extend(_grafico_a_parole(tipo, grafico))
                 grafico = None
             else:
                 grafico.append(nuda)
             continue
-        if nuda.startswith("```mermaid"):
-            grafico = []
+        if nuda.startswith(tuple("```" + nome for nome in DISEGNI)):
+            grafico, tipo = [], nuda[3:].strip().lower()
             continue
         if nuda.startswith("```"):        # apertura o chiusura di un blocco
             continue
         m = re.match(r"^(#{1,6})\s+(.+)$", nuda)
         righe.append(m.group(2) if m else riga)
     if grafico:
-        righe.extend(grafico_in_testo(grafico))
+        righe.extend(_grafico_a_parole(tipo, grafico))
     fuori = "\n".join(righe)
     return fuori if grassetto else _strip_md_bold(fuori)
 

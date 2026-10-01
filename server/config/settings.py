@@ -180,12 +180,6 @@ _load_env_file()
 # "whisper-large-v3" (more accurate/slower), "distil-whisper-large-v3-en" (EN only).
 GROQ_MODEL = _env_str("ECHOSCRIPT_GROQ_MODEL", "whisper-large-v3-turbo")
 
-# Modelli di trascrizione Groq SELEZIONABILI dall'utente (GUI e CLI): entrambi
-# multilingua. 'turbo' = miglior rapporto prezzo/velocità (default); 'large-v3' =
-# più accurato ma ~2,8× più costoso. Il primo è il default. (Il distil, solo
-# inglese, resta impostabile via ECHOSCRIPT_GROQ_MODEL ma non è nel selettore.)
-GROQ_TRANSCRIBE_MODELS = ("whisper-large-v3-turbo", "whisper-large-v3")
-
 # Audio/video extensions accepted as LOCAL sources (phone recordings, PC files,
 # video files from which ffmpeg extracts the audio track). ffmpeg reads all of
 # these; anything not listed is still attempted but with a gentle warning.
@@ -260,7 +254,23 @@ OLLAMA_HOST = _env_str("ECHOSCRIPT_OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_NUM_CTX = _env_int("ECHOSCRIPT_OLLAMA_NUM_CTX", 8192)
 # Oltre questa lunghezza (caratteri) una sezione viene riassunta a blocchi e poi
 # i parziali vengono uniti (map-reduce), per non sforare il contesto del modello.
+# E' la misura di ripiego: quella con cui si ritenta quando Groq dice che una
+# richiesta e' troppo grande.
 SUMMARY_MAX_CHARS = _env_int("ECHOSCRIPT_SUMMARY_MAX_CHARS", 12000)
+# La misura dei blocchi, motore per motore. Ogni blocco si porta dietro tutte le
+# istruzioni del riassunto (con la matematica e i grafici circa 4.300 token), e
+# ogni blocco in piu' vuol dire anche un giro in piu' per unirli: meno blocchi,
+# meno token. Il modello di Groq ha una finestra grande, e un video di mezz'ora
+# ci sta in una richiesta sola invece di tre; se Groq la rifiuta perche' troppo
+# grande per il limite al minuto dell'account, si ritenta con SUMMARY_MAX_CHARS.
+GROQ_SUMMARY_MAX_CHARS = _env_int("ECHOSCRIPT_GROQ_SUMMARY_MAX_CHARS", 30000)
+# Ollama invece ha OLLAMA_NUM_CTX token in tutto: istruzioni, blocco e risposta
+# devono starci insieme, o taglia l'inizio in silenzio (cioe' le istruzioni).
+# 6000 caratteri sono circa 1.700 token.
+OLLAMA_SUMMARY_MAX_CHARS = _env_int("ECHOSCRIPT_OLLAMA_SUMMARY_MAX_CHARS", 6000)
+# Quanto si aspetta la risposta di Ollama per UN blocco, in secondi. Su un
+# portatile senza scheda video un modello da 7B puo' metterci molti minuti.
+OLLAMA_TIMEOUT = _env_int("ECHOSCRIPT_OLLAMA_TIMEOUT", 1800)
 
 # --- Modelli Ollama proposti nei pannelli di scelta (CLI e GUI) ---
 # Numero -> (nome modello, RAM indicativa richiesta, descrizione). Il pannello
@@ -268,6 +278,11 @@ SUMMARY_MAX_CHARS = _env_int("ECHOSCRIPT_SUMMARY_MAX_CHARS", 12000)
 # digitato a mano; .env resta la via per forzare un modello qualunque.
 # TESTO = riassunto + traduzione in locale (backend locale, niente chiave Groq).
 OLLAMA_TEXT_MODELS = {
+    # Il primo della lista, perche' e' l'unico che sta tutto in memoria su un
+    # portatile da 6 GB: gli altri lavorano in parte dal disco, e un riassunto
+    # locale finisce fuori tempo. qwen3 ragiona prima di rispondere e scrive
+    # molto di piu', quindi non e' lui quello leggero.
+    "6": ("qwen2.5:3b",  "~2 GB",  "il piu' veloce: per computer con 6-8 GB di RAM"),
     "1": ("qwen3:4b",    "~4 GB",  "leggero e moderno: ideale con 8 GB di RAM"),
     "2": ("qwen2.5:7b",  "~6 GB",  "equilibrio qualità/peso (default)"),
     "3": ("qwen3:8b",    "~7 GB",  "più accurato (12-16 GB di RAM)"),

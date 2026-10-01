@@ -3,7 +3,7 @@
 Il problema che risolve
     Ogni modulo del progetto calcola la propria cartella con
     ``os.path.dirname(os.path.abspath(__file__))``, e finche' si lancia
-    ``python transcriber.py`` e' esattamente quello che serve.
+    ``python EchoScript.py`` e' esattamente quello che serve.
 
     Dentro un eseguibile costruito con PyInstaller non lo e' piu'. In modalita'
     a file unico il contenuto viene riestratto a ogni avvio in una cartella

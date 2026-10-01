@@ -6,6 +6,11 @@ Perche' solo l'audio
     compresso sono una ventina. Su una playlist di cinquanta video quella
     differenza e' fra un lavoro che finisce e uno che riempie il disco.
 
+Da dove si scarica
+    Attraverso Tor, come tutto quello che va verso YouTube (vedi
+    ``server/utils/tor.py``). Se Tor non c'e' non si scarica: meglio un lavoro
+    che si ferma con un messaggio che uno fatto a viso scoperto.
+
 Non stampa niente
     Riferisce quello che sta succedendo chiamando una funzione che gli viene
     passata. Chi l'ha chiamato decide se scriverlo in un terminale, metterlo in
@@ -17,10 +22,9 @@ import os
 
 import yt_dlp
 
-from server.config import settings
 from server.config.messages import msg
+from server.utils import tor
 from server.utils.contract import MediaError, _never_stop, _noop_progress
-from server.utils.text import _safe_filename
 
 
 def download_audio(url: str, workdir: str, on_progress=_noop_progress,
@@ -81,9 +85,14 @@ def download_audio(url: str, workdir: str, on_progress=_noop_progress,
         }],
     }
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    def _scarica() -> None:
+        # Il proxy si chiede a ogni giro: resta lo stesso, a cambiare e' il
+        # nodo d'uscita dietro di lui.
+        with yt_dlp.YoutubeDL(tor.attraverso(dict(ydl_opts))) as ydl:
             ydl.download([url])
+
+    try:
+        tor.riprovando(_scarica)
     except Exception as e:
         raise MediaError(f"Errore nel download audio: {e}")
 

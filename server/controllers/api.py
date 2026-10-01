@@ -42,11 +42,10 @@ import webview
 from server.config import i18n, settings
 from server.utils import text
 from server.controllers import bridge
-from server.config import settings
 from server.services import estimate
 from server.sources import metadata
 from server.state import checkpoints, credits, jobs, storico
-from server.utils import contract, media, notifica, ollama
+from server.utils import contract, media, notifica, ollama, tor
 
 # Sotto questa durata un lavoro finito non manda la notifica di Windows: la
 # finestra la si sta ancora guardando, e un avviso sarebbe solo rumore.
@@ -276,7 +275,7 @@ _DLG_APRI = getattr(getattr(webview, 'FileDialog', None), 'OPEN',
 
 # ── Cataloghi dei modelli ────────────────────────────────────────────────────
 # Le chiavi di descrizione seguono il nome del modello ('model.small') o il
-# numero di catalogo di transcriber.py ('om.text.2'): cosi' aggiungere un
+# numero di catalogo di settings.py ('om.text.2'): cosi' aggiungere un
 # modello e' una riga qui e una nel file dei testi, non una modifica al codice.
 #
 # Sono divisi in due gruppi che non si mescolano mai (quelli che girano sul
@@ -290,8 +289,7 @@ _WHISPER = ('base', 'small', 'medium', 'large-v3', 'large-v3-turbo')
 _GROQ = ('whisper-large-v3-turbo', 'whisper-large-v3')
 
 # Gli altri due invece si costruiscono leggendo i cataloghi di
-# transcriber.py, che al momento in cui si legge questo file non e' ancora
-# stato importato: nascono vuoti e li riempie riempi_cataloghi(), chiamata
+# settings.py (OLLAMA_TEXT_MODELS e GROQ_TEXT_MODELS): nascono vuoti e li riempie riempi_cataloghi(), chiamata
 # da carica_motore() appena il motore c'e'.
 #
 # Nessuno li legge prima di allora. Chi li usa sono i metodi che rispondono
@@ -553,7 +551,7 @@ class Api:
 
     Qui non si decide niente di importante. Se un video sia una playlist, se
     esista gia' una trascrizione, quanto costera' un lavoro: sono domande a cui
-    rispondono ``server/services/pipeline.py`` e ``transcriber.py``, e questo file si limita
+    rispondono ``server/services/pipeline.py`` e i moduli che usa, e questo file si limita
     a girare la risposta alla pagina.
     """
 
@@ -585,8 +583,8 @@ class Api:
 
         # Le scelte si riempiono dopo, in _leggi_scelte(). Non qui, perche'
         # questo oggetto nasce insieme alla finestra e la finestra nasce prima
-        # del motore: i valori di ripiego dei modelli stanno dentro
-        # transcriber.py, che a quel punto non e' ancora stato importato.
+        # del motore: i valori di ripiego dei modelli stanno in
+        # settings.py, e si leggono quando il motore e' pronto.
         self.scelte: dict = {}
 
 
@@ -624,7 +622,7 @@ class Api:
         Ognuna ha due possibili provenienze. La prima e' settings.json, cioe'
         quello che si era scelto l'ultima volta. La seconda, quando li' non
         c'e' niente perche' e' il primo avvio, e' il valore di ripiego preso da
-        transcriber.py, che a sua volta lo legge dal file .env se c'e'.
+        settings.py, che a sua volta lo legge dal file .env se c'e'.
 
         Va chiamata DOPO che il motore e' stato importato, perche' e' li' che
         stanno quei valori di ripiego.
@@ -677,6 +675,10 @@ class Api:
         risponde lo stesso: la pagina si scopre, l'interfaccia e' a meta' e
         qualcosa non funzionera', ma almeno si VEDE che qualcosa non funziona.
         """
+        # Tor parte subito, mentre il motore si carica e si incolla il primo
+        # link: quando serve e' gia' pronto, invece di far aspettare la prima
+        # lettura di un video.
+        tor.avvia_in_sottofondo()
         MOTORE_PRONTO.wait(timeout=60)
         self._leggi_scelte()
         threading.Thread(target=self._leggi_ollama, daemon=True).start()
@@ -689,6 +691,11 @@ class Api:
             'chiave': self._stato_chiave(),
             'cartella': RISULTATI,
         }
+
+    @staticmethod
+    def stato_tor() -> dict:
+        """Per la spia nella barra laterale: se l'IP e' nascosto, o perche' no."""
+        return tor.stato()
 
     def _leggi_ollama(self) -> None:
         """In sottofondo: quali modelli Ollama sono gia' sul disco.
@@ -703,7 +710,7 @@ class Api:
         _verso_tutti('aggiornaModelli', self._modelli())
 
     def _applica_groq(self) -> None:
-        """Porta in transcriber i modelli Groq scelti nella sezione «Motore».
+        """Porta nelle impostazioni del motore i modelli Groq scelti nella sezione «Motore».
 
         Servono anche fuori da un lavoro, per esempio a chi chiede quanti
         crediti restano, quindi non basta passarli fra le opzioni al
@@ -736,7 +743,9 @@ class Api:
         # attaccata al nome. Con un separatore la riga finiva con tre stacchi in
         # fila (nome, memoria, descrizione) e non si capiva piu' dove
         # cominciasse il giudizio sul modello.
-        ollama = [{'valore': n, 'nome': f'{n}{spunta(n)} ({ram})', 'chiave': k}
+        # Non si chiama «ollama»: coprirebbe il modulo con lo stesso nome, che
+        # spunta() usa qui sopra, e con Ollama acceso il menu non si riempirebbe.
+        testo_locale = [{'valore': n, 'nome': f'{n}{spunta(n)} ({ram})', 'chiave': k}
                   for n, ram, k in _OLLAMA_TESTO]
 
         # I modelli Groq non si scaricano, quindi niente ✓ e niente memoria: il
@@ -749,7 +758,7 @@ class Api:
         # esisterebbe fra le voci e la pagina ripiegherebbe sulla prima,
         # cambiando di nascosto il modello scelto. Si guarda la scelta salvata,
         # non il valore del modulo: sono la stessa cosa solo al primo avvio.
-        for elenco, corrente in ((ollama, self.scelte['ollama']),
+        for elenco, corrente in ((testo_locale, self.scelte['ollama']),
                                  (groq_testo, self.scelte['groq_testo'])):
             if corrente and corrente not in [v['valore'] for v in elenco]:
                 # Nome nudo: non si puo' sapere da dove venga (.env o una scelta
@@ -759,7 +768,7 @@ class Api:
         return {
             # Sul computer.
             'whisper': [{'valore': m, 'nome': '', 'chiave': f'model.{m}'} for m in _WHISPER],
-            'ollama':  ollama,
+            'ollama':  testo_locale,
             # Sui server Groq.
             'groq':    [{'valore': m, 'nome': '', 'chiave': f'groqm.{m}'} for m in _GROQ],
             'groq_testo': groq_testo,
@@ -1132,7 +1141,7 @@ class Api:
         return {
             'tipo': 'gruppo',
             'titolo': i18n.t('coda.group', n=len(voci)),
-            'miniatura': voci[0]['meta'].get('thumbnail') or '',
+            'miniatura': metadata.miniatura(voci[0]['meta'].get('thumbnail') or ''),
             'righe': [{'chiave': 'info.videos', 'valore': str(len(voci))},
                       {'chiave': 'info.duration', 'valore': text._format_duration(totale)}],
             'stima': self._stima({'duration': totale}),
@@ -1173,7 +1182,7 @@ class Api:
         return {
             'tipo': 'video',
             'titolo': meta.get('title') or '?',
-            'miniatura': meta.get('thumbnail') or '',
+            'miniatura': metadata.miniatura(meta.get('thumbnail') or ''),
             'righe': [{'chiave': k, 'valore': str(v)} for k, v in righe],
             'stima': self._stima(meta),
         }
@@ -1191,7 +1200,7 @@ class Api:
         return {
             'tipo': 'playlist',
             'titolo': playlist.get('title') or playlist.get('channel') or '?',
-            'miniatura': (voci[0].get('thumbnail') or '') if voci else '',
+            'miniatura': metadata.miniatura(voci[0].get('thumbnail') or '') if voci else '',
             'righe': [
                 {'chiave': 'info.channel', 'valore': playlist.get('channel') or '—'},
                 {'chiave': 'info.videos', 'valore': str(len(voci))},
@@ -1975,7 +1984,7 @@ class Api:
 
         return {
             'titolo': i18n.t('res.title'),
-            'miniatura': (meta or {}).get('thumbnail') or '',
+            'miniatura': metadata.miniatura((meta or {}).get('thumbnail') or ''),
             'avvisi': res.get('warnings') or [],
             'dati': [
                 {'chiave': 'res.engine', 'valore': res.get('engine_label', '')},
@@ -2091,6 +2100,9 @@ class Api:
         try:
             if re.match(r'^https?://', indirizzo):
                 webbrowser.open(indirizzo)
+            elif os.path.isdir(indirizzo):
+                # Una cartella (un risultato di ricerca di un file locale): si apre.
+                return Api._apri_percorso(indirizzo)
             else:
                 # Un file locale dello storico: si apre la cartella che lo contiene.
                 return Api._apri_percorso(os.path.dirname(indirizzo))

@@ -222,6 +222,9 @@ def _is_rate_limit(msg: str) -> bool:
 # guardato PRIMA, altrimenti un video rifiutato verrebbe spiegato come una
 # chiave sbagliata e si andrebbe a cercare il guasto dalla parte opposta.
 _FAMIGLIE_ERRORE = (
+    # Per primo, perche' il resto del suo testo parla di connessione e
+    # finirebbe fra i guasti di rete: le parole sono quelle di tor.SENZA_TOR.
+    ("tor",            ("tor non raggiungibile",)),
     ("nonDisponibile", ("video unavailable", "private video", "removed by the uploader",
                         "members-only", "sign in to confirm your age", "age-restricted",
                         "not available in your country", "this video is unavailable")),

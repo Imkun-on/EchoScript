@@ -116,10 +116,6 @@
          stroke-linecap="round" stroke-linejoin="round">
         <path d="M9 5l7 7-7 7"/>
       </g>
-      <g id="i-storico" fill="none" stroke="currentColor" stroke-width="1.6"
-         stroke-linecap="round" stroke-linejoin="round">
-        <path d="M3.5 12a8.5 8.5 0 102.5-6"/><path d="M3 4v4.5h4.5"/><path d="M12 7.5V12l3 2"/>
-      </g>
       <g id="i-leggi" fill="none" stroke="currentColor" stroke-width="1.6"
          stroke-linecap="round" stroke-linejoin="round">
         <path d="M3 5.5c2.8-1.2 5.8-1.2 9 .8v13c-3.2-2-6.2-2-9-.8z"/>
@@ -135,21 +131,20 @@
   <div class="guscio">
 
     <aside class="barra">
-      <!-- Il marchio: lo stesso disegno dell'icona del programma, cosi' chi
+      <!-- Il marchio: lo stesso simbolo dell'icona del programma, cosi' chi
            l'ha appena lanciata dal desktop ritrova la stessa cosa dentro la
-           finestra. E' un disegno vettoriale e non l'immagine dell'icona,
-           perche' resta nitido a qualunque misura e prende il colore dal tema
-           invece di portarsi dietro il proprio. -->
+           finestra. Il simbolo sopra, sotto il nome e sotto ancora il motto.
+           L'immagine e' il simbolo senza il suo fondo, ritagliato dal foglio
+           del marchio da assets/marchio.py. -->
       <div class="marchio">
-        <svg class="marchio-icona" viewBox="0 0 100 100" aria-hidden="true">
-          <rect x="14" y="34" width="8"  height="32" rx="4" fill="currentColor"/>
-          <rect x="26" y="22" width="8"  height="56" rx="4" fill="currentColor" class="alta"/>
-          <rect x="38" y="30" width="8"  height="40" rx="4" fill="currentColor"/>
-          <rect x="54" y="32" width="32" height="8"  rx="4" fill="currentColor" class="riga"/>
-          <rect x="54" y="46" width="26" height="8"  rx="4" fill="currentColor" class="riga"/>
-          <rect x="54" y="60" width="20" height="8"  rx="4" fill="currentColor" class="riga"/>
-        </svg>
-        <div class="logo">EchoScript</div>
+        <img class="marchio-icona" src="images/logo.png" alt="">
+        <div class="logo">Echo<span>Script</span></div>
+        <p class="motto" data-t="marchio.motto"></p>
+        <!-- La spia di Tor: dice se YouTube vede l'IP di casa o quello di un
+             nodo Tor. La tiene aggiornata sorvegliaTor(), in app.js. -->
+        <div class="spia-tor" id="spia-tor" data-fase="avvio">
+          <span class="spia-tor-punto"></span><span class="spia-tor-testo"></span>
+        </div>
       </div>
 
       <nav class="menu">
@@ -169,14 +164,6 @@
           <svg class="icona" viewBox="0 0 24 24"><use href="#i-nuvola"/></svg>
           <span data-t="menu.cloud"></span>
           <span class="targhetta-menu" id="targhetta-cloud"></span>
-        </button>
-        <!-- Lo storico non e' una postazione: non ci si lavora, ci si guarda
-             quello che e' stato fatto nelle altre due. Sta in fondo, staccato,
-             per dirlo senza parole. -->
-        <button class="voce voce-staccata" data-va="storico">
-          <span class="rotaia"></span>
-          <svg class="icona" viewBox="0 0 24 24"><use href="#i-storico"/></svg>
-          <span data-t="menu.storico"></span>
         </button>
       </nav>
     </aside>
@@ -505,54 +492,6 @@
         <div class="slot-lavoro"></div>
       </div>
 
-      <!-- ══ STORICO ════════════════════════════════════════════════════ -->
-      <!-- Una tabella sola, con quello che e' stato trascritto in tutte e due
-           le postazioni. La riempie storico.js chiedendola a Python ogni
-           volta che si entra: i lavori finiscono mentre si guarda altro, e una
-           tabella ferma alla prima apertura mentirebbe. -->
-      <div class="sezione" data-sez="storico">
-        <header class="intestazione">
-          <h1 data-t="sez.storico.title"></h1>
-          <p data-t="sez.storico.desc"></p>
-        </header>
-        <hr class="divisore">
-
-        <section class="vetro storico">
-          <div class="storico-barra">
-            <div class="campo-icona storico-cerca">
-              <svg class="icona-campo" viewBox="0 0 24 24"><use href="#i-cerca"/></svg>
-              <input id="storico-cerca" class="campo con-icona" type="text" spellcheck="false">
-            </div>
-            <span class="targhetta" id="storico-conta"></span>
-            <div class="spazio"></div>
-            <button id="storico-aggiorna" class="bottone contorno piccolo">
-              <svg class="icona" viewBox="0 0 24 24"><use href="#i-rifai"/></svg>
-              <span data-t="hist.refresh"></span>
-            </button>
-          </div>
-          <div class="storico-scorri">
-            <table class="tabella-storico">
-              <thead>
-                <tr>
-                  <th data-t="hist.col.url"></th>
-                  <th data-t="hist.col.channel"></th>
-                  <th data-t="hist.col.title"></th>
-                  <th data-t="hist.col.duration"></th>
-                  <th data-t="hist.col.credits"></th>
-                  <th data-t="hist.col.kind"></th>
-                  <th data-t="hist.col.state"></th>
-                  <th data-t="hist.col.mode"></th>
-                  <th data-t="hist.col.date"></th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody id="storico-righe"></tbody>
-            </table>
-          </div>
-          <div id="storico-vuoto"></div>
-        </section>
-      </div>
-
     </main>
   </div>
 
@@ -585,21 +524,12 @@
        mezzo si vedrebbe per un istante l'interfaccia vuota e senza traduzioni. -->
   <div class="velo-avvio" id="velo-avvio">
     <div class="avvio-blocco">
-      <!-- Il marchio: tre barre di livello che diventano tre righe scritte.
-           E' lo stesso disegno di assets/EchoScript.ico e di
-           assets/EchoScript.png: le coordinate qui sotto sono le stesse che
-           assets/marchio.py usa per generarli. Cambiandone uno vanno cambiati
-           tutti, altrimenti l'icona, la schermata di avvio e questo velo si
-           contraddicono a vicenda nel giro di due secondi. -->
-      <svg class="avvio-marchio" viewBox="0 0 100 100" aria-hidden="true">
-        <rect class="b1" x="14" y="34" width="8"  height="32" rx="4" fill="currentColor"/>
-        <rect class="b2" x="26" y="22" width="8"  height="56" rx="4" fill="currentColor"/>
-        <rect class="b3" x="38" y="30" width="8"  height="40" rx="4" fill="currentColor"/>
-        <rect class="r1" x="54" y="32" width="32" height="8"  rx="4" fill="currentColor"/>
-        <rect class="r2" x="54" y="46" width="26" height="8"  rx="4" fill="currentColor"/>
-        <rect class="r3" x="54" y="60" width="20" height="8"  rx="4" fill="currentColor"/>
-      </svg>
-      <div class="avvio-nome">EchoScript</div>
+      <!-- Lo stesso simbolo della barra laterale e dell'icona del programma:
+           tutti e tre vengono dallo stesso foglio (assets/marchio.py), cosi'
+           l'icona, questo velo e la finestra non si contraddicono a vicenda
+           nel giro di due secondi. -->
+      <img class="avvio-marchio" src="images/logo.png" alt="">
+      <div class="avvio-nome">Echo<span>Script</span></div>
       <div class="avvio-barra"><span></span></div>
     </div>
   </div>
@@ -611,7 +541,6 @@
   <script src="features/engine.js"></script>
   <script src="features/transcribe.js"></script>
   <script src="features/carte.js"></script>
-  <script src="features/storico.js"></script>
   <script>avvia();</script>
 </body>
 </html>

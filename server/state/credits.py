@@ -93,7 +93,7 @@ def ratelimit_groups(headers):
     requests/tokens.
 
     È la parte comune ai due modi di presentare i limiti: la cache di
-    transcriber li salva col MOMENTO ASSOLUTO di azzeramento (parse_ratelimit_headers),
+    questo modulo li salva col MOMENTO ASSOLUTO di azzeramento (parse_ratelimit_headers),
     la GUI li vuole come durata + orario (engine._parse_ratelimit_headers).
     Entrambe partono da qui, così la lettura degli header sta scritta una volta sola."""
     def get(name: str):
@@ -155,14 +155,6 @@ def record_rate_limits(model: str, headers) -> list[dict]:
             "checked_at_iso": datetime.now().isoformat(),
         }
     return items
-
-
-def cached_rate_limits() -> list[dict]:
-    """Snapshot per-modello dei limiti registrati finora (per il pulsante crediti).
-
-    Lista (eventualmente vuota) di {model, items, checked_at_iso}. Vuota finché
-    non è stata fatta almeno una chiamata Groq reale in questa sessione."""
-    return list(_RATE_LIMIT_CACHE.values())
 
 
 # === QUANDO GROQ DICE «NON ADESSO» ===========================================

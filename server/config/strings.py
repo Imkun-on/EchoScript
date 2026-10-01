@@ -6,8 +6,9 @@ Perche' stanno qui e non nella pagina
     ``data-t``, e quando si cambia lingua le riscrive. Una frase si corregge in
     un file, non in cinque.
 
-Perche' non stanno nel catalogo di transcriber.py
-    Perche' quello e' il catalogo della riga di comando: mescolarli renderebbe
+Perche' non stanno nel catalogo di messages.py
+    Perche' quello e' il catalogo dei messaggi del motore, che compaiono
+    anche nella riga di comando: mescolarli renderebbe
     difficile capire, leggendo, quali frasi appaiono a terminale e quali in
     finestra. Le due cose cambiano per motivi diversi e a ritmi diversi.
 
@@ -22,18 +23,20 @@ TESTI: dict[str, str] = {
 
     # ── Cornice: marchio, barra laterale, sezioni ────────────────────────────
 
+    'marchio.motto':    'Trascrivi. Traduci. Riassumi. Capisci di più.',
+    # La spia sotto il marchio: se YouTube vede l'IP di casa o quello di Tor.
+    'tor.avvio':        'Nascondo l\'IP…',
+    'tor.pronto':       'IP nascosto',
+    'tor.errore':       'Tor non raggiungibile',
+    'tor.spiega':       'YouTube vede l\'indirizzo di un nodo Tor, non il tuo.',
+
     'menu.locale':      'Locale',
     'menu.cloud':       'Cloud',
-    'menu.storico':     'Storico',
 
     'sez.locale.title': 'Trascrivi sul tuo computer',
     'sez.locale.desc':  "Quello che parte da qui gira su questa macchina, con i modelli "
                         "scelti qui sotto: niente rete, niente chiave, niente crediti. "
                         "L'audio non esce di casa.",
-    'sez.storico.title': 'Storico dei lavori',
-    'sez.storico.desc': "Tutto quello che è stato trascritto: con quale motore, quando, "
-                        "quanto è costato e se è finito. Una riga per video e per "
-                        "sezione; riprendere un lavoro aggiorna la sua riga.",
     'sez.cloud.title':  'Trascrivi sui server Groq',
     'sez.cloud.desc':   "Quello che parte da qui gira in nuvola, con i modelli scelti "
                         "qui sotto e a carico della chiave. Molto più veloce, ma "
@@ -222,6 +225,7 @@ TESTI: dict[str, str] = {
     'gm.text.2':        'più economico e rapido',
 
     # Descrizioni dei modelli Ollama, per numero di catalogo.
+    'om.text.6':        'il più veloce · per computer con 6-8 GB di RAM',
     'om.text.1':        'leggero e moderno · ideale con 8 GB di RAM',
     'om.text.2':        'equilibrio qualità/peso (default)',
     'om.text.3':        'più accurato · 12-16 GB di RAM',
@@ -375,32 +379,13 @@ TESTI: dict[str, str] = {
     'read.trascrizione': 'la trascrizione',
 
     # ── Storico ─────────────────────────────────────────────────────────────
-    'hist.search':      'Cerca per titolo, canale o playlist…',
-    'hist.count':       '{n} lavori',
-    'hist.empty':       'Ancora niente: i lavori compariranno qui man mano che li fai.',
-    'hist.col.url':     'URL',
-    'hist.col.channel': 'Canale',
-    'hist.col.title':   'Video',
-    'hist.col.duration': 'Durata',
-    'hist.col.credits': 'Crediti usati',
-    'hist.col.kind':    'Tipo',
-    'hist.col.state':   'Stato',
-    'hist.col.mode':    'Modo',
-    'hist.col.date':    'Data',
-    'hist.single':      'Video singolo',
-    'hist.playlist':    'Playlist',
-    'hist.file':        'Audio registrato',
-    'hist.done':        'Completo',
-    'hist.half':        'A metà',
+    # Lo storico non ha piu' una sezione nella finestra: resta la logica in
+    # Python, e queste sono le frasi che scrive lei.
     'hist.min':         '{n} min',
     'hist.lessmin':     '< 1 min',
     'hist.free':        '0 · gratis',
     'hist.audio':       '{n} s audio',
     'hist.tokens':      '{n} token',
-    'hist.read':        'Leggi',
-    'hist.folder':      'Cartella',
-    'hist.remove':      'Togli dallo storico',
-    'hist.refresh':     'Aggiorna',
     'hist.gone':        'Questa riga non c\'è più nello storico.',
     'hist.nodoc':       'Il documento non si trova più: forse la cartella è stata '
                         'spostata o cancellata.',
@@ -413,7 +398,6 @@ TESTI: dict[str, str] = {
     'err.no_url':       'Incolla prima il link del video.',
     'src.pasted':       'Link incollato in «{stanza}»: apro l\'anteprima…',
     'err.no_file':      'Scegli prima un file audio.',
-    'err.unexpected':   'Errore imprevisto: {e}',
 
     # Il video su cui il lavoro si e' fermato, e l'etichetta del testo tecnico.
     'err.video':        'Video:',
@@ -431,15 +415,23 @@ TESTI: dict[str, str] = {
     # Ognuna dice due cose: che cosa e' successo, e se ci sia qualcosa da fare.
     # La seconda parte e' quella che serve davvero: sapere che un video non e'
     # scaricabile senza sapere se valga la pena riprovare lascia fermi.
+    'err.causa.tor':
+        'Non sono riuscito a collegarmi a Tor, e senza Tor non contatto '
+        'YouTube: vedrebbe il tuo indirizzo IP. Controlla di essere online e '
+        'riprova fra un minuto. La prima volta Tor va anche scaricato (circa '
+        '22 MB), e una rete che blocca Tor, come certe reti aziendali o '
+        'scolastiche, lo impedisce. I file dal disco si trascrivono lo stesso.',
     'err.causa.rifiutato':
-        'YouTube ha rifiutato il download di questo video. Di solito vuol dire '
-        'che il link al file audio è scaduto, oppure che yt-dlp è indietro '
-        'rispetto a un cambiamento di YouTube. Riprova, e se continua aggiorna '
-        'yt-dlp con «pip install -U yt-dlp».',
+        'YouTube ha rifiutato il download di questo video. Può aver '
+        'riconosciuto il nodo Tor da cui passava la richiesta (ho già provato '
+        'da altri due), oppure il link al file audio è scaduto, oppure yt-dlp è '
+        'indietro rispetto a un cambiamento di YouTube. Riprova fra poco, e se '
+        'continua aggiorna yt-dlp con «pip install -U yt-dlp».',
     'err.causa.nonDisponibile':
         'Questo video non è scaricabile: può essere privato, riservato agli '
-        'iscritti, rimosso, con limite di età oppure non disponibile in Italia. '
-        'Non c\'è niente da riprovare: è una scelta di chi lo ha pubblicato.',
+        'iscritti, rimosso, con limite di età oppure non disponibile nel paese '
+        'da cui risulta la connessione. Non c\'è niente da riprovare: è una '
+        'scelta di chi lo ha pubblicato.',
     'err.causa.rete':
         'La connessione non ha risposto in tempo. Controlla di essere online e '
         'riprova: se la rete era solo lenta, al secondo tentativo funziona.',

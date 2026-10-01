@@ -23,16 +23,12 @@ Perche' il testo viene spezzato
 from __future__ import annotations
 
 import json
-import os
 import re
-import time
 
 from server.config import settings
 from server.config.settings import OLLAMA_HOST, OLLAMA_NUM_CTX
-from server.config.messages import msg
-from server.utils.media import _is_italian, _lang_name
+from server.utils.media import _lang_name
 from server.utils.ollama import _check_ollama
-from server.utils.text import _safe_filename
 
 
 # Riusa una trascrizione GIÀ salvata e ne produce una versione tradotta, senza
@@ -210,11 +206,13 @@ def _make_translator(target: str = "it", local: bool = False):
     return translate
 
 
-def _split_for_translation(text: str) -> list[str]:
-    """Spezza 'text' in blocchi <= _TRANSLATE_MAX_CHARS sui confini di frase.
+def _split_for_translation(text: str, massimo: int | None = None) -> list[str]:
+    """Spezza 'text' in blocchi <= 'massimo' caratteri sui confini di frase.
 
-    Se una singola frase supera il limite, viene tagliata a forza per non
-    eccedere il massimo accettato da Google Translate."""
+    'massimo' di partenza e' _TRANSLATE_MAX_CHARS, il limite di Google
+    Translate; il riassunto, che riusa questo tagliatore, passa il suo. Se una
+    singola frase supera il limite, viene tagliata a forza."""
+    massimo = massimo or _TRANSLATE_MAX_CHARS
     text = (text or "").strip()
     if not text:
         return []
@@ -223,7 +221,7 @@ def _split_for_translation(text: str) -> list[str]:
     chunks: list[str] = []
     buf = ""
     for part in parts:
-        while len(part) > _TRANSLATE_MAX_CHARS:
+        while len(part) > massimo:
             # Frase mostruosa: tagliala in pezzi grezzi. Prima però va chiuso il
             # blocco in preparazione: senza, i pezzi di questa frase finirebbero
             # in coda PRIMA del testo che li precede, e la traduzione (o il
@@ -232,9 +230,9 @@ def _split_for_translation(text: str) -> list[str]:
             if buf:
                 chunks.append(buf)
                 buf = ""
-            chunks.append(part[:_TRANSLATE_MAX_CHARS])
-            part = part[_TRANSLATE_MAX_CHARS:]
-        if len(buf) + len(part) + 1 > _TRANSLATE_MAX_CHARS:
+            chunks.append(part[:massimo])
+            part = part[massimo:]
+        if len(buf) + len(part) + 1 > massimo:
             if buf:
                 chunks.append(buf)
             buf = part

@@ -17,7 +17,6 @@ from __future__ import annotations
 import os
 import subprocess
 
-from server.config import settings
 from server.config.messages import msg
 from server.config.settings import AUDIO_BITRATE, AUDIO_SAMPLE_RATE, CHUNK_SECONDS
 from server.utils.contract import MediaError, _never_stop, _noop_progress

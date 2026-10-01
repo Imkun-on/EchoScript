@@ -28,7 +28,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 
 from server.config import paths
 from server.config.settings import AUDIO_SAMPLE_RATE

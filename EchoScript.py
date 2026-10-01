@@ -13,7 +13,7 @@ Perche' l'interfaccia e' una pagina web
     Perche' Windows il motore per mostrarla ce l'ha gia' installato. L'aspetto
     sta nel CSS, la struttura nell'HTML, il comportamento in un file
     JavaScript per sezione, e Python fa solo da ponte verso il motore, che non
-    cambia di una riga: ``server/services/pipeline.py`` e ``transcriber.py``
+    cambia di una riga: ``server/services/pipeline.py`` e i moduli di ``server/``
     non sanno nemmeno che esista un'interfaccia.
 
     L'interfaccia precedente era scritta con un motore grafico Python: un file
@@ -41,7 +41,7 @@ import os
 import sys
 import threading
 
-# La radice del progetto raggiungibile, cosi' `import transcriber` funziona sia
+# La radice del progetto raggiungibile, cosi' `import server` funziona sia
 # lanciando i sorgenti sia da dentro l'eseguibile.
 _QUI = os.path.dirname(os.path.abspath(__file__))
 if _QUI not in sys.path:
@@ -52,7 +52,7 @@ if _QUI not in sys.path:
 # Qui sotto ci sono soltanto cose leggere: i percorsi, i testi, il ponte con la
 # finestra. Messe insieme costano meno di mezzo secondo.
 #
-# Il motore no. transcriber si porta dietro Groq, yt-dlp e Rich, e da solo
+# Il motore no. server.services.pipeline si porta dietro Groq, yt-dlp e Rich, e da solo
 # prende cinque volte il tempo di tutto il resto: e' l'attesa vera, quella che
 # chi ha fatto doppio clic si trova davanti. Importarlo qui vorrebbe dire
 # restare senza niente sullo schermo per tutto quel tempo, perche' finche' un

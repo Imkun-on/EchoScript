@@ -70,17 +70,19 @@ hiddenimports = ['server',
                  'server.export.pdf_basic', 'server.export.pdf_rich',
                  'server.export.word', 'server.state.storico',
                  'server.utils.notifica',
+                 'server.export.piano', 'server.export.spazio',
+                 'server.export.molecola', 'server.export.chimica', 'server.export.reazione',
                  'server.state', 'server.state.checkpoints',
                  'server.state.credits', 'server.state.jobs',
                  'server.utils', 'server.utils.console',
                  'server.utils.contract',
                  'server.utils.ffmpeg', 'server.utils.media',
-                 'server.utils.ollama',
+                 'server.utils.ollama', 'server.utils.tor',
                  'server.utils.text']
 
 for _pacchetto in ('webview', 'faster_whisper', 'av', 'ctranslate2',
                    'onnxruntime', 'tokenizers', 'huggingface_hub', 'yt_dlp',
-                   'groq', 'fpdf', 'rich', 'deep_translator'):
+                   'groq', 'fpdf', 'rich', 'deep_translator', 'rdkit', 'py2opsin'):
     try:
         _d, _b, _h = collect_all(_pacchetto)
         datas += _d

@@ -267,6 +267,13 @@ var
 begin
   if Passo = usPostUninstall then
   begin
+    { Tor lo scarica il programma al primo avvio, fuori dalla sua cartella
+      (vedi server/utils/tor.py). Non contiene niente di chi usa il programma,
+      quindi se ne va senza chiedere. La cartella che lo contiene si toglie
+      solo se e' rimasta vuota. }
+    DelTree(ExpandConstant('{localappdata}\EchoScript\tor'), True, True, True);
+    RemoveDir(ExpandConstant('{localappdata}\EchoScript'));
+
     cartella := ExpandConstant('{app}');
     if DirExists(cartella) then
       if MsgBox(FmtMessage(ExpandConstant('{cm:RimuoviDati}'), [cartella]),

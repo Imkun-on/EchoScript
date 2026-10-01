@@ -1,6 +1,10 @@
 <div align="center">
 
-# 🎙️ EchoScript
+<img src="assets/EchoScript.png" width="120" alt="EchoScript">
+
+# EchoScript
+
+**Trascrivi. Traduci. Riassumi. Capisci di più.**
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white" alt="Python">
@@ -12,11 +16,14 @@
   <img src="https://img.shields.io/badge/fpdf2-PDF-EC1C24?logo=adobeacrobatreader&logoColor=white" alt="fpdf2">
   <img src="https://img.shields.io/badge/Ollama-riassunto_locale-000000?logo=ollama&logoColor=white" alt="Ollama">
   <img src="https://img.shields.io/badge/Llama_3.3_·_Qwen_2.5-LLM-7C3AED" alt="LLM">
+  <img src="https://img.shields.io/badge/Tor-IP_nascosto-7D4698?logo=torproject&logoColor=white" alt="Tor">
+  <img src="https://img.shields.io/badge/RDKit-molecole-3A8FB7" alt="RDKit">
 </p>
 
 <p align="center">
   Trascrivi i video YouTube <b>e i tuoi audio locali</b> in <b>testo, Markdown, JSON e PDF</b>,<br>
-  poi <b>traducili</b> in italiano e ottienine un <b>riassunto pulito</b>, senza "ehm/uhm", ripetizioni e autocorrezioni.<br>
+  poi <b>traducili</b> in italiano e ottienine un <b>riassunto pulito</b>, senza "ehm/uhm", ripetizioni e autocorrezioni,<br>
+  con <b>formule, grafici, molecole e reazioni disegnati</b> quando il video parla di matematica, statistica, fisica o chimica.<br>
   <b>Velocemente</b> con Groq oppure <b>100% in locale</b> per la massima privacy.<br>
   Pensato per <b>studiare</b> video lunghi leggendoli invece di guardarli per ore.<br>
   <b>Niente abbonamenti, niente limiti giornalieri, niente minutaggio ridotto.</b>
@@ -42,6 +49,7 @@
 - [Cosa fa](#cosa-fa)
 - [I due motori: locale o cloud](#i-due-motori-locale-o-cloud)
 - [I modelli usati](#i-modelli-usati)
+- [Riassunti per materia](#riassunti-per-materia)
 - [Cosa produce](#cosa-produce)
 - [La chiave Groq](#la-chiave-groq)
 - [Per sviluppatori: eseguire dal codice](#per-sviluppatori-eseguire-dal-codice)
@@ -74,6 +82,7 @@ Non serve installare Python né altro.
 - ✅ Tutto: non servono Python, ffmpeg o altre installazioni.
 - 🪟 **WebView2**, il componente con cui Windows disegna la finestra, c'è già su Windows 11 e su Windows 10 aggiornato. Se manca, l'installazione se ne accorge e lo scarica da Microsoft.
 - 📥 La **prima volta** che usi il motore locale, l'app scarica una tantum il modello da HuggingFace, poi resta in cache anche offline.
+- 🧅 Al **primo avvio** l'app scarica anche **Tor** (circa 22 MB), con cui nasconde il tuo IP a YouTube: vedi [Privacy](#privacy).
 - ⚡ Per il motore **Groq** serve solo una chiave gratuita, vedi più sotto.
 - 💻 L'installatore è per **Windows 10/11 a 64 bit**. Per macOS e Linux si usa per ora l'installazione da sorgente.
 
@@ -90,10 +99,12 @@ Non serve installare Python né altro.
 Incolli un link di YouTube o scegli un file dal disco, e il programma:
 
 1. **legge cosa c'è dietro** appena incolli il link (titolo, durata, copertina) e ne apre l'anteprima in una finestra, così un link sbagliato si scopre prima di spendere mezz'ora;
-2. **scarica solo l'audio**, che pesa dieci volte meno del video;
+2. **scarica solo l'audio**, che pesa dieci volte meno del video. Tutto quello che va verso YouTube passa da **Tor**: YouTube non vede il tuo IP;
 3. **lo trascrive**, sui server Groq o sul tuo computer;
-4. opzionalmente lo **traduce** in italiano e ne fa un **riassunto** pulito, con **grafici** quando il video dà numeri confrontabili (statistiche, andamenti, valori di una funzione) e **commenti** dentro i blocchi di codice;
+4. opzionalmente lo **traduce** in italiano e ne fa un **riassunto** pulito, con formule, grafici, molecole e codice commentato secondo la materia (vedi [Riassunti per materia](#riassunti-per-materia));
 5. **salva tutto** in cinque formati, Word compreso.
+
+La finestra ha due sole sezioni, **Locale** e **Cloud**, e nella barra laterale una spia che dice se l'IP è nascosto.
 
 Funziona anche su **playlist intere** e su **cartelle di file audio**, un elemento dopo l'altro. E c'è una **coda**: incolla più link insieme (uno per riga), oppure incollane uno nuovo mentre un lavoro è in corso, e verranno trascritti in fila appena tocca a loro. Basta anche **Ctrl+V** in qualunque punto della finestra: se negli appunti c'è un link, si apre la sua anteprima.
 
@@ -102,8 +113,6 @@ Mentre lavora mostra l'elenco delle fasi, ognuna con **la sua percentuale** e un
 A lavoro finito, **«Leggi»** apre il riassunto (o la trascrizione) in una finestra, con formule e grafici già disegnati. Il riassunto può essere **esteso, normale, breve o solo i punti chiave**.
 
 In **Locale**, prima di partire il programma controlla che Ollama sia acceso e che il modello sia scaricato, e se manca qualcosa ti dice il comando da lanciare. In **Cloud** avvisa prima se i crediti Groq rimasti non bastano per tutto l'audio.
-
-La sezione **Storico** tiene una tabella di tutto quello che hai trascritto: link, canale, video, durata, crediti usati, singolo o playlist, se è completo o a metà, con quale motore e quando.
 
 **Se qualcosa si interrompe** (rete, crediti finiti, finestra chiusa) il lavoro fatto fino a quel punto è salvato: riaprendo il programma e reincollando lo stesso link compare **«Riprendi»**, che riparte dal punto esatto invece che da capo.
 
@@ -170,14 +179,27 @@ In **locale** si sceglie dal menu a ogni lavoro:
 
 Con la chiave Groq la **traduzione** passa invece da Google Translate, che è gratuito e non chiede una chiave sua. In locale riusa lo stesso modello del riassunto, così se ne scarica uno solo.
 
-### Grafici e commenti nel riassunto
-
-Sono due interruttori sotto «Crea riassunto», accesi di partenza:
-
-- **Grafici.** Quando una sezione dà numeri che si capiscono meglio a colpo d'occhio (una statistica, percentuali di un totale, una serie nel tempo, i valori di una funzione in una dimostrazione), il riassunto aggiunge un grafico a barre, a linee o a torta. Solo con i numeri detti nel video o calcolabili esattamente dalle sue formule: se i dati sono vaghi il grafico non si fa. Nel PDF è disegnato, nel `.md` è un blocco Mermaid (GitHub, Obsidian e VS Code lo mostrano), nel `.txt` diventa un elenco di voci e valori.
-- **Commenti nel codice.** Il codice riportato nel riassunto arriva con brevi commenti sulle righe che non si spiegano da sole. Il codice resta quello detto: si aggiungono solo commenti.
-
 > **Come leggere la colonna RAM.** È quella che il modello occupa mentre gira, e va **sommata** a Windows e alle altre app aperte. Con 8 GB totali conviene restare sui modelli da ~4 GB; con 16 GB gira comodo tutto fino a ~10 GB. Se un modello non ci sta, Ollama usa il disco e diventa molto lento: meglio scendere di taglia.
+
+---
+
+## Riassunti per materia
+
+Il riassunto non è uguale per tutti i video. Per ogni sezione il programma guarda di che cosa si parla (gli bastano poche parole del lessico di una materia) e aggiunge le regole e i disegni di quella materia. Non c'è niente da scegliere, e una lezione può essere di più materie insieme.
+
+| Materia | Cosa entra nel riassunto |
+|---|---|
+| **Matematica** | Formule scritte in LaTeX e disegnate. Un **piano cartesiano vero**: funzioni, coniche, curve a tratti, parametriche e polari, aree sotto una curva o fra due curve, vettori, angoli, poligoni, campi, successioni, somme di Riemann. Nello **spazio**: superfici, quadriche, curve e vettori in 3D. |
+| **Statistica** | **Istogrammi** (anche con classi di ampiezza diversa), **boxplot**, **dispersione** con la retta di regressione, distribuzioni con l'area di una probabilità. Per i dati semplici, grafici a **barre, linee o torta**. |
+| **Chimica** | Formule e reazioni scritte come nei libri. **Molecole**: modello 3D a sfere e bastoncini, formula a scheletro per i composti organici, struttura di **Lewis** con le coppie di elettroni. **Reazioni** disegnate, anche come **meccanismo** con le frecce degli elettroni. **Orbitali**: configurazione elettronica a caselle e forma di s, p, d e ibridi. **Curve di titolazione**, **profili di energia**, **reticoli cristallini** e **tavola periodica**. |
+| **Fisica** | Grafici del moto, diagrammi delle forze, piani inclinati, campi. |
+| **Codice** | Il codice detto nel video, con brevi **commenti** sulle righe che non si spiegano da sole. Il codice non cambia. |
+
+**Niente di inventato.** Un grafico si fa solo con i numeri detti nel video o calcolabili esattamente dalle sue formule. Ogni disegno viene controllato prima di finire sulla pagina: una descrizione sbagliata si scarta, invece di disegnare qualcosa di falso. Per le molecole la struttura deve tornare con la formula, e con il nome IUPAC se sul computer c'è Java; una reazione si disegna solo se è bilanciata. E dove si può il conto lo fa il programma, non il modello: il pH di una titolazione punto per punto, gli elettroni di una struttura di Lewis, il riempimento degli orbitali, la posizione degli atomi in un reticolo.
+
+**Dove si vedono.** Disegnati nel **PDF** e in **«Leggi»**. Nel `.md` i grafici dei dati sono blocchi Mermaid, che GitHub, Obsidian e VS Code mostrano; nel `.txt` e nel `.docx` tutto è descritto a parole.
+
+**Si possono spegnere.** Sono due interruttori sotto «Crea riassunto», accesi di partenza: «Grafici nel riassunto» (tutti i disegni) e «Commenti nei blocchi di codice».
 
 ---
 
@@ -249,6 +271,8 @@ python EchoScript.py     # la finestra
 python cli/main.py       # il terminale
 ```
 
+Le molecole e le reazioni le disegna **RDKit**, che è nei requisiti; il controllo col nome IUPAC si attiva solo se c'è **Java**. `python tests/prova.py` disegna in un PDF un centinaio di esempi di tutti i grafici e controlla che quelli scritti male vengano scartati (`--muto` per il solo conto). Il logo e l'icona si rifanno con `python assets/marchio.py`, che li ritaglia da `assets/marchio-originale.png`.
+
 ### Costruire l'installatore
 
 Servono due strumenti, e fanno due mestieri diversi: **PyInstaller** trasforma il codice Python in un programma vero (`EchoScript.exe` più la cartella `_internal`), **Inno Setup** prende quella cartella e la chiude in un unico file di installazione. Senza il primo non c'è nessun `.exe` da installare; senza il secondo c'è una cartella che chi la riceve deve sistemarsi da sé.
@@ -294,10 +318,12 @@ server/             il lavoro, diviso per mestiere
   sources/          da dove arriva l'audio: YouTube o un file sul disco
   transcription/    l'audio diventa parole: Groq oppure faster-whisper
   enrichment/       riassunto e traduzione
-  export/           documento, PDF semplice, PDF ricco
-  state/            parziali, crediti, fasi già fatte
-  utils/            quello che serve a tutti e non appartiene a nessuno
+  export/           documento, PDF, Word, e i disegni: piano, spazio, molecole, chimica
+  state/            parziali, crediti, fasi già fatte, storico dei lavori
+  utils/            quello che serve a tutti, compreso Tor
 cli/main.py         i menu del terminale
+assets/             il logo e l'icona
+tests/prova.py      il collaudo dei disegni
 installer/          lo script di installazione per Windows
 ```
 
@@ -338,6 +364,7 @@ Tutte le manopole si impostano da variabili d'ambiente o dal file `.env` accanto
 
 ## Privacy
 
+- **YouTube**: informazioni sul video, copertina e audio passano da **Tor**, quindi YouTube vede l'indirizzo di un nodo Tor e non il tuo. Tor si avvia da solo all'apertura (la prima volta viene scaricato da torproject.org in `%LOCALAPPDATA%\EchoScript\tor`) e la spia sotto il logo dice se l'IP è nascosto. Se Tor non parte, YouTube **non** viene contattato con la connessione diretta: il lavoro si ferma con un messaggio. Groq, Ollama e i file dal disco non passano da Tor.
 - **Motore locale**: l'audio **non lascia mai il computer**. Al primo uso scarica solo i pesi del modello.
 - **Motore Groq**: l'audio viene caricato sui server di Groq. Ottimo per video pubblici, sconsigliato per audio privati.
 - **Traduzione**: con la chiave Groq passa da Google Translate, quindi il testo va ai server di Google. Senza chiave traduce Ollama sul tuo computer.

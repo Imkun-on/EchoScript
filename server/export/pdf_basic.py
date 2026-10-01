@@ -15,13 +15,11 @@ Perche' ce ne sono due
 from __future__ import annotations
 
 import os
-import re
 
 from server.export import document
 from server.utils.media import _is_local
 from server.utils.text import (
-    _format_duration, _format_timestamp, _format_upload_date, _lp,
-    _safe_filename,
+    _format_duration, _format_timestamp, _format_upload_date, _lp
 )
 
 

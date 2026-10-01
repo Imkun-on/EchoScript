@@ -30,22 +30,17 @@ _save_pdf: chi sceglie fra i due
 """
 from __future__ import annotations
 
-import html
-import json
 import os
-import re
 import shutil
 import subprocess
 import tempfile
-import urllib.request
 
-from server.config import paths, settings
+from server.config import paths
 from server.config.settings import BROWSER_PATH, RICH_PDF
 from server.export.document import build_md
 from server.export.pdf_basic import build_pdf
-from server.utils.console import SYM_FAIL, console
-from server.utils.media import _is_local
-from server.utils.text import _format_timestamp, _lp, _safe_filename
+from server.utils.console import console
+from server.utils.text import _lp
 
 
 PDF_ASSETS_DIR = paths.dati(".pdfassets")
@@ -60,10 +55,17 @@ PDF_ASSETS_DIR = paths.dati(".pdfassets")
 # si fa invece di ricalcolarla: prima c'era una funzione _data_root() qui
 # dentro che rispondeva la stessa cosa in un modo diverso, ed era solo un modo
 # in più di poter sbagliare.
+#
+# MathJax e' la versione «full», con tutte le estensioni dentro. Quella di
+# prima (tex-svg.js) le estensioni le va a prendere quando servono, dalla
+# stessa cartella da cui e' stata caricata: in cache non ci sono, e un solo
+# \ce{...} della chimica bloccava TUTTE le formule della pagina. tex-svg.js
+# resta come ripiego per chi l'ha gia' in cache e adesso non ha rete.
 _PDF_ASSET_URLS = {
-    "tex-svg.js": "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js",
+    "tex-svg-full.js": "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg-full.js",
     "mermaid.min.js": "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js",
 }
+_PDF_ASSET_RIPIEGHI = {"tex-svg-full.js": "tex-svg.js"}
 _PDF_HTML_TEMPLATE = """<!doctype html>
 <html lang="it"><head><meta charset="utf-8">
 <style>
@@ -97,6 +99,18 @@ _PDF_HTML_TEMPLATE = """<!doctype html>
   pre code { background: none; padding: 0; }
   .mermaid { background: #fbfdfc; border: 1px solid #eef3f0; border-radius: 8px;
              padding: 12px; text-align: center; margin: 0 0 12px; }
+  .piano { background: #fff; border: 1px solid #eef3f0; border-radius: 8px;
+           padding: 12px 12px 10px; margin: 0 0 12px; text-align: center;
+           break-inside: avoid; }
+  .piano svg { max-width: 100%; height: auto; }
+  .piano-titolo { font-weight: 600; color: #0b3b22; margin-bottom: 6px; }
+  .piano-legenda { display: flex; flex-wrap: wrap; justify-content: center;
+                   gap: 6px 18px; font-size: 10.5pt; margin-top: 6px; }
+  .piano-legenda i { display: inline-block; width: 14px; height: 3px;
+                     border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+  .piano-famiglia { font-weight: 600; color: #0b3b22; }
+  .piano-legenda i.piano-area { width: 12px; height: 12px; opacity: .35; }
+  .piano-nota { font-size: 11pt; color: #b45309; margin-top: 6px; }
   img { max-width: 100%; max-height: 15cm; display: block; margin: 8px 0 12px;
         border: 1px solid #e3e7e4; border-radius: 8px; }
 </style>
@@ -197,17 +211,38 @@ def _md_to_html(md: str) -> str:
     def _fence(m):
         """Un blocco di codice fra apici tripli diventa HTML.
 
-        Due destini diversi a seconda di com'e' marcato. Se dice `mermaid`, e'
-        un diagramma e va consegnato alla libreria che lo disegnera'. Tutto il
-        resto e' codice e va mostrato cosi' com'e', con gli spazi al posto
-        giusto.
+        Tre destini diversi a seconda di com'e' marcato. Se dice `mermaid`, e'
+        un diagramma e va consegnato alla libreria che lo disegnera'. Se dice
+        `piano`, e' un piano cartesiano e lo si disegna qui (vedi piano.py);
+        se la descrizione non si capisce sparisce, e non resta a vista come
+        codice. Tutto il resto e' codice e va mostrato cosi' com'e', con gli
+        spazi al posto giusto.
         """
         lang = (m.group(1) or "").strip().lower()
         body = _html.escape(m.group(2))
+        if lang == "piano":
+            from server.export import piano
+            descrizione = piano.leggi(m.group(2))
+            return _stash(piano.svg(descrizione), block=True) if descrizione else ""
+        if lang == "spazio":
+            from server.export import spazio
+            descrizione = spazio.leggi(m.group(2))
+            return _stash(spazio.svg(descrizione), block=True) if descrizione else ""
+        if lang == "molecola":
+            from server.export import molecola
+            descrizione = molecola.leggi(m.group(2))
+            return _stash(molecola.svg(descrizione), block=True) if descrizione else ""
+        if lang in ("reazione", "orbitali", "titolazione", "energia", "reticolo", "tavola"):
+            from server.export import chimica
+            descrizione = chimica.leggi(lang, m.group(2))
+            return _stash(chimica.svg(lang, descrizione), block=True) if descrizione else ""
         if lang == "mermaid":
             return _stash(f'<pre class="mermaid">{body}</pre>', block=True)
         return _stash(f"<pre><code>{body}</code></pre>", block=True)
 
+    if "```molecola" in md:
+        from server.export import molecola
+        molecola.prepara(md)        # tutti i nomi a OPSIN in una volta, non blocco per blocco
     md = re.sub(r"```([^\n]*)\n(.*?)```", _fence, md, flags=re.S)
 
     # 1b) Immagini ![alt](src): elemento di blocco. I percorsi locali diventano
@@ -280,19 +315,23 @@ def _md_to_html(md: str) -> str:
             out.append("<p>" + _md_inline_to_html(" ".join(para)) + "</p>")
             para.clear()
 
-    def _open_list(kind: str):
+    def _open_list(kind: str, inizio: int = 1):
         """Apre un elenco del tipo chiesto, se non era gia' quello aperto.
 
         Serve perche' gli elenchi sono diventati due, quello puntato e quello
         numerato, e passare dall'uno all'altro senza chiudere il primo darebbe
         una pagina con le voci annidate una dentro l'altra invece che una
         sotto l'altra.
+
+        'inizio' e' il numero scritto sulla prima voce: una formula a meta'
+        elenco lo spezza in due, e senza il secondo ripartirebbe da 1.
         """
         nonlocal in_list
         _flush_para()
         if in_list != kind:
             _close_list()
-            out.append(f"<{kind}>")
+            out.append(f'<ol start="{inizio}">' if kind == "ol" and inizio != 1
+                       else f"<{kind}>")
             in_list = kind
 
     def _close_list():
@@ -332,7 +371,7 @@ def _md_to_html(md: str) -> str:
             _open_list("ul")
             out.append("<li>" + _md_inline_to_html(s[2:]) + "</li>")
         elif voce_numerata.match(s):
-            _open_list("ol")
+            _open_list("ol", int(voce_numerata.match(s).group(1)))
             out.append("<li>" + _md_inline_to_html(voce_numerata.match(s).group(2)) + "</li>")
         else:
             _close_list(); para.append(s)
@@ -353,18 +392,24 @@ def _ensure_pdf_assets():
     except OSError:
         return None
     paths = {}
+    def _in_cache(p):
+        return os.path.isfile(p) and os.path.getsize(p) > 10000
+
     for name, url in _PDF_ASSET_URLS.items():
         p = os.path.join(PDF_ASSETS_DIR, name)
-        if not (os.path.isfile(p) and os.path.getsize(p) > 10000):
+        if not _in_cache(p):
             try:
                 with urllib.request.urlopen(url, timeout=30) as r:
                     data = r.read()
                 with open(p, "wb") as f:
                     f.write(data)
             except Exception:
-                return None
+                ripiego = os.path.join(PDF_ASSETS_DIR, _PDF_ASSET_RIPIEGHI.get(name, name))
+                if not _in_cache(ripiego):
+                    return None
+                p = ripiego
         paths[name] = p
-    return paths["tex-svg.js"], paths["mermaid.min.js"]
+    return paths["tex-svg-full.js"], paths["mermaid.min.js"]
 def _find_browser() -> str | None:
     """Cerca un browser sul computer, perche' e' lui a disegnare il PDF.
 

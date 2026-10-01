@@ -14,6 +14,12 @@ Il primo passo di ogni lavoro
     La seconda e' la durata, che e' l'unico numero da cui si possa stimare
     quanto costera' e quanto ci vorra'.
 
+Da dove si guarda
+    YouTube lo si interroga attraverso Tor (vedi ``server/utils/tor.py``):
+    vede l'indirizzo di un nodo d'uscita, non quello di casa. Vale anche per
+    la copertina, che per questo arriva alla pagina gia' scaricata invece che
+    come indirizzo da andare a prendere.
+
 Due sorgenti, la stessa risposta
     Un video di YouTube e un file sul disco sono cose diverse, ma il resto del
     programma non deve accorgersene: tutt'e due finiscono in un dizionario
@@ -21,18 +27,15 @@ Due sorgenti, la stessa risposta
 """
 from __future__ import annotations
 
-import json
+import base64
+import functools
 import os
-import subprocess
 
 import yt_dlp
 
-from server.config import settings
-from server.config.messages import msg
-from server.utils.contract import MediaError, _noop_progress
+from server.utils import tor
+from server.utils.contract import MediaError
 from server.utils.ffmpeg import _probe_duration
-from server.utils.media import _lang_name
-from server.utils.text import _format_duration, _safe_filename
 
 
 def _best_thumbnail(info: dict) -> str | None:
@@ -47,6 +50,34 @@ def _best_thumbnail(info: dict) -> str | None:
         return None
     best = max(thumbs, key=lambda t: (t.get("width") or 0) * (t.get("height") or 0))
     return best.get("url")
+
+
+@functools.lru_cache(maxsize=64)
+def miniatura(url: str) -> str:
+    """La copertina gia' scaricata, pronta da mettere in un ``<img>``.
+
+    Alla pagina non si da' l'indirizzo della copertina: lo andrebbe a prendere
+    lei, direttamente, e i server di YouTube vedrebbero l'IP di casa proprio
+    mentre tutto il resto passa da Tor. La si scarica qui, attraverso Tor, e
+    le si passa l'immagine stessa.
+
+    '' se non c'e' o non si riesce a scaricarla: la pagina al suo posto mostra
+    un'icona, e una copertina mancante non ferma niente.
+    """
+    if not url or not url.lower().startswith(("http://", "https://")):
+        return ""
+    try:
+        with yt_dlp.YoutubeDL(tor.attraverso({"quiet": True, "no_warnings": True})) as ydl:
+            with ydl.urlopen(url) as risposta:
+                dati = risposta.read()
+                tipo = (risposta.headers.get("Content-Type") or "").split(";")[0].strip()
+    except Exception:                       # noqa: BLE001
+        return ""
+    if not tipo.startswith("image/"):
+        tipo = "image/webp" if url.lower().split("?")[0].endswith(".webp") else "image/jpeg"
+    return f"data:{tipo};base64,{base64.b64encode(dati).decode('ascii')}"
+
+
 def get_video_info(url: str) -> dict:
     """Download ONLY the video metadata (without downloading the audio).
 
@@ -55,14 +86,17 @@ def get_video_info(url: str) -> dict:
     our own, cleaner dictionary. Solleva MediaError su errore (URL non valido,
     video privato, rete...). Versione SENZA interfaccia, condivisa da CLI e GUI:
     per la CLI c'è il wrapper `_cli_get_video_info`."""
-    ydl_opts = {
-        "quiet": True,            # no yt-dlp output on screen (we handle it ourselves)
-        "no_warnings": True,
-        "skip_download": True,    # do NOT download the media, only the info
-    }
-    try:
+    def _leggi() -> dict:
+        ydl_opts = tor.attraverso({
+            "quiet": True,            # no yt-dlp output on screen (we handle it ourselves)
+            "no_warnings": True,
+            "skip_download": True,    # do NOT download the media, only the info
+        })
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+            return ydl.extract_info(url, download=False)
+
+    try:
+        info = tor.riprovando(_leggi)
     except Exception as e:
         raise MediaError(f"Impossibile leggere il video: {e}")
 
@@ -104,15 +138,18 @@ def get_playlist_info(url: str) -> dict | None:
     è il nome della playlist (con fallback al canale) usato per la sottocartella
     in results/. Versione senza interfaccia: wrapper CLI in
     `_cli_get_playlist_info`."""
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "extract_flat": "in_playlist",  # non scaricare i metadati di ogni video
-    }
-    try:
+    def _leggi() -> dict:
+        ydl_opts = tor.attraverso({
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "extract_flat": "in_playlist",  # non scaricare i metadati di ogni video
+        })
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+            return ydl.extract_info(url, download=False)
+
+    try:
+        info = tor.riprovando(_leggi)
     except Exception as e:
         raise MediaError(f"Impossibile leggere la playlist: {e}")
 
