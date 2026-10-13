@@ -1,0 +1,635 @@
+/* Nucleo della pagina: testi, cambio sezione, avvisi, avanzamento, errori.
+ *
+ * Regola unica, valida anche per i tre file delle sezioni: qui non si decide
+ * niente di importante. La pagina raccoglie cio' che si sceglie, lo passa a
+ * Python, e mostra cio' che Python risponde. Ogni scelta vera (se un URL sia
+ * una playlist, se un video sia gia' stato trascritto, quanto costera' un
+ * lavoro, in quante fasi si divide) sta gia' nel motore, ed e' li' che deve
+ * restare: duplicarla qui significherebbe due risposte diverse alla stessa
+ * domanda.
+ */
+
+let TESTI = {};
+// Nessuna, finche' l'avvio non apre quella del motore salvato.
+let SEZIONE = '';
+
+/* Le scelte dell'interfaccia: motore, modelli, interruttori. Vivono qui e in
+ * Python, non nel documento, perche' Python le salva per la volta dopo e le
+ * ritrova al prossimo avvio. */
+let SCELTE = {};
+
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+/* La frase che sta dietro una chiave, con i buchi riempiti.
+ *
+ * Una chiave che non esiste torna indietro cosi' com'e': a schermo si vede una
+ * stringa strana, che e' brutta ma dice subito dove si e' sbagliato a scrivere.
+ * Meglio di un'etichetta vuota, che non dice niente a nessuno. */
+function t(chiave, valori) {
+  let testo = TESTI[chiave];
+  if (testo === undefined) testo = chiave;
+  if (valori) {
+    for (const [k, v] of Object.entries(valori)) testo = testo.split('{' + k + '}').join(v);
+  }
+  return testo;
+}
+
+/* Riempie di testo ogni elemento che porta un data-t.
+ *
+ * Si chiama una volta sola, all'avvio. Finche' c'erano due lingue serviva a
+ * riscrivere la pagina intera a ogni cambio; adesso e' il riempimento
+ * iniziale, e il nome e' rimasto quello perche' il lavoro che fa e' lo stesso. */
+function riempiTesti() {
+  $$('[data-t]').forEach((e) => { e.textContent = t(e.dataset.t); });
+  // Due postazioni, quindi due volte tutto quello che riguarda il lavoro: due
+  // spie, due riepiloghi. Il ciclo e' la forma piu' onesta di dirlo, e
+  // aggiungere una terza stanza un giorno non richiederebbe di tornare qui a
+  // scrivere una terza riga.
+  Object.values(POSTI).forEach((p) => {
+    p.q('stato').textContent = t('status.' + (p.stato || 'idle'));
+    if (window.riempiMotore) window.riempiMotore(p);
+    if (window.riempiTrascrivi) window.riempiTrascrivi(p);
+  });
+  aggiornaVoci();
+}
+
+/* ── Cambio sezione ───────────────────────────────────────────────────────── */
+
+/* Cambiare sezione adesso e' solo cambiare stanza.
+ *
+ * Prima era anche un altro gesto travestito: entrando in «Cloud» si cambiava
+ * la scelta del motore, e con essa la postazione unica si portava dietro tutto
+ * quello che stava facendo. Adesso le postazioni sono due e stanno ferme
+ * ciascuna nella sua: cambiare stanza non tocca piu' niente di quello che ci
+ * sta dentro, e soprattutto non tocca l'altra.
+ *
+ * Il motore non si sceglie piu' da nessuna parte, perche' la stanza E' il
+ * motore: in «Locale» si trascrive su questo computer, in «Cloud» sui server
+ * Groq, e non c'e' piu' una seconda cosa che possa dire il contrario. */
+function cambiaSezione(nome, immediato) {
+  if (nome === SEZIONE && !immediato) return;
+  const uscente = document.querySelector('.sezione.attiva');
+  SEZIONE = nome;
+  $$('.voce').forEach((v) => v.classList.toggle('attiva', v.dataset.va === nome));
+  // Nella testata il nome della stanza aperta, e la pillola rifa' i conti:
+  // «altrove» dipende da dove si sta guardando.
+  $('#briciola').textContent = t('menu.' + nome);
+  aggiornaCornice();
+
+  // Si ricorda in quale stanza si stava, per riaprirci il programma la volta
+  // dopo. E' l'unica cosa che il cambio di stanza salva, ed e' una comodita':
+  // non cambia niente di quello che le due postazioni stanno facendo.
+  if (POSTI[nome] && SCELTE.motore !== MOTORE_DI[nome]) {
+    SCELTE.motore = MOTORE_DI[nome];
+    if (window.pywebview) window.pywebview.api.imposta({ motore: MOTORE_DI[nome] }, nome);
+  }
+
+  // Prima la sezione che se ne va sfuma e arretra, poi entra la nuova
+  // dall'altro lato. Il ritardo e' quello dell'animazione di uscita, non un
+  // numero scelto a caso.
+  const entra = () => {
+    $$('.sezione').forEach((s) => {
+      s.classList.remove('uscita');
+      s.classList.toggle('attiva', s.dataset.sez === nome);
+    });
+    // Se mentre si era di la' questa stanza aveva finito qualcosa, il suo
+    // riepilogo ha aspettato fin qui: adesso si puo' aprire.
+    apriSospeso(nome);
+  };
+
+  if (uscente && uscente.dataset.sez !== nome && !immediato) {
+    uscente.classList.add('uscita');
+    uscente.classList.remove('attiva');
+    setTimeout(entra, 200);
+  } else {
+    entra();
+  }
+}
+
+/* Il riquadro vuoto: un'icona e una frase, quando non c'e' ancora niente da
+ * mostrare. Lo usa la scheda della sorgente prima che si scelga un video. */
+function statoVuoto(testo) {
+  const box = el('div', 'vuoto');
+  box.appendChild(icona('i-vuoto'));
+  box.appendChild(el('div', '', testo));
+  return box;
+}
+
+/* ── Avvisi a comparsa ────────────────────────────────────────────────────── */
+
+function avvisa(testo, tipo) {
+  const box = el('div', 'avviso ' + (tipo || ''));
+  box.appendChild(el('div', '', testo));
+  $('#avvisi').appendChild(box);
+  // Gli errori restano piu' a lungo: si vuole avere il tempo di leggerli.
+  setTimeout(() => {
+    box.classList.add('uscita');
+    setTimeout(() => box.remove(), 300);
+  }, tipo === 'fail' ? 7000 : 4000);
+}
+
+function errore(messaggio) {
+  avvisa(messaggio, 'fail');
+}
+
+/* Un errore che appartiene a una postazione.
+ *
+ * Sono i rifiuti immediati, quelli che arrivano prima che il lavoro cominci:
+ * un link vuoto, un file che non esiste, una chiave mancante. Un avviso a
+ * comparsa basta e avanza, perche' chi legge ha ancora le mani sul modulo che
+ * ha appena compilato e capisce al volo che cosa correggere.
+ *
+ * Diverso e' il lavoro che cade DOPO essere partito: quello apre una finestra
+ * (vedi `erroreLavoro`), che dice su quale video, di che cosa si tratta e qual
+ * era il testo tecnico. Un avviso che passa da solo dopo sette secondi, li',
+ * sarebbe sparito prima di essere letto.
+ *
+ * La postazione non serve piu' a niente qui dentro da quando il diario non
+ * c'e': si tiene perche' chi chiama ce l'ha e passarla resta il modo in cui
+ * questa pagina dice «questo errore e' di quella stanza». */
+function erroreDi(p, messaggio) {
+  avvisa(messaggio, 'fail');
+}
+
+/* ── Stato del lavoro ─────────────────────────────────────────────────────── */
+
+/* Cosa si blocca mentre un lavoro gira, e perche' il blocco si ferma sulla
+ * porta della stanza.
+ *
+ * Dentro la postazione che sta lavorando non si cambia piu' niente: ne' i
+ * modelli, ne' la sorgente, ne' gli interruttori. Non e' una precauzione
+ * formale: cambiare modello a meta' trascrizione darebbe un risultato che non
+ * corrisponde a niente di quello che si vede scritto.
+ *
+ * Ma si ferma li'. L'altra stanza resta viva e si puo' preparare, avviare e
+ * guardare: e' esattamente la ragione per cui le postazioni sono due. Prima il
+ * blocco prendeva la pagina intera, e un lavoro in corso rendeva inerte anche
+ * la meta' del programma che non c'entrava niente. */
+ascolta('cambiaStato', (p, stato) => {
+  p.stato = stato;
+  p.q('spia').className = 'spia ' + (stato === 'idle' ? '' : stato);
+  p.q('stato').textContent = t('status.' + stato);
+
+  const inCorso = stato === 'working';
+
+  // Il bottone principale dice cosa sta succedendo invece di limitarsi a
+  // spegnersi.
+  const testo = p.q('testo-avvia');
+  testo.dataset.t = inCorso ? 'src.busy' : 'src.start';
+  testo.textContent = t(testo.dataset.t);
+  p.q('icona-avvia').setAttribute('href', inCorso ? '#i-clessidra' : '#i-avvia');
+
+  // Restano vivi solo i pezzi segnati «resta-attivo»: la riga del link (da
+  // cui si mette in coda il prossimo video) e
+  // «Annulla». Tutto il resto aspetta la fine del lavoro.
+  const libero = (e) => !e.closest('.resta-attivo');
+  p.tutti('.bottone.pieno, .bottone.contorno').filter(libero)
+    .forEach((b) => { b.disabled = inCorso; });
+  p.tutti('.campo, .interruttore input').filter(libero)
+    .forEach((c) => { c.disabled = inCorso; });
+  if (window.aggiornaTendine) window.aggiornaTendine();
+
+  p.quota = null;
+  if (!inCorso) {
+    p.piano = [];
+    p.q('avanzamento').classList.remove('visibile');
+    p.q('badge-batch').hidden = true;
+    if (window.riabilitaTrascrivi) window.riabilitaTrascrivi(p);
+  }
+  aggiornaVoci();
+});
+
+/* Un lavoro comincia: si sa gia' quali fasi ci saranno, chi le fara' e cosa
+ * produrranno. Dirlo tutto in anticipo e' cio' che trasforma un'attesa muta in
+ * un'attesa che si capisce. */
+ascolta('iniziaLavoro', (p, dati) => {
+  p.piano = dati.piano || [];
+  p.q('avanzamento').classList.add('visibile');
+  p.q('barra').style.width = '0%';
+  p.q('avanz-pct').textContent = t('prog.working');
+  p.q('avanz-eta').textContent = '';
+  p.fase = null;
+  p.quota = null;
+  const annulla = p.q('annulla');
+  annulla.disabled = false;
+  annulla.querySelector('span').textContent = t('prog.cancel');
+  p.q('avanz-fase').textContent = t('phase.default');
+  p.q('avanz-dettaglio').textContent = '';
+  p.q('racconto-testo').textContent = t('narr.info');
+  p.q('racconto-piano').textContent = t('prog.plan') + ' ' + dati.frase;
+
+  const motore = p.q('badge-motore');
+  motore.className = 'targhetta-motore ' + (dati.tono || '');
+  motore.textContent = dati.motore || '';
+
+  const nota = p.q('badge-nota');
+  nota.textContent = dati.nota || '';
+  nota.hidden = !dati.nota;
+
+  disegnaPassi(p, -1, null);
+  aggiornaVoci();
+});
+
+/* Quanto manca alla fine della fase, da quanto ci ha messo finora.
+ *
+ * Si misura dal momento in cui la fase ha dato il suo primo numero, non da
+ * quando e' cominciata: il caricamento di un modello o la lettura delle
+ * informazioni stanno prima, non fanno avanzare niente, e falserebbero il
+ * conto. Si parte anche dalla quota raggiunta in quel momento, perche' una
+ * fase ripresa comincia gia' a meta'.
+ *
+ * Si tace finche' la stima non ha basi: nei primi secondi, o sotto il 3%,
+ * un numero cambierebbe a ogni blocco e varrebbe meno del silenzio. */
+function tempoRimanente(p, indice, quota) {
+  const adesso = performance.now();
+  if (!p.fase || p.fase.indice !== indice) p.fase = { indice, inizio: null, q0: 0 };
+  if (quota === null || quota >= 1) return '';
+  if (p.fase.inizio === null) { p.fase.inizio = adesso; p.fase.q0 = quota; return ''; }
+  const trascorso = (adesso - p.fase.inizio) / 1000;
+  const fatto = quota - p.fase.q0;
+  if (trascorso < 5 || fatto < 0.03) return '';
+  const secondi = (1 - quota) * trascorso / fatto;
+  return '· ' + (secondi < 60 ? t('prog.eta.sec')
+                              : t('prog.eta.min', { n: Math.round(secondi / 60) }));
+}
+
+/* Una frazione da 0 a 1 detta come percentuale, o «in corso» se non si sa. */
+function percento(quota) {
+  if (quota === null || quota === undefined) return t('prog.working');
+  return Math.round(Math.max(0, Math.min(1, quota)) * 100) + '%';
+}
+
+/* I passaggi: quelli fatti spuntati, quello in corso acceso, gli altri spenti.
+ * Ognuno porta la SUA percentuale: 100% quelli fatti, il numero vero quello in
+ * corso, niente quelli che devono ancora cominciare. E' l'elenco che dice
+ * quanto manca alla FINE; la barra dice quanto manca alla fine della fase. */
+function disegnaPassi(p, corrente, quota) {
+  const box = p.q('passi');
+  box.innerHTML = '';
+  // L'ultima fase arrivata al 100% vuol dire lavoro finito: anche lei spuntata.
+  const finito = quota === 1 && corrente === p.piano.length - 1;
+  p.piano.forEach((fase, i) => {
+    const fatto = i < corrente || (finito && i === corrente);
+    const stato = fatto ? ' fatto' : (i === corrente ? ' corrente' : '');
+    const passo = el('span', 'passo' + stato);
+    passo.appendChild(el('span', 'pallino'));
+    passo.appendChild(el('span', '', t('phase.' + fase)));
+    if (fatto) passo.appendChild(el('span', 'pct', '100%'));
+    else if (i === corrente && quota !== null && quota !== undefined) {
+      passo.appendChild(el('span', 'pct', percento(quota)));
+    }
+    box.appendChild(passo);
+  });
+}
+
+/* L'avanzamento vero.
+ *
+ *   fase       il nome della fase che il motore sta eseguendo;
+ *   indice     la sua posizione nel piano (-1 se fuori piano);
+ *   fasi       quante sono in tutto;
+ *   quota      da 0 a 1, quanto e' stato fatto DI QUESTA FASE, oppure null
+ *              quando la fase non sa quanto le manca (carica un modello, legge
+ *              le informazioni): la barra resta ferma e al posto del numero
+ *              compare «in corso». Prima era la percentuale del lavoro intero,
+ *              che mescolava un download di un minuto con una trascrizione di
+ *              mezz'ora e non diceva niente di nessuno dei due;
+ *   dettaglio  cosa sta lavorando in questo momento (un blocco, una sezione).
+ */
+ascolta('avanzaLavoro', (p, fase, indice, fasi, quota, dettaglio) => {
+  const nome = TESTI['phase.' + fase] ? t('phase.' + fase) : t('phase.default');
+  p.q('avanz-fase').textContent = nome;
+  p.q('avanz-dettaglio').textContent = dettaglio || '';
+
+  if (TESTI['narr.' + fase]) p.q('racconto-testo').textContent = t('narr.' + fase);
+
+  // Fuori piano cambia solo il testo: la barra e i passaggi restano quelli
+  // della fase in corso.
+  if (indice < 0) return;
+  const noto = quota !== null && quota !== undefined;
+  p.q('barra').style.width = (noto ? Math.max(0, Math.min(1, quota)) * 100 : 0).toFixed(1) + '%';
+  p.q('avanz-pct').textContent = percento(quota);
+  p.q('avanz-eta').textContent = tempoRimanente(p, indice, noto ? quota : null);
+  // Lo stesso numero nella barra di stato, che si vede da qualunque stanza.
+  p.quota = noto ? Math.max(0, Math.min(1, quota)) : null;
+  aggiornaCornice();
+
+  const badge = p.q('badge-fase');
+  badge.hidden = false;
+  badge.textContent = t('prog.phase', { i: indice + 1, n: fasi });
+  disegnaPassi(p, indice, quota);
+});
+
+/* La playlist: quale video, di quanti. Il resto del pannello racconta gia' cosa
+ * sta succedendo a QUESTO video, quindi qui basta dire quale sia. */
+ascolta('lavoroBatch', (p, conteggio, titolo) => {
+  const badge = p.q('badge-batch');
+  badge.hidden = false;
+  badge.textContent = conteggio + '  ·  ' + titolo;
+});
+
+/* Il lavoro si e' fermato. La finestra deve rispondere a tre domande, in
+ * quest'ordine: su QUALE video, CHE COSA e' successo, e qual era il testo
+ * originale dell'errore.
+ *
+ * L'ordine non e' casuale. Il testo originale e' l'unica cosa che c'era prima,
+ * ed era anche l'unica inservibile: «HTTP Error 403: Forbidden» e' esatto e non
+ * dice a nessuno se convenga riprovare. Adesso sta in fondo, sotto la sua
+ * etichetta, per chi lo vuole cercare in rete; sopra c'e' la frase che spiega
+ * di che cosa si tratta, che e' quello che serve a decidere.
+ *
+ * Il titolo del video compare solo se c'e': su un file locale scelto a mano non
+ * aggiungerebbe niente che non si sappia gia'. */
+ascolta('erroreLavoro', (p, e) => {
+  window.__instrada(p.dove, 'cambiaStato', ['error']);
+  const corpo = [];
+  if (e.video) corpo.push(riquadroPercorso(e.et_video, e.video));
+  corpo.push(paragrafo(e.causa || t('err.unknown')));
+  if (e.dettaglio) corpo.push(riquadroDettaglio(e.et_dettaglio, e.dettaglio));
+  finestraDi(p, {
+    icona: 'errore', tono: 'errore', titolo: e.titolo || t('err.title'),
+    corpo,
+    azioni: [{ testo: t('comune.chiudi'), tono: 'pieno', icona: 'spunta' }],
+  });
+});
+
+/* ── Le scelte, ricordate ─────────────────────────────────────────────────── */
+
+/* Ogni modifica va anche a Python, che la salva e rispedisce la stima
+ * aggiornata: il costo cambia col modello, e vederlo cambiare nell'istante in
+ * cui si sceglie e' meta' del motivo per cui la stima esiste.
+ *
+ * La postazione da cui arriva la scelta viaggia insieme alla scelta, perche'
+ * non tutte valgono per tutto il programma. I modelli si', sono le stesse
+ * quattro tendine da qualunque stanza le si guardi. La sorgente e gli
+ * interruttori no: appartengono alla stanza in cui sono stati toccati, e spuntare
+ * «grafici» in «Cloud» non deve spuntarlo anche di la'.
+ *
+ * Anche la stima torna indietro con l'indirizzo, ed e' il motivo per cui la si
+ * rimette a schermo nella postazione giusta invece che «nella pagina»: la
+ * stessa sorgente vista da «Locale» costa un tempo e vista da «Cloud» costa
+ * dei soldi, e sono due numeri veri che convivono. */
+async function salvaScelte(valori, p) {
+  p = p || posto();
+  Object.assign(SCELTE, valori);
+  Object.assign(p.opz, valori);
+  const esito = await window.pywebview.api.imposta(valori, p.dove);
+  if (esito && esito.ok && window.mostraStima) window.mostraStima(p, esito.stima);
+}
+
+/* ── Avvio ────────────────────────────────────────────────────────────────── */
+
+const T_AVVIO = performance.now();
+
+/* La barra del velo, e perche' e' fatta di due pezzi.
+ *
+ * Il velo copre TUTTO l'avvio, dal primo istante in cui la finestra compare
+ * fino a quando l'interfaccia e' usabile. Ma in quell'intervallo succedono due
+ * cose diverse, e nessuna delle due sa niente dell'altra:
+ *
+ *   da 0 a 0.80   Python carica il motore. La pagina non ha modo di sapere a
+ *                 che punto sia, quindi e' Python a dirglielo chiamando
+ *                 avanzamentoAvvio() (vedi _carica_motore in EchoScriptApp.py);
+ *
+ *   da 0.80 a 1   la pagina si monta da se': chiede i testi, riempie le
+ *                 sezioni, apre la stanza giusta. Qui i passi sono un elenco
+ *                 chiuso e noto, quindi si contano.
+ *
+ * La barra e' una sola e non torna mai indietro, da qualunque delle due parti
+ * arrivi il numero. */
+const BASE_PAGINA = 0.80;
+const PASSI_AVVIO = 5;
+let passiFatti = 0;
+
+/* Le tre quote della barra, e perche' non bastava una.
+ *
+ * `mostrata`  dov'e' disegnata adesso, e cambia a ogni fotogramma;
+ * `vera`      l'ultimo traguardo raggiunto davvero;
+ * `tetto`     fin dove le si lascia strisciare mentre aspetta il prossimo.
+ *
+ * Il tetto e' l'unica cosa che rende la barra scorrevole invece che a scatti.
+ * Fra un traguardo e l'altro possono passare diversi secondi, e in quei
+ * secondi una barra onesta resterebbe immobile: ma una barra immobile, a chi
+ * la guarda, non dice "sto lavorando", dice "mi sono piantato". Cosi' il tetto
+ * scivola in avanti piano per conto suo, e la barra lo insegue.
+ *
+ * Cosa promette, e cosa no
+ *     Non torna MAI indietro, e non arriva in fondo prima che il lavoro sia
+ *     finito: il tetto puo' consumare al massimo l'85% della distanza che
+ *     manca, quindi finche' c'e' un traguardo da tagliare la barra non puo'
+ *     toccare la fine. Quello che non promette e' che la posizione sia una
+ *     percentuale esatta: mentre aspetta si muove per dire che sta aspettando. */
+const TETTO_MAX = 0.85;     // quanta della distanza che manca si puo' consumare aspettando
+const SCIVOLO = 0.004;      // quanto avanza il tetto a ogni fotogramma
+const RINCORSA = 0.035;     // quanto si avvicina al tetto quello che si vede
+
+let quotaMostrata = 0;
+let quotaVera = 0;
+let quotaTetto = 0;
+
+function traguardo(q) {
+  if (q <= quotaVera) return;         // mai indietro
+  quotaVera = Math.min(q, 1);
+  // Il tetto non si riabbassa: se lo scivolamento lo aveva gia' portato piu'
+  // avanti del traguardo appena tagliato, resta dov'e' e la barra non arretra.
+  quotaTetto = Math.max(quotaTetto, quotaVera);
+}
+
+function animaBarra() {
+  const tettoMax = quotaVera + (1 - quotaVera) * TETTO_MAX;
+  quotaTetto = Math.min(tettoMax, quotaTetto + (tettoMax - quotaTetto) * SCIVOLO);
+  quotaMostrata += (quotaTetto - quotaMostrata) * RINCORSA;
+  const b = document.querySelector('.avvio-barra span');
+  if (b) b.style.width = (quotaMostrata * 100).toFixed(2) + '%';
+  if (quotaMostrata < 0.999) requestAnimationFrame(animaBarra);
+}
+
+/* Python dice a che punto e' il caricamento del motore. Il numero arriva
+ * gia' nella scala di questa barra: la sua ultima tappa vale esattamente
+ * BASE_PAGINA, cioe' il punto in cui il racconto passa da Python alla
+ * pagina. Le due meta' si toccano li' senza salti. */
+window.avanzamentoAvvio = (quota) => traguardo(quota);
+
+function passoAvvio() {
+  passiFatti = Math.min(passiFatti + 1, PASSI_AVVIO);
+  traguardo(BASE_PAGINA + (1 - BASE_PAGINA) * (passiFatti / PASSI_AVVIO));
+}
+
+/* Toglie il velo di caricamento. Si puo' chiamare quante volte si vuole.
+ *
+ * I 500 ms minimi non sono un'attesa finta: su una macchina veloce la pagina e'
+ * pronta in un attimo, e un velo che appare e sparisce in cinquanta millesimi
+ * si vede come uno sfarfallio, non come un caricamento. */
+function togliVelo() {
+  const v = document.getElementById('velo-avvio');
+  if (!v || v.dataset.uscita) return;
+  v.dataset.uscita = '1';
+  const resta = Math.max(0, 500 - (performance.now() - T_AVVIO));
+  setTimeout(() => {
+    // La barra si chiude a mano prima che il velo se ne vada: a questo punto
+    // il caricamento E' finito davvero, e senza questa riga l'ultima cosa che
+    // si vede mentre il velo sfuma e' una barra a tre quarti.
+    const b = document.querySelector('.avvio-barra span');
+    if (b) b.style.width = '100%';
+
+    v.classList.add('via');
+    setTimeout(() => v.remove(), 600);
+  }, resta);
+}
+
+/* La spia nella barra di stato: dice se YouTube vede l'IP di casa o quello di
+ * Tor. Si interroga Python ogni pochi secondi, sempre: Tor puo' cadere e
+ * ripartire anche a meta' sessione, e la spia deve seguirlo. */
+function sorvegliaTor() {
+  const spia = document.getElementById('spia-tor');
+  if (!spia) return;
+  const giro = async () => {
+    try {
+      const s = await window.pywebview.api.stato_tor();
+      const fase = s.fase === 'pronto' ? 'pronto' : s.fase === 'errore' ? 'errore' : 'avvio';
+      spia.dataset.fase = fase;
+      spia.querySelector('.spia-tor-testo').textContent = t('tor.' + fase);
+      spia.title = fase === 'errore' ? s.errore : t('tor.spiega');
+    } catch (_) { /* il ponte non risponde: si riprova al giro dopo */ }
+    setTimeout(giro, 3000);
+  };
+  giro();
+}
+
+function avvia() {
+  /* La barra comincia a muoversi subito, prima ancora che ci sia qualcosa da
+   * raccontare. Il primo traguardo e' piccolo di proposito: serve solo a dare
+   * al tetto un valore diverso da zero, perche' con tetto a zero la barra
+   * resterebbe ferma e il primo fotogramma del velo sarebbe immobile. */
+  traguardo(0.03);
+  requestAnimationFrame(animaBarra);
+
+  /* Se l'apertura si inceppa, per esempio un import fallito o una chiamata che
+   * non torna, il velo deve comunque andarsene: meglio un'interfaccia a meta',
+   * che si vede e si puo' chiudere, di una schermata di caricamento perpetua.
+   *
+   * Settantacinque secondi e non dodici come prima, perche' adesso sotto il
+   * velo c'e' anche il caricamento del motore: al primo avvio dopo
+   * l'installazione Windows deve leggere qualche centinaio di megabyte da
+   * disco, e su una macchina lenta dodici secondi non bastano. Questa e' una
+   * rete di sicurezza, non una scadenza: deve scattare solo quando qualcosa si
+   * e' rotto davvero. */
+  setTimeout(togliVelo, 75000);
+  passoAvvio();                       // 1. la pagina e i suoi script ci sono
+
+  window.addEventListener('pywebviewready', async () => {
+    passoAvvio();                     // 2. il ponte con Python risponde
+    const dati = await window.pywebview.api.avvio();
+    passoAvvio();                     // 3. testi, scelte e modelli sono arrivati
+
+    TESTI = dati.testi;
+    SCELTE = dati.scelte;
+
+    // Le due postazioni si costruiscono QUI, prima di ogni altra cosa che le
+    // riguardi. Tutto quello che viene dopo va a cercare i pezzi del lavoro
+    // dentro una postazione: se non esistessero ancora, ogni ricerca tornerebbe
+    // a mani vuote e l'interfaccia si monterebbe sopra il niente.
+    creaPosti();
+    Object.values(POSTI).forEach((p) => {
+      // Le due stanze partono dalle stesse abitudini dell'ultima volta e da qui
+      // divergono: e' Python a tenerle, ed e' Python che le ha appena mandate.
+      p.opz = {
+        sorgente: SCELTE.sorgente, translate: SCELTE.translate,
+        grafici: SCELTE.grafici,
+        commenti: SCELTE.commenti, dettaglio: SCELTE.dettaglio,
+      };
+      if (window.initMotore) window.initMotore(p, dati);
+      if (window.initTrascrivi) window.initTrascrivi(p);
+    });
+    passoAvvio();                     // 4. le due sezioni sono pronte
+
+    riempiTesti();
+    sorvegliaTor();
+    if (window.potenziaTendine) window.potenziaTendine();
+    passoAvvio();                     // 5. ogni etichetta ha il suo testo
+
+    // Si riapre nella stanza in cui si lavorava l'ultima volta. E' l'unica
+    // cosa che il motore salvato decide ancora: non piu' con che cosa si
+    // trascrive, che adesso lo dice la stanza, ma solo quale delle due aprire
+    // per prima.
+    cambiaSezione(SCELTE.motore === 'groq' ? 'cloud' : 'locale', true);
+    Object.values(POSTI).forEach((p) => {
+      window.__instrada(p.dove, 'cambiaStato', ['idle']);
+    });
+
+    $$('.voce[data-va]').forEach((v) =>
+      v.addEventListener('click', () => cambiaSezione(v.dataset.va)));
+    $('#pillola-lavori').addEventListener('click', (e) => {
+      if (e.currentTarget.dataset.va) cambiaSezione(e.currentTarget.dataset.va);
+    });
+
+    // Ctrl+Invio avvia la trascrizione della stanza che si sta guardando: chi
+    // ha appena riempito il modulo ha le mani sulla tastiera, non sul mouse.
+    // Della stanza che si guarda e non di tutte e due, perche' una scorciatoia
+    // che fa partire un lavoro che non si sta vedendo e' una trappola.
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey) || finestraAperta()) return;
+      if (!POSTI[SEZIONE]) return;           // fuori da una postazione non si avvia niente
+      e.preventDefault();
+      const avvia = posto().q('avvia');
+      if (avvia && !avvia.disabled) avvia.click();
+    });
+
+    // Ctrl+V ovunque nella stanza, a finestra chiusa: se negli appunti c'e' un
+    // link, si apre direttamente la sua anteprima. Chi ha appena copiato un
+    // link da YouTube non deve prima cercare la casella in cui incollarlo.
+    // Dentro una casella di testo, invece, Ctrl+V fa quello che fa sempre.
+    document.addEventListener('paste', (e) => {
+      const dentro = e.target && e.target.closest && e.target.closest('input, textarea, select');
+      if (dentro || finestraAperta() || !POSTI[SEZIONE]) return;
+      const testo = ((e.clipboardData && e.clipboardData.getData('text')) || '').trim();
+      if (!/https?:\/\//i.test(testo) || !window.accettaTrascinato) return;
+      e.preventDefault();
+      const p = posto();
+      avvisa(t('src.pasted', { stanza: p.nome() }), 'ok');
+      window.accettaTrascinato(p, testo.split(/\s+/).join(' '));
+    });
+
+    // Trascinare un link o un file dentro la finestra: e' il gesto naturale, e
+    // senza questo resterebbe l'unica cosa che ci si aspetta e non funziona.
+    let dentro = 0;
+    const velo = $('#velo-trascina');
+    window.addEventListener('dragenter', (e) => {
+      e.preventDefault(); dentro++; velo.classList.add('visibile');
+    });
+    window.addEventListener('dragover', (e) => e.preventDefault());
+    window.addEventListener('dragleave', () => {
+      if (--dentro <= 0) { dentro = 0; velo.classList.remove('visibile'); }
+    });
+    window.addEventListener('drop', (e) => {
+      e.preventDefault(); dentro = 0; velo.classList.remove('visibile');
+      const testo = (e.dataTransfer.getData('text/uri-list')
+                  || e.dataTransfer.getData('text/plain') || '').trim();
+      if (!testo || !window.accettaTrascinato) return;
+      // Il link trascinato va nella stanza che si sta guardando, che e' quella
+      // in cui e' stato lasciato cadere. Prima veniva portato «dove sta il
+      // motore scelto», che con una postazione sola era l'unico posto
+      // possibile; adesso i posti sono due e quello giusto e' dove ha mirato
+      // la mano.
+      window.accettaTrascinato(posto(), testo);
+    });
+
+    // Ultima riga: da qui l'interfaccia e' disegnata, tradotta e reattiva.
+    // Toglierlo prima avrebbe scoperto un'interfaccia che non risponde ancora ai
+    // clic, che e' peggio di un attimo di attesa in piu'.
+    passoAvvio();                     // 6. risponde ai comandi: si puo' usare
+    togliVelo();
+  });
+}
+
+// Cio' che i file delle sezioni usano.
+window.t = t;
+window.$ = $;
+window.$$ = $$;
+window.avvisa = avvisa;
+window.errore = errore;
+window.erroreDi = erroreDi;
+window.statoVuoto = statoVuoto;
+window.cambiaSezione = cambiaSezione;
+window.salvaScelte = salvaScelte;
+window.scelte = () => SCELTE;

@@ -1,0 +1,9 @@
+Manrope.woff2
+
+Carattere Manrope (variabile, pesi 200-800, sottoinsieme latino).
+Copyright 2018 The Manrope Project Authors (https://github.com/sharanda/manrope)
+
+Distribuito con la SIL Open Font License, versione 1.1:
+https://openfontlicense.org
+
+Il file viene da Fontsource (https://fontsource.org/fonts/manrope).

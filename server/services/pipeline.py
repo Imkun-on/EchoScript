@@ -1,0 +1,1173 @@
+"""Il direttore d'orchestra: chiama gli altri nell'ordine giusto.
+
+Che mestiere fa
+    Un lavoro intero, dall'inizio alla fine: leggere cosa c'e' dietro un link,
+    scaricare l'audio, dividerlo in pezzi, trascriverlo (sui server Groq o su
+    questo computer), tradurlo, riassumerlo, e scrivere il riassunto su disco. Ma di queste cose non ne sa fare NESSUNA per conto suo:
+    sono altri moduli a saperle, e questo si limita a chiamarli in fila e a
+    passarsi i risultati di mano in mano.
+
+    E' una distinzione che conta. Il giorno in cui si vuole cambiare come si
+    trascrive, si apre il modulo della trascrizione; il giorno in cui si vuole
+    cambiare l'ORDINE delle cose, o aggiungere un passaggio, si apre questo.
+
+Perche' non stampa niente
+    Perche' non sa chi lo sta guardando. Stampando sul terminale funzionerebbe
+    solo dalla riga di comando, e dentro una finestra quelle righe non le
+    vedrebbe nessuno. Invece riferisce l'avanzamento chiamando una funzione che
+    gli viene passata da fuori: chi lo usa decide se scrivere in un terminale,
+    riempire una barra o non farne niente.
+
+La direzione delle dipendenze, che non va mai invertita
+    Questo modulo importa gli altri; gli altri non importano mai lui. Il giorno
+    in cui un modulo di trascrizione importasse questo, si chiuderebbe un
+    cerchio, e a quel punto Python si ferma con un errore che non indica il
+    file colpevole ma quello sfortunato che e' arrivato per primo.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+import subprocess
+import tempfile
+
+from server.config import groq_key, messages, paths, settings
+from server.enrichment import summary, translation
+from server.utils import text
+from server.export import document, pdf_rich, word
+from server.sources import download, metadata
+from server.state import checkpoints, credits, jobs
+from server.transcription import audio, groq_api, local_whisper
+from server.utils import contract, ffmpeg, media
+
+# La radice del progetto deve essere raggiungibile, altrimenti gli import dei
+# moduli del progetto non trovano niente.
+#
+# Si chiede a paths invece di contare le cartelle sopra questo file, e non e'
+# pignoleria: contandole, la riga si romperebbe in silenzio il giorno in cui
+# questo file si sposta di un livello, e per giunta darebbe la risposta
+# sbagliata dentro l'eseguibile, dove i moduli non stanno affatto dove stanno i
+# sorgenti. paths sa rispondere in tutti e due i casi.
+if paths.cartella_risorse() not in sys.path:
+    sys.path.insert(0, paths.cartella_risorse())
+
+
+# Dove finisce tutto quello che si produce: i riassunti, una cartella per video,
+# e dentro `.checkpoints` quello che serve a riprendere (parziali, trascrizioni
+# finite, fasi).
+#
+# E' la stessa cartella che usa la riga di comando, e non per comodita': e' il
+# motivo per cui il controllo "questo video l'ho gia' trascritto" funziona a
+# prescindere da come lo si era trascritto la prima volta. Due cartelle diverse
+# vorrebbero dire due archivi che non si vedono fra loro.
+RESULTS_DIR = paths.dati("results")
+
+
+class EngineError(Exception):
+    """Raised for any user-facing engine failure (bad key, network, etc.).
+
+    The message is meant to be shown directly to the user (in Italian, to match
+    the app's interface)."""
+
+
+def _shared(fn, *args, **kwargs):
+    """Chiama una funzione di base di server/ traducendone l'errore.
+
+    Le funzioni di base (metadata, download, audio, local_whisper) stanno nei
+    loro moduli e
+    segnalano i guasti con contract.MediaError. La GUI però cattura EngineError: qui
+    la riavvolgiamo, così il contratto verso l'alto non cambia."""
+    try:
+        return fn(*args, **kwargs)
+    except contract.MediaError as e:
+        raise EngineError(str(e)) from e
+
+
+class RateLimitReached(EngineError):
+    """Trascrizione Groq interrotta dal limite (429 / token-al-giorno).
+
+    Il parziale è stato salvato in un checkpoint: il video potrà riprendere da
+    dove si è fermato. Porta con sé il MINUTAGGIO raggiunto (done_seconds) sul
+    totale (total_seconds), oltre ai blocchi fatti/totali, per comporre un
+    messaggio elegante e leggibile dall'utente."""
+
+    def __init__(self, done: int, total: int, done_seconds: float = 0.0,
+                 total_seconds: float = 0.0, ripresa: str | None = None):
+        """Si porta dietro quanto era stato fatto quando i crediti sono finiti.
+
+        Due misure e non una: i blocchi e i secondi. I blocchi servono a
+        riprendere dal punto giusto; i secondi servono a DIRLO a chi guarda,
+        perche' «fatti 47 minuti su 1h 20m» significa qualcosa, mentre
+        «fatti 23 blocchi su 40» non significa niente per nessuno.
+        """
+        self.done = done
+        self.total = total
+        self.done_seconds = done_seconds
+        self.total_seconds = total_seconds
+        # L'ora in cui Groq dice che i crediti tornano, se l'ha detta.
+        self.ripresa = ripresa
+        at = text._format_timestamp(done_seconds)
+        of = text._format_timestamp(total_seconds) if total_seconds else None
+        where = f"{at} su {of}" if of else at
+        quando = (f"alle {ripresa}" if ripresa
+                  else "di norma il giorno successivo")
+        super().__init__(
+            "I crediti gratuiti Groq sono esauriti. La trascrizione si è "
+            f"fermata a {where} ed è stata salvata automaticamente: riprendila "
+            f"quando i crediti tornano disponibili ({quando}) "
+            "scegliendo «Riprendi», oppure completala subito in locale.")
+
+
+class CreditiEsauriti(EngineError):
+    """I crediti Groq risultano gia' finiti, e il lavoro non parte nemmeno.
+
+    Si sa dalle intestazioni dell'ultima risposta di Groq (anche un rifiuto le
+    porta): se dicono che il conto e' a zero e torna fra ore, partire vorrebbe
+    dire scaricare l'audio, dividerlo e farsi dire di no al primo blocco. E'
+    esattamente l'attesa a vuoto che non si vuole: meglio dirlo subito, con
+    l'ora in cui si potra' riprovare.
+    """
+
+    def __init__(self, ripresa: str):
+        """'ripresa' e' l'ora in cui i crediti tornano, tipo «16:45»."""
+        self.ripresa = ripresa
+        super().__init__(
+            f"I crediti Groq sono esauriti e tornano alle {ripresa}. Il lavoro "
+            "non è partito: riprova a quell'ora, oppure trascrivi in «Locale».")
+
+
+# A progress callback has the signature:
+#   on_progress(phase: str, current: float|None, total: float|None, detail: str)
+# where 'phase' is one of: "info", "download", "prepare", "transcribe",
+# "translate", "export"; current/total describe the bar (None = indeterminate);
+# 'detail' is a short human note. A no-op default keeps every function callable
+# without a callback.
+def _noop(phase, current, total, detail=""):  # pragma: no cover - trivial
+    """La richiamata di riserva: riceve l'avanzamento e non ne fa niente.
+
+    Sta qui perche' chi chiama il motore possa non passarne una. Senza, ogni
+    riga che riferisce qualcosa andrebbe protetta da un controllo, e quelle
+    righe sono decine: con questa, il caso «nessuno sta guardando» smette di
+    essere un caso da trattare.
+    """
+    pass
+
+
+# La lingua in cui si traduce e in cui si scrivono i riassunti.
+#
+# Era la lingua dell'interfaccia, e viaggiava fra le opzioni di ogni
+# lavorazione: `options["LINGUA_USCITA"]`. Adesso l'interfaccia ne ha una sola,
+# quindi quell'opzione poteva valere solo questo, e un'opzione che puo' valere
+# una cosa sola non e' un'opzione: e' una costante scritta nel posto sbagliato,
+# dove chi legge continua a chiedersi chi potrebbe cambiarla.
+LINGUA_USCITA = "it"
+
+
+# --- Le scelte fatte nei menu, applicate a questa lavorazione ---------------
+
+def _set_engine_lang(options: dict) -> None:
+    """Applica i modelli scelti nei menu, all'inizio di ogni lavorazione.
+
+    Va chiamata da OGNI punto d'ingresso del motore, non una volta sola
+    all'avvio: chi usa il programma puo' cambiare modello fra un video e
+    l'altro, e la scelta deve valere per la lavorazione che comincia adesso.
+
+    Scrive dentro ``settings`` e non in variabili proprie, perche' quei valori
+    li leggono anche i moduli che fanno il lavoro vero. E ci scrive con
+    ``settings.NOME = ...``, che e' l'unico modo perche' la modifica si veda
+    anche di la': la spiegazione per esteso sta in cima a settings.py.
+
+    Il nome della funzione e' rimasto quello di quando impostava anche la
+    lingua dei messaggi, che adesso e' una sola e non si imposta piu'.
+    """
+    # Modello Ollama (locale) scelto nei menu: diventa quello attivo per
+    # riassunto e traduzione.
+    m = options.get("ollama_model")
+    if m:
+        settings.OLLAMA_MODEL = m
+        # La traduzione riusa il modello del riassunto, salvo .env esplicito.
+        if not os.environ.get("ECHOSCRIPT_OLLAMA_TRANSLATE_MODEL", "").strip():
+            settings.OLLAMA_TRANSLATE_MODEL = m
+    # Modello Groq (cloud) scelto in GUI: lo stesso ruolo, ma sui server.
+    # Vale solo quando il backend è Groq: con backend locale il cloud non
+    # viene toccato affatto (vedi _resolve_summary_client).
+    gs = options.get("groq_summary_model")
+    if gs:
+        settings.GROQ_SUMMARY_MODEL = gs
+
+
+def _L(key: str, **fmt) -> str:
+    """Un messaggio di avanzamento, preso dal catalogo di server/config/messages.
+
+    Il giro da questa scorciatoia invece di chiamare direttamente ``msg`` e'
+    rimasto da quando il motore doveva scrivere nella lingua dell'interfaccia e
+    la lingua andava passata a ogni chiamata. Adesso non serve piu' a niente di
+    tecnico, ma le ottanta chiamate che la usano si leggono meglio cosi'.
+    """
+    return messages.msg(key, **fmt)
+
+
+# === VIDEO METADATA ===
+# get_video_info / get_playlist_info vivono in server/sources/metadata.py (funzioni di base,
+# senza interfaccia) e sono usate identiche da CLI e GUI: qui restano solo i
+# ponti che traducono contract.MediaError in EngineError.
+
+def get_video_info(url: str) -> dict:
+    """Cosa c'e' dietro questo link, senza scaricare niente.
+
+    E' un ponte di una riga verso il modulo dei metadati, e serve a una cosa
+    sola: tradurre l'errore. Chi lavora solleva MediaError, che e' il
+    linguaggio dei moduli di lavoro; chi ha chiamato il motore si aspetta
+    EngineError. Il passaggio da uno all'altro lo fa _shared.
+    """
+    return _shared(metadata.get_video_info, url)
+
+
+def get_playlist_info(url: str) -> dict | None:
+    """Nome/canale + elenco video se l'URL e' una playlist, altrimenti None.
+
+    Raises EngineError su errore di rete/lettura."""
+    return _shared(metadata.get_playlist_info, url)
+
+# === GROQ CLIENT ===
+
+def make_groq_client(api_key: str | None = None):
+    """Create and VALIDATE a Groq client. Raises EngineError with a clear message.
+
+    The key is taken from the argument, otherwise from GROQ_API_KEY (env or the
+    .env file). The placeholder value is treated as "missing". A lightweight
+    models.list() call validates the key before any real work begins."""
+    groq_key.load_dotenv()
+    key = (api_key or os.environ.get("GROQ_API_KEY", "")).strip()
+    if key == groq_key._GROQ_KEY_PLACEHOLDER:
+        key = ""
+    if not key:
+        raise EngineError("API key Groq mancante. Inseriscila nel campo apposito "
+                          "oppure nel file .env (la generi su console.groq.com/keys).")
+    try:
+        from groq import Groq
+        # max_retries=0: il client di Groq, lasciato ai suoi valori, davanti a
+        # un «crediti finiti» riprovava da solo aspettando in silenzio. Adesso
+        # le attese le decide chi chiama (vedi credits.attesa_breve): quelle
+        # brevi si fanno col conto alla rovescia a schermo, quelle lunghe no.
+        client = Groq(api_key=key, max_retries=0)
+        client.models.list()  # validation call
+        return client
+    except Exception as e:
+        msg = str(e)
+        if "401" in msg or "invalid_api_key" in msg or "Unauthorized" in msg:
+            raise EngineError("Chiave Groq non valida (401). Controlla di averla copiata bene.")
+        if "403" in msg:
+            raise EngineError("Accesso negato da Groq (403): possibile chiave errata o rete/VPN bloccata.")
+        raise EngineError(f"Impossibile contattare Groq: {e}")
+
+
+# === GROQ RATE LIMITS / "CREDITS" ============================================
+# Groq does not expose a "balance" endpoint: the free-tier budget is reported
+# only via the x-ratelimit-* HTTP headers attached to every API response. To
+# READ them without doing real work we send a ~1-second silent audio clip to the
+# transcription endpoint (the same one the app uses) and parse the headers from
+# the raw response. Costs about 1 second of the daily audio budget, negligible.
+
+from datetime import datetime as _datetime, timedelta as _timedelta
+
+
+def _reset_clock(seconds: float | None) -> str | None:
+    """Da «fra due ore e dieci» a «alle 16:45».
+
+    Sono la stessa informazione, ma non si usano allo stesso modo. Una durata
+    dice quanto aspettare, un orario dice quando tornare, e per decidere
+    servono tutt'e due: chi legge «fra 2h 10m» deve fare il conto a mente, e
+    chi legge solo «alle 16:45» non sa se sono dieci minuti o dieci ore.
+    """
+    if seconds is None:
+        return None
+    return (_datetime.now() + _timedelta(seconds=seconds)).strftime("%H:%M")
+
+
+def _parse_ratelimit_headers(headers) -> list[dict]:
+    """Turn the x-ratelimit-* headers into a tidy list of limit groups.
+
+    Each item: {kind, remaining, limit, reset_seconds, reset_clock}. 'kind' is
+    one of 'audio_seconds' | 'requests' | 'tokens' (the GUI localizes the label).
+    Only groups actually present in the response are returned.
+
+    La lettura degli header (regex del formato '2m59.56s', unità, conversioni)
+    sta in credits.ratelimit_groups: qui resta solo la FORMA che serve alla GUI,
+    durata + orario di azzeramento, diversa da quella salvata in cache."""
+    return [
+        {
+            "kind": kind,
+            "remaining": remaining,
+            "limit": limit,
+            "reset_seconds": reset_s,
+            "reset_clock": _reset_clock(reset_s),
+        }
+        for kind, remaining, limit, reset_s in credits.ratelimit_groups(headers)
+    ]
+
+
+def _silent_probe_audio(workdir: str) -> str:
+    """Un secondo di silenzio, da mandare a Groq solo per farsi dire i limiti.
+
+    Serve al pannello dei crediti quando non si e' ancora fatto niente: i
+    limiti si leggono dalle intestazioni delle risposte, e senza una richiesta
+    non c'e' nessuna risposta da leggere.
+
+    Si manda un secondo di silenzio perche' e' la richiesta piu' piccola
+    possibile: costa quasi niente in crediti e in tempo, e porta indietro
+    esattamente le stesse intestazioni di una trascrizione vera.
+    """
+    out_path = os.path.join(workdir, "probe.mp3")
+    cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i",
+           f"anullsrc=r={settings.AUDIO_SAMPLE_RATE}:cl=mono", "-t", "1",
+           "-b:a", settings.AUDIO_BITRATE, out_path]
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+    return out_path
+
+
+def fetch_groq_limits(api_key: str | None = None) -> dict:
+    """Read the current Groq rate limits ("credits") for the transcription model.
+
+    Sends a ~1-second silent clip to the audio endpoint and parses the
+    x-ratelimit-* headers of the raw response. Returns
+    {checked_at: 'HH:MM', items: [...], raw: {header: value}}. Raises EngineError
+    on a missing/invalid key or a network failure (message ready to show)."""
+    client = make_groq_client(api_key)  # validates the key, clear errors
+    with tempfile.TemporaryDirectory(prefix="echoscript_lim_", ignore_cleanup_errors=True) as workdir:
+        try:
+            probe = _silent_probe_audio(workdir)
+        except Exception as e:
+            raise EngineError(f"Impossibile creare l'audio di test (serve ffmpeg): {e}")
+        try:
+            with open(probe, "rb") as f:
+                raw = client.audio.transcriptions.with_raw_response.create(
+                    file=(os.path.basename(probe), f.read()),
+                    model=settings.GROQ_MODEL,
+                    response_format="json",
+                    temperature=0.0,
+                )
+            headers = raw.headers
+        except Exception as e:
+            msg = str(e)
+            if contract._is_rate_limit(msg):
+                # Già a zero: prova comunque a leggere gli header dell'errore 429.
+                headers = getattr(getattr(e, "response", None), "headers", {})
+            elif "401" in msg or "invalid_api_key" in msg:
+                raise EngineError("Chiave Groq non valida (401).")
+            else:
+                raise EngineError(f"Impossibile leggere i limiti Groq: {e}")
+
+    # La lettura resta in cache come quella di una trascrizione vera: e' la
+    # stessa informazione, e serve alla stima prima di partire.
+    credits.record_rate_limits(settings.GROQ_MODEL, headers)
+    items = _parse_ratelimit_headers(headers)
+    # Tutti gli header x-ratelimit-* grezzi (per debug / vista \"completa\").
+    raw_map = {}
+    try:
+        for k, v in headers.items():
+            if str(k).lower().startswith("x-ratelimit"):
+                raw_map[str(k).lower()] = v
+    except Exception:
+        pass
+    return {"checked_at": _datetime.now().strftime("%H:%M"),
+            "items": items, "raw": raw_map}
+
+
+def stima_crediti(durata: float, api_key: str | None = None) -> dict | None:
+    """Il video ci sta nei crediti Groq rimasti? None se si', o se non si sa.
+
+    Si guarda prima la cache, che le richieste di questa sessione hanno gia'
+    riempito. Se e' vuota si fa una lettura di prova (un secondo di silenzio,
+    vedi fetch_groq_limits): costa quasi niente, e un avviso prima di partire
+    vale molto di piu' di un lavoro che si ferma a meta'.
+
+    Restituisce {'restano', 'serve', 'ripresa'} in secondi (e l'ora a cui i
+    crediti si ricaricano) solo quando l'audio residuo e' meno del video.
+    """
+    if not durata:
+        return None
+    residuo = credits.audio_residuo(settings.GROQ_MODEL)
+    if residuo is None:
+        try:
+            fetch_groq_limits(api_key)
+        except EngineError:
+            return None
+        residuo = credits.audio_residuo(settings.GROQ_MODEL)
+    if residuo is None:
+        return None
+    restano, ripresa = residuo
+    if restano >= durata:
+        return None
+    return {"restano": restano, "serve": durata, "ripresa": ripresa}
+
+
+# === AUDIO/VIDEO DOWNLOAD ===
+# Anche questi sono ponti: la logica yt-dlp sta in server/sources/download.py. Passiamo la
+# lingua del motore cosi' i testi di avanzamento arrivano gia' tradotti.
+
+def _fermati_se_richiesto() -> None:
+    """Se in questa postazione e' stato premuto «Annulla», ci si ferma qui.
+
+    Si chiama nei punti in cui fermarsi non lascia niente a meta': fra una
+    fase e l'altra, dopo un blocco, dopo una sezione. Il parziale fin li' e'
+    gia' salvato da chi ha lavorato, e «Riprendi» ripartira' da quel punto.
+    """
+    if contract.fermarsi():
+        raise contract.Annullato()
+
+
+def download_audio(url: str, workdir: str, on_progress=_noop) -> str:
+    """Scarica l'audio, traducendo gli errori nel linguaggio del motore.
+
+    Come gli altri ponti di questo file: il lavoro lo fa il modulo dello
+    scaricamento, qui si cambia solo il tipo di errore. Vedi _shared.
+    """
+    try:
+        percorso = _shared(download.download_audio, url, workdir, on_progress,
+                           contract.fermarsi)
+    except KeyboardInterrupt:
+        # E' il modo in cui yt-dlp esce quando il suo richiamo chiede di
+        # fermarsi: qui vuol dire che e' stato premuto «Annulla».
+        raise contract.Annullato()
+    _fermati_se_richiesto()
+    return percorso
+
+
+# === AUDIO SPLITTING (Groq only) ===
+
+def split_audio(audio_path: str, duration: float, workdir: str, on_progress=_noop) -> list[tuple[float, str]]:
+    """Divide l'audio in blocchi da ~CHUNK_SECONDS (16 kHz mono).
+
+    Returns a list of (offset_seconds, chunk_path) pairs."""
+    blocchi = _shared(audio.split_audio, audio_path, duration, workdir, on_progress,
+                      contract.fermarsi)
+    _fermati_se_richiesto()
+    return blocchi
+
+# === TRANSCRIPTION ===
+
+def transcribe_groq(client, chunks: list[tuple[float, str]], on_progress=_noop,
+                    start_index: int = 0, prior_segments: list | None = None,
+                    prior_lang=None, language=None, usage_out: dict | None = None):
+    """Transcribe chunks via Groq, con RIPRESA da 'start_index' (riusando
+    'prior_segments' già fatti). Shifta i timestamp di ogni blocco (e le parole).
+
+    'language' forza la lingua audio (None = autorileva). Se 'usage_out' è un
+    dict, viene riempito con i limiti Groq letti dagli header dell'ULTIMO blocco
+    (usage_out['items'] = lista di gruppi limite) per mostrare i crediti residui.
+    Returns (segments, detected_language). Se Groq rifiuta per limite, solleva
+    contract.TranscriptionInterrupted col parziale (per il checkpoint)."""
+    all_segments: list[dict] = list(prior_segments or [])
+    context = " ".join(s["text"] for s in all_segments[-6:]) if all_segments else ""
+    detected = prior_lang
+    n = len(chunks)
+    # Cattura header dell'ultimo blocco (solo se al chiamante interessano i crediti).
+    _hdr: dict = {}
+    sink = (lambda h: _hdr.__setitem__("headers", h)) if usage_out is not None else None
+    for i in range(start_index, n):
+        if contract.fermarsi():
+            # «Annulla»: i blocchi fatti fin qui si salvano come per i crediti
+            # finiti, e «Riprendi» ripartira' dal prossimo.
+            raise contract.TranscriptionInterrupted(all_segments, i, n, detected,
+                                                    annullato=True)
+        offset, path = chunks[i]
+        on_progress("transcribe", i, n, _L("chunk_send", i=i + 1, n=n))
+        # Il limite al minuto si aspetta dicendolo: la barra resta dov'e', e
+        # sotto compare il conto alla rovescia invece del silenzio.
+        attesa = (lambda sec, i=i: on_progress("transcribe", i, n,
+                                               _L("wait_minute", s=sec)))
+        try:
+            if i == start_index:
+                segments, lang = groq_api._transcribe_chunk(
+                    client, path, prompt=context, return_language=True,
+                    language=language, on_headers=sink, on_attesa=attesa)
+                detected = detected or lang
+            else:
+                segments = groq_api._transcribe_chunk(
+                    client, path, prompt=context, language=language,
+                    on_headers=sink, on_attesa=attesa)
+        except contract.GroqRateLimit as rl:
+            # I blocchi 0..i-1 sono completati: passali a chi orchestra.
+            raise contract.TranscriptionInterrupted(all_segments, i, n, detected,
+                                                    getattr(rl, "ripresa", None))
+        for seg in segments:
+            seg["start"] += offset
+            seg["end"] += offset
+            for w in seg.get("words", []):
+                w["start"] += offset
+                w["end"] += offset
+            all_segments.append(seg)
+        if segments:
+            context = " ".join(s["text"] for s in segments)
+        on_progress("transcribe", i + 1, n, _L("chunk_done", i=i + 1, n=n))
+    # Crediti residui letti dall'ultimo blocco trascritto (best effort).
+    if usage_out is not None and _hdr.get("headers") is not None:
+        usage_out["items"] = _parse_ratelimit_headers(_hdr["headers"])
+    return all_segments, detected
+
+
+def transcribe_local(model_name: str, audio_path: str, duration: float, on_progress=_noop,
+                     language=None, meta: dict | None = None,
+                     resume_cp: dict | None = None, workdir: str | None = None):
+    """Trascrive tutto il file in locale con faster-whisper, riportando l'avanzamento.
+
+    Ponte verso local_whisper.transcribe_local: sceglie da se' GPU (CUDA) o CPU, chiede i
+    timestamp per parola quando WORD_TIMESTAMPS e' attivo e gestisce il
+    checkpoint di ripresa. 'language' forza la lingua audio (None = autorileva).
+    Returns (segments, detected_language). Raises EngineError on failure."""
+    risultato = _shared(local_whisper.transcribe_local, model_name, audio_path, duration,
+                        on_progress, should_stop=contract.fermarsi,
+                        language=language, meta=meta, resume_cp=resume_cp,
+                        workdir=workdir)
+    # Fermata da «Annulla»: il parziale locale e' gia' salvato da chi trascrive.
+    _fermati_se_richiesto()
+    return risultato
+
+# === FILE HELPERS ===
+
+def _ensure_dir(path: str) -> None:
+    """Make sure the PARENT directory of 'path' exists.
+
+    Called right before every write: on OneDrive-synced folders the directory
+    can be briefly renamed/locked while syncing, which would otherwise cause a
+    'No such file or directory' (Errno 2) error mid-run. Il percorso passa da
+    text._lp: con titoli lunghi la cartella supera i 260 caratteri di Windows e
+    makedirs fallirebbe."""
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(text._lp(parent), exist_ok=True)
+
+
+def _write(path: str, content: str, created: list[str], root: str) -> None:
+    """Write a UTF-8 file and record its path relative to 'root' (for the result).
+
+    Ponte verso text.write_text_file, che ricrea la directory e riprova una volta
+    sui guasti transitori di OneDrive E applica il prefisso per i percorsi lunghi
+    di Windows (_lp): quest'ultimo qui mancava, quindi un titolo di video lungo
+    faceva fallire la scrittura dalla GUI mentre da CLI funzionava."""
+    text.write_text_file(path, content, created, root)
+
+
+def _salva_word(meta: dict, sections: list[dict], percorso: str, with_timestamps: bool,
+                engine_label: str, created: list[str], root: str) -> None:
+    """Il .docx accanto al PDF, per chi vuole correggere il testo.
+
+    Non puo' far fallire niente: se non riesce, restano gli altri formati.
+    """
+    _ensure_dir(percorso)
+    if word.save_docx(meta, sections, percorso, with_timestamps, engine_label):
+        created.append(os.path.relpath(percorso, root).replace("\\", "/"))
+
+
+# === HIGH-LEVEL ORCHESTRATION ===
+
+def transcribe_only(source: str, options: dict, on_progress=_noop, resume: bool = False):
+    """PHASE 1: download/read + transcribe ONE source, returning data IN MEMORY.
+
+    'source' is a YouTube URL or, when options["source_kind"] == "local", the
+    path of a local audio/video file. Local files skip the download phase.
+
+    Con backend Groq supporta la RIPRESA: se 'resume' è True e c'è un checkpoint
+    del video, riparte dal blocco salvato; se il limite Groq viene raggiunto,
+    salva/aggiorna il checkpoint e solleva RateLimitReached. A trascrizione
+    completa il checkpoint viene rimosso.
+
+    Returns (meta, segments, engine_label, client)."""
+    _set_engine_lang(options)
+    # Modello di trascrizione Groq scelto dall'utente (GUI): diventa quello attivo
+    # per l'intera lavorazione, così API call, etichette e checkpoint lo usano.
+    if options.get("groq_model"):
+        settings.GROQ_MODEL = options["groq_model"]
+    backend = options.get("backend", "groq")
+    model = options.get("model")
+    source_kind = options.get("source_kind", "youtube")
+    # Forced audio language (None = auto-detect); explicit option wins over .env.
+    audio_lang = options.get("audio_lang") or settings.LANGUAGE
+
+    # A Groq client is needed only for cloud transcription.
+    client = None
+    if backend == "groq":
+        # Se l'ultima risposta di Groq diceva gia' «crediti finiti fino alle
+        # 16:45», non si parte nemmeno: scaricare e dividere l'audio per farsi
+        # dire di no al primo blocco sarebbe l'attesa a vuoto da evitare.
+        ripresa = credits.esauriti(settings.GROQ_MODEL)
+        if ripresa:
+            raise CreditiEsauriti(ripresa)
+        client = make_groq_client(options.get("api_key"))
+
+    # Metadata: YouTube needs a network call; a local file is described synthetically.
+    if source_kind == "local":
+        if not os.path.isfile(source):
+            raise EngineError(f"File non trovato: {source}")
+        on_progress("info", None, None, _L("read_audio"))
+        meta = metadata.local_file_meta(source)
+    else:
+        on_progress("info", None, None, _L("read_info"))
+        meta = get_video_info(source)
+
+    engine_label = (f"Locale / faster-whisper {model}" if backend == "local"
+                    else f"Groq / {settings.GROQ_MODEL}")
+
+    # Checkpoint da cui riprendere (Groq a blocchi, oppure locale a tempo).
+    cp = None
+    local_cp = None
+    if resume:
+        if backend == "groq":
+            cp = checkpoints.load_checkpoint(meta)
+        else:
+            local_cp = checkpoints.load_local_checkpoint(meta)
+
+    return _transcribe_body(source, options, on_progress, meta, client, backend,
+                            model, source_kind, audio_lang, engine_label,
+                            cp, local_cp)
+
+
+def _transcribe_body(source, options, on_progress, meta, client, backend, model,
+                     source_kind, audio_lang, engine_label, cp, local_cp):
+    """Il corpo di transcribe_only: scarica/legge, trascrive e restituisce."""
+    with tempfile.TemporaryDirectory(prefix="echoscript_", ignore_cleanup_errors=True) as workdir:
+        if source_kind == "local":
+            audio_path = source  # fed directly to ffmpeg / whisper
+        else:
+            audio_path = download_audio(source, workdir, on_progress)
+        duration = meta["duration"] or ffmpeg._probe_duration(audio_path)
+        meta["duration"] = duration  # keep it consistent for the output builders
+        if backend == "groq":
+            chunks = split_audio(audio_path, duration, workdir, on_progress)
+            # La ripresa è valida solo se i blocchi coincidono (stessa durata).
+            start_index, prior, prior_lang = 0, None, None
+            if cp and cp.get("total_chunks") == len(chunks):
+                start_index = int(cp.get("done_chunks", 0))
+                prior = cp.get("segments")
+                prior_lang = cp.get("detected_language")
+            groq_usage: dict = {}
+            try:
+                segments, detected_lang = transcribe_groq(
+                    client, chunks, on_progress, start_index, prior, prior_lang,
+                    language=audio_lang, usage_out=groq_usage)
+            except contract.TranscriptionInterrupted as ti:
+                # Limite raggiunto: salva/aggiorna il checkpoint e segnala.
+                checkpoints.save_checkpoint(meta, {
+                    "title": meta["title"], "id": meta.get("id"),
+                    "source": meta.get("source", source_kind),
+                    "source_path": meta.get("source_path"),
+                    "webpage_url": meta.get("webpage_url"),
+                    "model": settings.GROQ_MODEL, "chunk_seconds": settings.CHUNK_SECONDS,
+                    "total_chunks": ti.total, "done_chunks": ti.done,
+                    "detected_language": ti.lang, "segments": ti.segments,
+                    "duration": duration,
+                })
+                # Minutaggio raggiunto: i blocchi sono uniformi (CHUNK_SECONDS),
+                # quindi il tempo fatto = blocchi completati × durata blocco,
+                # limitato alla durata totale del video.
+                done_s = ti.done * settings.CHUNK_SECONDS
+                if duration:
+                    done_s = min(done_s, duration)
+                if getattr(ti, "annullato", False):
+                    raise contract.Annullato()
+                raise RateLimitReached(ti.done, ti.total, done_s, duration or 0.0,
+                                       getattr(ti, "ripresa", None))
+            # Trascrizione completa: niente più parziale da conservare.
+            checkpoints.delete_checkpoint(meta)
+            # Crediti Groq residui letti durante la trascrizione (per il riepilogo).
+            # Chiave con underscore: i builder dei file non la serializzano.
+            if groq_usage.get("items"):
+                meta["_groq_limits"] = groq_usage["items"]
+        else:
+            segments, detected_lang = transcribe_local(
+                model, audio_path, duration, on_progress, language=audio_lang,
+                meta=meta, resume_cp=local_cp, workdir=workdir)
+
+    if not segments:
+        raise EngineError("Nessun testo trascritto.")
+    # Lingua dell'audio: quella rilevata da Whisper è autorevole; in mancanza, si
+    # ripiega su quella dichiarata da YouTube. Serve alla GUI per decidere se
+    # proporre la traduzione (italiano -> non serve; inglese -> sì).
+    meta["detected_language"] = detected_lang or meta.get("language")
+    return meta, segments, engine_label, client
+
+
+def continue_local_from_groq(source: str, options: dict, on_progress=_noop):
+    """Completa IN LOCALE una trascrizione Groq fermata dal limite giornaliero.
+
+    Riusa il parziale salvato nel checkpoint Groq (i blocchi già trascritti),
+    riscarica/riusa l'audio, trascrive in locale (faster-whisper: GPU se c'è,
+    altrimenti CPU) SOLO la parte mancante e la unisce al parziale. A fine
+    lavoro rimuove ogni checkpoint del video.
+
+    Serve al pulsante «Continua ora in locale» mostrato quando i crediti Groq si
+    esauriscono. Returns (meta, segments, engine_label, None)."""
+    _set_engine_lang(options)
+    source_kind = options.get("source_kind", "youtube")
+    model = options.get("model") or "small"
+    audio_lang = options.get("audio_lang") or settings.LANGUAGE
+
+    # Metadati: servono a ritrovare il checkpoint (chiave) e a conoscere la durata.
+    if source_kind == "local":
+        if not os.path.isfile(source):
+            raise EngineError(f"File non trovato: {source}")
+        on_progress("info", None, None, _L("read_audio"))
+        meta = metadata.local_file_meta(source)
+    else:
+        on_progress("info", None, None, _L("read_info"))
+        meta = get_video_info(source)
+
+    cp = checkpoints.load_checkpoint(meta)
+    if not cp:
+        raise EngineError("Nessun parziale Groq da completare per questo video.")
+
+    duration = cp.get("duration") or meta.get("duration") or 0.0
+    meta["duration"] = duration
+    chunk_seconds = cp.get("chunk_seconds") or settings.CHUNK_SECONDS
+    done_seconds = int(cp.get("done_chunks", 0)) * chunk_seconds
+    if duration:
+        done_seconds = min(done_seconds, duration)
+
+    # Checkpoint "locale" sintetico costruito dal parziale Groq: stesso modello e
+    # stessa durata, così _local_resume_point lo accetta, riusa i segmenti già
+    # fatti e riparte esattamente dal minuto in cui Groq si era fermato.
+    local_cp = {
+        "model": model,
+        "done_seconds": done_seconds,
+        "duration": duration,
+        "detected_language": cp.get("detected_language"),
+        "segments": list(cp.get("segments") or []),
+    }
+    engine_label = f"Groq + Locale / faster-whisper {model}"
+
+    with tempfile.TemporaryDirectory(prefix="echoscript_", ignore_cleanup_errors=True) as workdir:
+        if source_kind == "local":
+            audio_path = source
+        else:
+            audio_path = download_audio(source, workdir, on_progress)
+        if not duration:
+            duration = ffmpeg._probe_duration(audio_path)
+            meta["duration"] = duration
+            local_cp["duration"] = duration
+        segments, detected = transcribe_local(
+            model, audio_path, duration, on_progress, language=audio_lang,
+            meta=meta, resume_cp=local_cp, workdir=workdir)
+
+    if not segments:
+        raise EngineError("Nessun testo trascritto.")
+    # Completato: via ogni parziale (sia Groq sia l'eventuale locale intermedio).
+    checkpoints.delete_checkpoint(meta)
+    checkpoints.delete_local_checkpoint(meta)
+    meta["detected_language"] = detected or cp.get("detected_language") or meta.get("language")
+    return meta, segments, engine_label, None
+
+
+# === TRANSLATION & SUMMARY (post-transcription, UI-agnostic) =================
+# These mirror the CLI's translate_existing()/summarize_existing() but are
+# headless: they write through _write() and report through on_progress() instead
+# of printing to the rich console. Failures are turned into warnings (the
+# transcription is already saved), never into a hard error.
+
+def _translate_sections(meta: dict, sections: list[dict], warnings: list[str],
+                        on_progress=_noop, local: bool = False) -> list[dict] | None:
+    """Translate the transcription sections to Italian, for the summary to use.
+
+    With 'local=True' the translation runs offline via Ollama (no Google
+    Translate); otherwise it uses Google Translate. Returns the translated
+    sections (so the summary can reuse them) or None if translation was
+    skipped/failed. A None return never aborts the run: a clear warning is
+    appended instead.
+
+    Non scrive nessun file fra i risultati: la traduzione e' un passaggio verso
+    il riassunto, non una cosa da leggere. Le sezioni tradotte restano nel
+    foglietto delle fasi, da dove «Riprendi» e «Solo riassunto» le rileggono."""
+    target = LINGUA_USCITA
+    lang_label = media._lang_name(target) or target
+
+    n = len(sections)
+    # Resume: ricarica dallo stato le sezioni già tradotte (se una precedente
+    # esecuzione si era interrotta) e riparti da lì; 'on_section' salva il
+    # parziale dopo ogni sezione, così è sempre riprendibile.
+    done_secs, _persist_translation = jobs.resume_sections(
+        meta, "translation", n, "target", target)
+
+    on_progress("translate", len(done_secs), n, _L("translating_to", lang=lang_label))
+    try:
+        translated = translation.translate_sections(
+            sections, target, local=local,
+            on_progress=lambda i, tot: (on_progress("translate", i, tot,
+                                                    _L("section_tr", i=i, n=tot)),
+                                        _fermati_se_richiesto()),
+            done_sections=done_secs, on_section=_persist_translation)
+    except contract.Annullato:
+        raise                        # il parziale e' gia' salvato da on_section
+    except RuntimeError as e:        # deep_translator non installato o Ollama giù
+        warnings.append(_L("tr_unavail", e=e))
+        return None
+    except Exception as e:
+        # Parziale già salvato da 'on_section': la traduzione sarà riprendibile.
+        warnings.append(_L("tr_interrupted", e=e))
+        return None
+
+    # Traduzione completata: fase 'done' nello stato, con le sezioni dentro.
+    jobs.update_stage(meta, "translation", status=jobs.STAGE_DONE,
+                    done=len(translated), total=n, sections=translated,
+                    extra={"target": target})
+    return translated
+
+
+def _resolve_summary_client(options: dict, client):
+    """Pick the chat client for the post-processing (translation, summary): a
+    Groq client when the chosen backend is Groq, None otherwise
+    (-> Ollama, i.e. everything local).
+
+    The backend is the whole decision, and deliberately so: choosing "on my
+    computer" is a promise that nothing leaves the machine, so a Groq key loaded
+    for other jobs must NOT silently route the summary through the cloud. The
+    two engines are two separate worlds (local models on one side, the key and
+    the cloud models on the other) and this is where that separation is
+    enforced. Anything else would make the panel lie."""
+    if (options.get("backend") or "").lower() != "groq":
+        return None
+    if client is not None:
+        return client
+    key = (options.get("api_key") or "").strip()
+    if key:
+        try:
+            return make_groq_client(key)
+        except EngineError:
+            return None
+    return None
+
+
+def _summarize_outputs(meta: dict, sections: list[dict], options: dict,
+                       video_dir: str, created: list[str], warnings: list[str],
+                       client=None, on_progress=_noop) -> str:
+    """Summarize the (Italian) sections per-section and write md/txt(+pdf).
+
+    'sections' should already be Italian (the translation when available, else
+    the original). Uses Groq when a client/key is available, else Ollama. Any
+    failure becomes a warning: the transcription/translation stay saved.
+
+    Sono gli unici file che finiscono nella cartella dei risultati: e' il
+    riassunto quello che si apre e si legge, il resto serve ad arrivarci.
+
+    options["charts"] e options["code_comments"] accendono le due aggiunte
+    alle istruzioni (grafici e commenti nel codice); se mancano valgono le
+    impostazioni. Il PDF è quello "ricco", che disegna formule e grafici."""
+    sum_client = _resolve_summary_client(options, client)
+    grafici = options.get("charts")
+    if grafici is None:
+        grafici = settings.SUMMARY_CHARTS
+
+    # Crediti del riassunto gia' finiti: si dice subito, invece di partire e
+    # restare fermi. Il parziale non c'e' ancora, ma «Concludi in locale»
+    # funziona lo stesso, partendo dalla prima sezione.
+    if sum_client is not None:
+        ripresa = credits.esauriti(settings.GROQ_SUMMARY_MODEL)
+        if ripresa:
+            warnings.append(_L("sum_ratelimit_at", ora=ripresa))
+            return "partial"
+
+    n_sez = max(1, len(sections))
+    dettaglio = options.get("summary_detail") or summary.DETTAGLIO_PREDEFINITO
+    chiave_riassunto = (LINGUA_USCITA if dettaglio == summary.DETTAGLIO_PREDEFINITO
+                        else f"{LINGUA_USCITA}:{dettaglio}")
+    try:
+        summarize_fn, engine_label = summary._make_summarizer(
+            sum_client, grafici=grafici, commenti=options.get("code_comments"),
+            dettaglio=dettaglio,
+            on_attesa=lambda sec: on_progress("summarize", None, n_sez,
+                                              _L("wait_minute", s=sec)))
+    except RuntimeError as e:        # né Groq né Ollama disponibili
+        warnings.append(_L("sum_unavail", e=e))
+        return "skipped"
+
+    safe_title = text._safe_filename(meta["title"])
+    sum_dir = os.path.join(video_dir, jobs.summary_subdir())
+    suffix = jobs.SUMMARY_SUFFIX
+    base = os.path.join(sum_dir, f"{safe_title}_{suffix}")
+
+    n = len(sections)
+    # Resume: riparti dalle sezioni già riassunte (es. crediti Groq esauriti a
+    # metà); 'on_section' salva il parziale dopo ogni sezione. Il parziale si
+    # riusa solo se e' stato scritto alla stessa misura (esteso, breve…):
+    # mescolare sezioni lunghe e sezioni in punti darebbe un documento sbilenco.
+    # La misura di sempre resta scritta come prima, «it», cosi' i parziali
+    # lasciati dalle versioni precedenti continuano a valere.
+    done_secs, _persist_summary = jobs.resume_sections(
+        meta, "summary", n, "lang", chiave_riassunto)
+
+    on_progress("summarize", len(done_secs), n, _L("summarizing"))
+    try:
+        summarized = summary.summarize_sections(
+            sections, summarize_fn,
+            on_progress=lambda i, tot: (on_progress("summarize", i, tot,
+                                                    _L("section_sum", i=i, n=tot)),
+                                        _fermati_se_richiesto()),
+            done_sections=done_secs, on_section=_persist_summary)
+    except contract.Annullato:
+        raise                        # il parziale e' gia' salvato da on_section
+    except Exception as e:
+        # Parziale già salvato: lo stato resta 'partial' e il riassunto potrà
+        # riprendere da lì (anche in locale con Ollama).
+        if contract._is_rate_limit(str(e)):
+            ripresa = getattr(e, "ripresa", None)
+            warnings.append(_L("sum_ratelimit_at", ora=ripresa) if ripresa
+                            else _L("sum_ratelimit"))
+            return "partial"
+        warnings.append(_L("sum_fail", e=e))
+        return "error"
+
+    # Pulizia diagrammi: tiene i grafici ammessi (ripuliti dagli errori tipici)
+    # e toglie ogni altro blocco mermaid sfuggito al modello.
+    for sec in summarized:
+        sec["text"] = summary._pulisci_diagrammi(sec.get("text", ""), grafici)
+
+    # Il riassunto è testo pulito: niente timestamp. Nel .txt i grafici
+    # diventano elenchi di voci e valori (vedi document.grafico_in_testo).
+    on_progress("export", None, None, _L("saving_files"))
+    _write(f"{base}.md", document.build_md(meta["title"], meta, engine_label, summarized, with_timestamps=False), created, video_dir)
+    _write(f"{base}.txt", document.build_txt(meta["title"], meta, summarized, markdown=True), created, video_dir)
+    if options.get("export"):
+        on_progress("export", None, None, _L("creating_pdf"))
+        try:
+            _ensure_dir(f"{base}.pdf")
+            if pdf_rich._save_pdf(meta, summarized, f"{base}.pdf", with_timestamps=False,
+                            engine_label=engine_label, markdown=True):
+                created.append(os.path.relpath(f"{base}.pdf", video_dir).replace("\\", "/"))
+        except Exception as e:
+            warnings.append(_L("sum_pdf_fail", e=e))
+        _salva_word(meta, summarized, f"{base}.docx", False, engine_label, created, video_dir)
+    # Riassunto completato e salvato: fase 'done' nello stato.
+    jobs.update_stage(meta, "summary", status=jobs.STAGE_DONE,
+                    done=len(summarized), total=len(summarized), sections=summarized,
+                    extra={"lang": chiave_riassunto})
+    return "done"
+
+
+def save_results(meta: dict, segments: list[dict], engine_label: str, options: dict,
+                 out_root: str, client=None, on_progress=_noop) -> dict:
+    """PHASE 2: dalla trascrizione al riassunto, che e' l'unica cosa che si salva
+    fra i risultati.
+
+    Layout: out_root/<title>/<riassunti>/ (md, txt, + pdf e docx). The chosen
+    'out_root' lets the user save anywhere (e.g. outside OneDrive).
+
+    La trascrizione non diventa un documento: viene messa da parte accanto ai
+    parziali (vedi jobs.save_transcript), e la traduzione resta nel foglietto
+    delle fasi. Occupavano spazio nella cartella dei risultati senza che
+    nessuno le aprisse, ma servono ancora tutt'e due: e' da li' che «Riprendi»
+    riparte se il riassunto si ferma a meta'.
+
+    Returns the result dict."""
+    _set_engine_lang(options)
+
+    # La cartella del video porta davanti il numero della playlist, quando il
+    # video viene da una playlist. Il NOME DEI FILE dentro resta il titolo nudo:
+    # il numero serve a ritrovare l'ordine aprendo la cartella della playlist,
+    # mentre dentro a un file aperto da solo non direbbe niente a nessuno.
+    # Va chiesta PRIMA di riscrivere lo stato, che e' dove sta scritta quella
+    # usata la volta prima.
+    video_dir = jobs.video_dir(meta, out_root)
+
+    sections = document._build_sections(meta, segments)
+    created: list[str] = []
+    warnings: list[str] = []
+    jobs.save_transcript(meta, segments, engine_label)
+
+    # Stato pipeline: la trascrizione è ora al sicuro. Registra il PIANO (quali
+    # fasi erano richieste) così un futuro «Riprendi» sa cosa completare e da
+    # dove, e in quale cartella mettere il riassunto.
+    _want_tr = bool(options.get("translate")) and not media._is_same_language(
+        meta.get("detected_language"), LINGUA_USCITA)
+    _st = jobs._empty_state(meta, options.get("backend", "groq"))
+    _st["video_dir"] = video_dir
+    _st["stages"]["transcription"]["status"] = jobs.STAGE_DONE
+    _st["stages"]["translation"]["status"] = jobs.STAGE_PENDING if _want_tr else jobs.STAGE_SKIP
+    _st["stages"]["summary"]["status"] = jobs.STAGE_PENDING
+    jobs.save_state(meta, _st)
+
+    # La trascrizione e' salvata: da qui «Annulla» lascia un lavoro a meta'
+    # ma riprendibile, con traduzione e riassunto ancora da fare.
+    _fermati_se_richiesto()
+
+    # --- Optional translation (to Italian) and per-section summary ---
+    # The transcription is already saved, so any failure here is a warning, not
+    # a fatal error. The summary works on the ITALIAN text: the translation when
+    # produced, otherwise the original (already Italian, or accepted as-is).
+    # Un solo client chat per tutto il post-processing (traduzione, riassunto):
+    # se è None siamo offline, quindi la traduzione va in locale (Ollama).
+    chat_client = _resolve_summary_client(options, client)
+
+    translated_sections = None
+    audio_lang = meta.get("detected_language")
+    if options.get("translate"):
+        if media._is_same_language(audio_lang, LINGUA_USCITA):
+            # L'audio è già nella lingua dell'interfaccia: tradurre sarebbe inutile.
+            _ln = media._lang_name(LINGUA_USCITA) or LINGUA_USCITA
+            warnings.append(_L("audio_already", lang=_ln))
+        else:
+            translated_sections = _translate_sections(
+                meta, sections, warnings, on_progress, local=chat_client is None)
+    _fermati_se_richiesto()
+    summary_status = _summarize_outputs(
+        meta, translated_sections or sections, options, video_dir,
+        created, warnings, chat_client, on_progress)
+
+    n_words = sum(len(s["text"].split()) for s in segments)
+    # Crediti Groq: secondi audio consumati da QUESTA trascrizione (≈ durata) e i
+    # limiti residui letti durante il run. Solo per i run Groq cloud.
+    credits = None
+    if options.get("backend") == "groq":
+        credits = {
+            "audio_seconds_used": meta.get("duration") or 0.0,
+            "limits": meta.get("_groq_limits") or [],
+        }
+    return {
+        "title": meta["title"],
+        "video_dir": video_dir,
+        "files": created,
+        "segments": len(segments),
+        "words": n_words,
+        "sections": len(meta["chapters"]) or 0,
+        "engine_label": engine_label,
+        "warnings": warnings,
+        "credits": credits,
+        # 'partial' quando il riassunto si è interrotto per crediti Groq esauriti:
+        # la GUI può offrire di concluderlo in locale (Ollama), dalla sezione ferma.
+        "summary_status": summary_status,
+    }
+
+
+# === POST-PROCESS ONLY (già trascritto: solo riassunto / riprendi) ============
+# Riusano una trascrizione GIÀ salvata (nessun credito di trascrizione) e sono
+# state-aware: ogni fase riparte dalla sezione in cui si era interrotta. Servono
+# alle voci del menu «video già trascritto» nella GUI e restituiscono lo stesso
+# tipo di dizionario di save_results(), così l'interfaccia può mostrarne l'esito.
+
+def _load_saved_transcript(meta: dict):
+    """Carica (disk_meta, segments, engine_label) dalla trascrizione salvata.
+
+    Usa i metadati RICOSTRUITI dal file tenuto da parte per contenuti/PDF, ma
+    tiene dai metadati originali la lingua rilevata e il numero della playlist,
+    se ci sono. La chiave di stato è basata sul titolo, quindi coincide con
+    quella scritta durante la trascrizione."""
+    existing = jobs.load_transcript(meta)
+    if not existing:
+        raise EngineError("Nessuna trascrizione salvata trovata per questo video.")
+    disk_meta, segments, engine_label = existing
+    for chiave in ("detected_language", "_num_playlist"):
+        if meta.get(chiave):
+            disk_meta[chiave] = meta[chiave]
+    return disk_meta, segments, engine_label
+
+
+def _post_result(disk_meta: dict, segments: list[dict], engine_label: str,
+                 video_dir: str, created: list[str], warnings: list[str],
+                 summary_status=None) -> dict:
+    """Il riepilogo di com'e' andata, nella forma che la pagina si aspetta.
+
+    Stessa forma di quello che produce un lavoro completo, ed e' voluto: le
+    operazioni parziali (solo riassunto, ripresa) finiscono nello stesso
+    pannello di riepilogo, e la pagina non deve sapere da quale delle strade
+    si e' arrivati li'.
+    """
+    return {
+        "title": disk_meta["title"],
+        "video_dir": video_dir,
+        "files": created,
+        "segments": len(segments),
+        "words": sum(len(s.get("text", "").split()) for s in segments),
+        "sections": len(disk_meta.get("chapters") or []) or 0,
+        "engine_label": engine_label,
+        "warnings": warnings,
+        "credits": None,
+        "summary_status": summary_status,
+    }
+
+
+def summary_only(meta: dict, options: dict, out_root: str, on_progress=_noop) -> dict:
+    """Solo riassunto di un video già trascritto.
+
+    Riassume la TRADUZIONE salvata se presente (testo italiano), altrimenti la
+    trascrizione originale. Riprende un riassunto parziale se presente. Se i
+    crediti Groq finiscono a metà, l'esito è 'partial' (la GUI offrirà di
+    concluderlo in locale)."""
+    _set_engine_lang(options)
+    disk_meta, segments, engine_label = _load_saved_transcript(meta)
+    video_dir = jobs.video_dir(disk_meta, out_root)
+    sections = (jobs.load_translation(disk_meta, LINGUA_USCITA)
+                or document._build_sections(disk_meta, segments))
+    created, warnings = [], []
+    chat_client = _resolve_summary_client(options, None)
+    status = _summarize_outputs(disk_meta, sections, options, video_dir, created,
+                                warnings, chat_client, on_progress)
+    return _post_result(disk_meta, segments, engine_label, video_dir, created,
+                        warnings, summary_status=status)
+
+
+def resume(meta: dict, options: dict, out_root: str, on_progress=_noop) -> dict:
+    """Riprendi la pipeline di un video da dove si era interrotta.
+
+    Completa, nell'ordine, le sole fasi ancora da fare (traduzione poi riassunto),
+    ciascuna ripartendo dalla sezione ferma. L'esito 'summary_status' == 'partial'
+    segnala che il riassunto è di nuovo incompleto (crediti Groq): la GUI potrà
+    offrire di finirlo in locale."""
+    _set_engine_lang(options)
+    disk_meta, segments, engine_label = _load_saved_transcript(meta)
+    video_dir = jobs.video_dir(disk_meta, out_root)
+    created, warnings = [], []
+    chat_client = _resolve_summary_client(options, None)
+    sections = document._build_sections(disk_meta, segments)
+
+    state = jobs.load_state(disk_meta)
+    translated = None
+    if jobs.stage_status(state, "translation") in (jobs.STAGE_PENDING, jobs.STAGE_PARTIAL):
+        translated = _translate_sections(disk_meta, sections, warnings, on_progress,
+                                         local=chat_client is None)
+    summary_status = None
+    if jobs.stage_status(jobs.load_state(disk_meta), "summary") in (jobs.STAGE_PENDING, jobs.STAGE_PARTIAL):
+        src = (translated
+               or jobs.load_translation(disk_meta, LINGUA_USCITA)
+               or sections)
+        _fermati_se_richiesto()
+        summary_status = _summarize_outputs(disk_meta, src, options, video_dir,
+                                            created, warnings, chat_client,
+                                            on_progress)
+    return _post_result(disk_meta, segments, engine_label, video_dir, created,
+                        warnings, summary_status=summary_status)
+
+
+def has_transcript(meta: dict) -> bool:
+    """Di questo video c'e' gia' il testo trascritto, da cui ripartire?
+
+    Vale anche quando il riassunto non e' mai stato scritto: e' il caso di un
+    lavoro fermato subito dopo la trascrizione, che non lascia niente nella
+    cartella dei risultati ma non va rifatto da capo.
+    """
+    return jobs.transcript_exists(meta)
+
+
+def can_resume(meta: dict, out_root: str) -> bool:
+    """C'e' qualcosa da riprendere, per questo video?
+
+    Serve a decidere se mostrare o no la voce «Riprendi» quando si reincolla
+    un link gia' trascritto. Mostrarla sempre porterebbe a premerla e non
+    ottenere niente; non mostrarla mai farebbe rifare da capo lavori lasciati
+    a un passo dalla fine.
+    """
+    disk_meta = dict(meta)
+    return jobs.has_resumable_state(disk_meta)
+
+
+def resume_hint(meta: dict, out_root: str, lang: str = "it") -> str:
+    """La frase che dice da dove ripartirebbe, tipo «riassunto, sezione 8/20».
+
+    Va accanto alla voce «Riprendi» perche' quella parola da sola non dice
+    abbastanza: riprendere da una traduzione quasi finita e riprendere da una
+    trascrizione appena cominciata sono due decisioni diverse, e senza questo
+    testo si somigliano.
+
+    'lang' resta per chi la chiama, ma non serve piu': il testo e' solo in
+    italiano, e resume_info_text non chiede la lingua.
+    """
+    return jobs.resume_info_text(dict(meta))
+

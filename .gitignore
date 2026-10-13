@@ -1,0 +1,33 @@
+# --- Segreti: NON committare mai la API key ---
+.env
+*.key
+
+# --- Output generato ---
+results/
+
+# --- Preferenze dell'interfaccia (lingua, motore, modelli scelti) ---
+# Sono abitudini di chi usa il programma, non impostazioni del progetto.
+settings.json
+
+# --- Cache librerie JS per il PDF "ricco" (MathJax/Mermaid, scaricate al volo) ---
+.pdfassets/
+
+# --- Costruzione: PyInstaller (l'.exe) e Inno Setup (l'installatore) ---
+build/
+dist/
+installer/output/
+
+# --- Python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# --- Sistema / IDE ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Storico dei lavori (dati di chi usa il programma) ---
+storico.json
