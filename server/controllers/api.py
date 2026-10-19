@@ -1306,7 +1306,7 @@ class Api:
         if presenti is None:
             return [i18n.t('warn.ollama.off', host=settings.OLLAMA_HOST)]
         modelli = [self.scelte['ollama']]
-        a_parte = os.environ.get('ECHOSCRIPT_OLLAMA_TRANSLATE_MODEL', '').strip()
+        a_parte = os.environ.get('MUSAUDITOR_OLLAMA_TRANSLATE_MODEL', '').strip()
         if serve_traduzione and a_parte and a_parte not in modelli:
             modelli.append(a_parte)
         return [i18n.t('warn.ollama.model', m=m) for m in modelli
@@ -1622,7 +1622,7 @@ class Api:
                          else storico.documento_da_leggere(v.get('cartella', '')))
             if not documento:
                 return {'ok': False, 'errore': i18n.t('hist.nodoc')}
-            return self._apri_lettore(documento, v.get('titolo') or 'EchoScript')
+            return self._apri_lettore(documento, v.get('titolo') or 'Mus auditor')
         if cosa == 'link':
             return self.apri_url(v.get('url', ''))
         return self._apri_percorso(v.get('cartella', ''))
@@ -2083,7 +2083,7 @@ class Api:
         pagina = pdf_rich.pagina_html(md, schermo=True)
         if pagina is None:
             return Api._apri_percorso(percorso)
-        cartella = os.path.join(tempfile.gettempdir(), 'echoscript_lettore')
+        cartella = os.path.join(tempfile.gettempdir(), 'musauditor_lettore')
         os.makedirs(cartella, exist_ok=True)
         nome = hashlib.sha1(percorso.encode('utf-8')).hexdigest()[:12] + '.html'
         destinazione = os.path.join(cartella, nome)

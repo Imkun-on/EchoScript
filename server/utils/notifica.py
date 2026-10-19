@@ -21,7 +21,7 @@ Cosa si fa
 Da chi sembra arrivare la notifica
     Windows attribuisce le notifiche a un «AppUserModelID» registrato. Il
     programma installato ne ha uno suo (lo scrive l'installatore sul
-    collegamento del menu Start), e la notifica arriva col nome EchoScript.
+    collegamento del menu Start), e la notifica arriva col nome Mus auditor.
     Lanciando i sorgenti quel collegamento non c'e': la notifica si fa
     prestare l'identita' di PowerShell, che su ogni Windows e' registrata.
 """
@@ -35,10 +35,10 @@ import threading
 
 # L'identita' con cui il programma installato si presenta a Windows. Deve
 # essere la stessa scritta dall'installatore sul collegamento del menu Start
-# (installer/EchoScript.iss) e quella che il processo dichiara all'avvio
-# (EchoScript.py): se le tre non coincidono, Windows non sa di chi e' la
+# (installer/MusAuditor.iss) e quella che il processo dichiara all'avvio
+# (MusAuditor.py): se le tre non coincidono, Windows non sa di chi e' la
 # notifica e non la mostra.
-APP_ID = "EchoScript.App"
+APP_ID = "MusAuditor.App"
 _APP_ID_POWERSHELL = r"{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe"
 
 _SCRIPT = r"""
@@ -54,7 +54,7 @@ $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
 
 
 def dichiara_identita() -> None:
-    """Dice a Windows che questo processo e' EchoScript, e non python.exe.
+    """Dice a Windows che questo processo e' Mus auditor, e non python.exe.
 
     Va chiamata all'avvio, prima di aprire la finestra. Serve alla notifica,
     e anche a raggruppare la finestra sotto l'icona giusta nella barra.
@@ -71,7 +71,7 @@ def dichiara_identita() -> None:
 def _finestra_programma():
     """L'handle della finestra principale, cercata per titolo. 0 se non c'e'."""
     import ctypes
-    return ctypes.windll.user32.FindWindowW(None, "EchoScript")
+    return ctypes.windll.user32.FindWindowW(None, "Mus auditor")
 
 
 def _in_primo_piano(hwnd) -> bool:

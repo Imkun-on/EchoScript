@@ -1,4 +1,4 @@
-# Dipendenze Python di EchoScript
+# Dipendenze Python di Mus auditor
 # Installa con:  pip install -r requirements.txt
 yt-dlp>=2024.1.0
 groq>=0.11.0
@@ -16,9 +16,9 @@ fpdf2>=2.7
 # salvata in italiano via Google Translate. Serve solo per l'opzione "traduci".
 deep-translator>=1.11
 
-# INTERFACCIA GRAFICA (EchoScript.py): una pagina web (client/) mostrata dentro
+# INTERFACCIA GRAFICA (MusAuditor.py): una pagina web (client/) mostrata dentro
 # il WebView che Windows ha gia' installato. Niente motore grafico da scaricare.
-# Avvio: python EchoScript.py
+# Avvio: python MusAuditor.py
 pywebview>=5.0
 # Su Windows serve anche il ponte .NET verso WebView2 (su macOS e Linux
 # pywebview usa WebKit di sistema e questa riga viene semplicemente ignorata).
@@ -30,7 +30,7 @@ pythonnet>=3.0 ; sys_platform == "win32"
 # 11 e' sempre installato; va bene anche Chrome). Le due librerie JS vengono
 # scaricate UNA volta in cache locale (.pdfassets/), poi funziona anche offline.
 # Se manca il browser o la rete la prima volta, ripiega sul PDF base (fpdf2).
-# Disattivabile con ECHOSCRIPT_RICH_PDF=0; browser specifico con ECHOSCRIPT_BROWSER.
+# Disattivabile con MUSAUDITOR_RICH_PDF=0; browser specifico con MUSAUDITOR_BROWSER.
 
 # Disegno delle MOLECOLE nei riassunti di chimica (modello 3D a sfere e
 # bastoncini, formula a scheletro dei composti organici). Senza, i blocchi

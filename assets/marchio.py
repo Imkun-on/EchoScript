@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Il marchio di EchoScript, montato una volta sola e messo nei posti in cui serve.
+"""Il marchio di Mus auditor, montato una volta sola e messo nei posti in cui serve.
 
     python assets/marchio.py
 
@@ -19,8 +19,8 @@ Cosa gli si fa
     stacca tanto da un desktop chiaro quanto da uno scuro.
 
 Dove finisce
-    - ``assets/EchoScript.ico``: l'eseguibile, la finestra e l'installatore.
-    - ``assets/EchoScript.png``: l'icona della pagina e il README.
+    - ``assets/MusAuditor.ico``: l'eseguibile, la finestra e l'installatore.
+    - ``assets/MusAuditor.png``: l'icona della pagina e il README.
     - ``client/marchio.png``: la testata e il velo di avvio. Qui non c'e' il
       quadrato: solo il topo coi suoi libri, scontornato, sul nero della
       finestra.
@@ -47,8 +47,8 @@ from PIL import Image, ImageDraw
 QUI = os.path.dirname(os.path.abspath(__file__))
 RADICE = os.path.dirname(QUI)
 ORIGINALE = os.path.join(QUI, 'icona-originale.png')
-ICO = os.path.join(QUI, 'EchoScript.ico')
-PNG = os.path.join(QUI, 'EchoScript.png')
+ICO = os.path.join(QUI, 'MusAuditor.ico')
+PNG = os.path.join(QUI, 'MusAuditor.png')
 PAGINA = os.path.join(RADICE, 'client', 'marchio.png')
 
 # Tutto e' pensato su 1024 punti di lato; le altre misure si ricavano

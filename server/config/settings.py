@@ -57,7 +57,7 @@ def _env_candidates() -> list[str]:
     ce ne sono due, e non sono equivalenti.
 
     Il primo è la cartella dell'.exe, cioè, dopo l'installazione, quella che
-    l'installatore apre da «Programs/EchoScript» dentro %LOCALAPPDATA%. È
+    l'installatore apre da «Programs/MusAuditor» dentro %LOCALAPPDATA%. È
     l'unico che una persona sappia trovare («apri la cartella del programma»),
     ed è l'unico che sopravvive a un aggiornamento: l'installazione rifà
     `_internal` da zero ogni volta.
@@ -121,7 +121,7 @@ def _env_str(key: str, default: str) -> str:
     """Una manopola di testo: il valore scritto fuori, o quello di partenza.
 
     Assente e vuoto contano come la stessa cosa. E' voluto: chi scrive
-    `ECHOSCRIPT_QUALCOSA=` nel file .env quasi sempre sta cancellando la
+    `MUSAUDITOR_QUALCOSA=` nel file .env quasi sempre sta cancellando la
     propria scelta, non chiedendo una stringa vuota.
     """
     v = os.environ.get(key, "").strip()
@@ -176,9 +176,24 @@ def _env_bool(key: str, default: bool) -> bool:
 # entry / environment variable, so users never need to edit this file.
 _load_env_file()
 
+
+def _accetta_nomi_vecchi() -> None:
+    """Fino alla 3.2 il programma si chiamava EchoScript, e le manopole
+    ECHOSCRIPT_QUALCOSA. Un .env scritto allora deve continuare a valere:
+    ogni nome vecchio diventa quello nuovo, a meno che il nuovo non ci sia
+    gia', e allora vince il nuovo. Lo si fa qui, una volta sola, cosi' anche
+    chi legge os.environ direttamente vede soltanto i nomi nuovi."""
+    for chiave, valore in list(os.environ.items()):
+        if chiave.upper().startswith("ECHOSCRIPT_"):
+            nuova = "MUSAUDITOR_" + chiave[len("ECHOSCRIPT_"):].upper()
+            os.environ.setdefault(nuova, valore)
+
+
+_accetta_nomi_vecchi()
+
 # Whisper model on Groq: "turbo" is very fast and cheap. Alternatives:
 # "whisper-large-v3" (more accurate/slower), "distil-whisper-large-v3-en" (EN only).
-GROQ_MODEL = _env_str("ECHOSCRIPT_GROQ_MODEL", "whisper-large-v3-turbo")
+GROQ_MODEL = _env_str("MUSAUDITOR_GROQ_MODEL", "whisper-large-v3-turbo")
 
 # Audio/video extensions accepted as LOCAL sources (phone recordings, PC files,
 # video files from which ffmpeg extracts the audio track). ffmpeg reads all of
@@ -189,12 +204,12 @@ AUDIO_EXTENSIONS = {
     ".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v",          # video (audio extracted)
 }
 
-CHUNK_SECONDS = _env_int("ECHOSCRIPT_CHUNK_SECONDS", 600)      # seconds per audio chunk (10 min)
-AUDIO_SAMPLE_RATE = _env_int("ECHOSCRIPT_SAMPLE_RATE", 16000)  # 16 kHz: recommended for Whisper
-AUDIO_BITRATE = _env_str("ECHOSCRIPT_BITRATE", "64k")          # chunk bitrate (low is fine for speech)
-MAX_RETRIES = _env_int("ECHOSCRIPT_MAX_RETRIES", 3)            # attempts per chunk before giving up
+CHUNK_SECONDS = _env_int("MUSAUDITOR_CHUNK_SECONDS", 600)      # seconds per audio chunk (10 min)
+AUDIO_SAMPLE_RATE = _env_int("MUSAUDITOR_SAMPLE_RATE", 16000)  # 16 kHz: recommended for Whisper
+AUDIO_BITRATE = _env_str("MUSAUDITOR_BITRATE", "64k")          # chunk bitrate (low is fine for speech)
+MAX_RETRIES = _env_int("MUSAUDITOR_MAX_RETRIES", 3)            # attempts per chunk before giving up
 # Audio language: None = auto-detect (Whisper). Force with e.g. "it"/"en" via the
-# ECHOSCRIPT_AUDIO_LANG env var or, per-run, the GUI/CLI selector.
+# MUSAUDITOR_AUDIO_LANG env var or, per-run, the GUI/CLI selector.
 # Il valore che vuol dire "usa quella scritta qui sopra".
 #
 # Serve perche' None e' gia' preso: None significa "riconosci da sola che
@@ -202,16 +217,16 @@ MAX_RETRIES = _env_int("ECHOSCRIPT_MAX_RETRIES", 3)            # attempts per ch
 # "lasciami decidere" da "non lo so", che sono due richieste diverse.
 _USE_CONFIG = object()
 
-LANGUAGE = _env_opt("ECHOSCRIPT_AUDIO_LANG")
+LANGUAGE = _env_opt("MUSAUDITOR_AUDIO_LANG")
 # Word-level timestamps: ask Groq/faster-whisper for per-WORD timings (enables
-# precise subtitles later). On by default; disable with ECHOSCRIPT_WORD_TIMESTAMPS=0.
-WORD_TIMESTAMPS = _env_bool("ECHOSCRIPT_WORD_TIMESTAMPS", True)
+# precise subtitles later). On by default; disable with MUSAUDITOR_WORD_TIMESTAMPS=0.
+WORD_TIMESTAMPS = _env_bool("MUSAUDITOR_WORD_TIMESTAMPS", True)
 
 # --- LOCAL backend (faster-whisper) ---
 # Device: "auto" picks CUDA (GPU) when available, else CPU. compute_type "" means
 # "auto" (float16 on GPU, int8 on CPU); both can be forced via .env.
-LOCAL_DEVICE = _env_str("ECHOSCRIPT_DEVICE", "auto")
-LOCAL_COMPUTE_TYPE = _env_str("ECHOSCRIPT_COMPUTE_TYPE", "")
+LOCAL_DEVICE = _env_str("MUSAUDITOR_DEVICE", "auto")
+LOCAL_COMPUTE_TYPE = _env_str("MUSAUDITOR_COMPUTE_TYPE", "")
 # Local models selectable in the panel (number -> (model_name, description)).
 # Bigger = more accurate but slower on CPU. The time estimates are for a video
 # of ~2 hours without a GPU and are indicative (they depend on your processor).
@@ -233,7 +248,7 @@ LOCAL_MODELS = {
 #     modello scaricato (es. `ollama pull llama3.1:8b`).
 # Default: gpt-oss-120b (Production; sostituto del deprecato llama-3.3-70b-versatile,
 # spento da Groq il 16 ago 2026 per i tier free/developer). Più economico e stabile.
-GROQ_SUMMARY_MODEL = _env_str("ECHOSCRIPT_GROQ_SUMMARY_MODEL", "openai/gpt-oss-120b")
+GROQ_SUMMARY_MODEL = _env_str("MUSAUDITOR_GROQ_SUMMARY_MODEL", "openai/gpt-oss-120b")
 # Modelli di CHAT Groq selezionabili (riassunto + traduzione lato cloud). Sono
 # l'equivalente in nuvola di OLLAMA_TEXT_MODELS: catalogo corto e curato, perché
 # è la scelta di chi ha detto "fai tutto sui server" e vuole solo decidere quanto
@@ -242,35 +257,35 @@ GROQ_TEXT_MODELS = {
     "1": ("openai/gpt-oss-120b", "qualità piena (default)"),
     "2": ("openai/gpt-oss-20b",  "più economico e rapido"),
 }
-OLLAMA_MODEL = _env_str("ECHOSCRIPT_OLLAMA_MODEL", "qwen2.5:7b")
+OLLAMA_MODEL = _env_str("MUSAUDITOR_OLLAMA_MODEL", "qwen2.5:7b")
 # Modello Ollama per la TRADUZIONE locale (vedi più sotto). Di default riusa lo
 # stesso del riassunto, così basta scaricarne uno solo per restare 100% offline.
-OLLAMA_TRANSLATE_MODEL = _env_str("ECHOSCRIPT_OLLAMA_TRANSLATE_MODEL", OLLAMA_MODEL)
-OLLAMA_HOST = _env_str("ECHOSCRIPT_OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_TRANSLATE_MODEL = _env_str("MUSAUDITOR_OLLAMA_TRANSLATE_MODEL", OLLAMA_MODEL)
+OLLAMA_HOST = _env_str("MUSAUDITOR_OLLAMA_HOST", "http://localhost:11434")
 # Finestra di contesto per Ollama. ATTENZIONE: di default Ollama usa solo 2048
 # token e TRONCA in silenzio gli input più lunghi (rovinando i riassunti dei
 # video lunghi). Lo alziamo per far entrare un blocco intero (~SUMMARY_MAX_CHARS)
 # + prompt + risposta. 8192 è un buon compromisso qualità/RAM su 7-8B.
-OLLAMA_NUM_CTX = _env_int("ECHOSCRIPT_OLLAMA_NUM_CTX", 8192)
+OLLAMA_NUM_CTX = _env_int("MUSAUDITOR_OLLAMA_NUM_CTX", 8192)
 # Oltre questa lunghezza (caratteri) una sezione viene riassunta a blocchi e poi
 # i parziali vengono uniti (map-reduce), per non sforare il contesto del modello.
 # E' la misura di ripiego: quella con cui si ritenta quando Groq dice che una
 # richiesta e' troppo grande.
-SUMMARY_MAX_CHARS = _env_int("ECHOSCRIPT_SUMMARY_MAX_CHARS", 12000)
+SUMMARY_MAX_CHARS = _env_int("MUSAUDITOR_SUMMARY_MAX_CHARS", 12000)
 # La misura dei blocchi, motore per motore. Ogni blocco si porta dietro tutte le
 # istruzioni del riassunto (con la matematica e i grafici circa 4.300 token), e
 # ogni blocco in piu' vuol dire anche un giro in piu' per unirli: meno blocchi,
 # meno token. Il modello di Groq ha una finestra grande, e un video di mezz'ora
 # ci sta in una richiesta sola invece di tre; se Groq la rifiuta perche' troppo
 # grande per il limite al minuto dell'account, si ritenta con SUMMARY_MAX_CHARS.
-GROQ_SUMMARY_MAX_CHARS = _env_int("ECHOSCRIPT_GROQ_SUMMARY_MAX_CHARS", 30000)
+GROQ_SUMMARY_MAX_CHARS = _env_int("MUSAUDITOR_GROQ_SUMMARY_MAX_CHARS", 30000)
 # Ollama invece ha OLLAMA_NUM_CTX token in tutto: istruzioni, blocco e risposta
 # devono starci insieme, o taglia l'inizio in silenzio (cioe' le istruzioni).
 # 6000 caratteri sono circa 1.700 token.
-OLLAMA_SUMMARY_MAX_CHARS = _env_int("ECHOSCRIPT_OLLAMA_SUMMARY_MAX_CHARS", 6000)
+OLLAMA_SUMMARY_MAX_CHARS = _env_int("MUSAUDITOR_OLLAMA_SUMMARY_MAX_CHARS", 6000)
 # Quanto si aspetta la risposta di Ollama per UN blocco, in secondi. Su un
 # portatile senza scheda video un modello da 7B puo' metterci molti minuti.
-OLLAMA_TIMEOUT = _env_int("ECHOSCRIPT_OLLAMA_TIMEOUT", 1800)
+OLLAMA_TIMEOUT = _env_int("MUSAUDITOR_OLLAMA_TIMEOUT", 1800)
 
 # --- Modelli Ollama proposti nei pannelli di scelta (CLI e GUI) ---
 # Numero -> (nome modello, RAM indicativa richiesta, descrizione). Il pannello
@@ -297,20 +312,20 @@ OLLAMA_TEXT_MODELS = {
 # browser Chromium GIÀ presente sul sistema (Edge su Windows): nessun LaTeX da
 # installare. Se manca il browser o la rete (serve solo la prima volta, per
 # scaricare le due librerie JS in cache locale), si ripiega in automatico sul PDF
-# fpdf2. Disattivabile con ECHOSCRIPT_RICH_PDF=0.
-RICH_PDF = _env_bool("ECHOSCRIPT_RICH_PDF", True)
+# fpdf2. Disattivabile con MUSAUDITOR_RICH_PDF=0.
+RICH_PDF = _env_bool("MUSAUDITOR_RICH_PDF", True)
 # Percorso a un browser Chromium specifico (altrimenti rilevato in automatico).
-BROWSER_PATH = _env_opt("ECHOSCRIPT_BROWSER")
+BROWSER_PATH = _env_opt("MUSAUDITOR_BROWSER")
 
 # Grafici nel riassunto: quando il parlato contiene numeri confrontabili (una
 # statistica, una distribuzione, una serie nel tempo, una funzione calcolata in
 # qualche punto) il modello puo' aggiungere un grafico Mermaid (a barre, a linee
 # o a torta), che il PDF disegna davvero. Mai con dati inventati: solo quelli
 # detti o calcolabili esattamente dal testo. E' il valore di partenza; la
-# finestra lo cambia lavoro per lavoro. Disattiva con ECHOSCRIPT_SUMMARY_CHARTS=0.
-SUMMARY_CHARTS = _env_bool("ECHOSCRIPT_SUMMARY_CHARTS", True)
+# finestra lo cambia lavoro per lavoro. Disattiva con MUSAUDITOR_SUMMARY_CHARTS=0.
+SUMMARY_CHARTS = _env_bool("MUSAUDITOR_SUMMARY_CHARTS", True)
 # Commenti dentro i blocchi di codice del riassunto: brevi, nella sintassi del
 # linguaggio, sulle righe che non si spiegano da sole. Il codice resta quello
 # detto: si aggiungono commenti, non istruzioni. Disattiva con
-# ECHOSCRIPT_SUMMARY_CODE_COMMENTS=0.
-SUMMARY_CODE_COMMENTS = _env_bool("ECHOSCRIPT_SUMMARY_CODE_COMMENTS", True)
+# MUSAUDITOR_SUMMARY_CODE_COMMENTS=0.
+SUMMARY_CODE_COMMENTS = _env_bool("MUSAUDITOR_SUMMARY_CODE_COMMENTS", True)

@@ -11,7 +11,7 @@ Che differenza c'e' con i parziali
 
 Perche' e' scritto su disco e non tenuto a mente
     Perche' la domanda arriva quasi sempre dopo aver chiuso e riaperto il
-    programma. Uno riapre EchoScript il giorno dopo, incolla lo stesso link, e
+    programma. Uno riapre Mus auditor il giorno dopo, incolla lo stesso link, e
     si aspetta che il programma gli dica «questo ce l'hai gia'» invece di
     rifare un'ora di lavoro.
 

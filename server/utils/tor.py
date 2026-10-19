@@ -20,7 +20,7 @@ Cosa non passa da Tor
 
 Da dove viene tor.exe
     Dal «Tor Expert Bundle» ufficiale, scaricato da torproject.org la prima
-    volta (circa 22 MB), in ``%LOCALAPPDATA%\\EchoScript\\tor``. La versione
+    volta (circa 22 MB), in ``%LOCALAPPDATA%\\MusAuditor\\tor``. La versione
     la dice l'indice che usa anche Tor Browser per aggiornarsi. Sta li' e non
     accanto al programma perche' la cartella dei dati di Tor cambia di
     continuo, e dentro una cartella sincronizzata (OneDrive) darebbe guai.
@@ -46,7 +46,26 @@ import urllib.request
 from server.config import paths
 
 CARTELLA = os.path.join(os.environ.get('LOCALAPPDATA') or paths.dati(),
-                        'EchoScript', 'tor')
+                        'MusAuditor', 'tor')
+
+
+def _sposta_cartella_vecchia() -> None:
+    """Fino alla 3.2 Tor stava in ``%LOCALAPPDATA%\\EchoScript\\tor``. Lo si
+    sposta, invece di riscaricarlo e lasciare li' quello vecchio. Se non si
+    riesce (Tor ancora aperto da un'altra istanza) pazienza: si riscarica."""
+    vecchia = os.path.join(os.path.dirname(os.path.dirname(CARTELLA)),
+                           'EchoScript', 'tor')
+    if not os.path.isdir(vecchia) or os.path.exists(CARTELLA):
+        return
+    try:
+        os.makedirs(os.path.dirname(CARTELLA), exist_ok=True)
+        os.replace(vecchia, CARTELLA)
+        os.rmdir(os.path.dirname(vecchia))
+    except OSError:
+        pass
+
+
+_sposta_cartella_vecchia()
 ESEGUIBILE = os.path.join(CARTELLA, 'tor', 'tor.exe')
 DATI = os.path.join(CARTELLA, 'dati')
 DIARIO = os.path.join(CARTELLA, 'tor.log')

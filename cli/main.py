@@ -1,5 +1,5 @@
 # =============================================================================
-#  EchoScript: fast transcription of YouTube videos with Groq (Whisper) or local
+#  Mus auditor: fast transcription of YouTube videos with Groq (Whisper) or local
 # =============================================================================
 #  HOW IT WORKS, IN BRIEF (for first-time readers):
 #
@@ -1193,7 +1193,7 @@ def _run_pipeline(meta: dict, source: tuple[str, str], backend: str,
 
     # ignore_cleanup_errors: evita il PermissionError (WinError 32) su Windows se
     # l'audio temporaneo resta bloccato un istante da ffmpeg/whisper alla chiusura.
-    with tempfile.TemporaryDirectory(prefix="echoscript_", ignore_cleanup_errors=True) as workdir:
+    with tempfile.TemporaryDirectory(prefix="musauditor_", ignore_cleanup_errors=True) as workdir:
         # --- Acquire the audio ---
         if kind == "youtube":
             console.print()
@@ -1584,7 +1584,7 @@ def run() -> None:
             return
         settings.OLLAMA_MODEL = om
         # La traduzione riusa il modello del riassunto, salvo .env esplicito.
-        if not _env_str("ECHOSCRIPT_OLLAMA_TRANSLATE_MODEL", ""):
+        if not _env_str("MUSAUDITOR_OLLAMA_TRANSLATE_MODEL", ""):
             settings.OLLAMA_TRANSLATE_MODEL = om
     else:  # groq: scelta del modello di trascrizione cloud (costo associato)
         gm = choose_groq_model()

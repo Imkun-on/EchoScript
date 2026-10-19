@@ -1,8 +1,12 @@
 <p align="center">
-  <img src="assets/EchoScript.png" alt="EchoScript: un topo da biblioteca col tocco da laureato, seduto su una pila di libri" width="170">
+  <img src="assets/MusAuditor.png" alt="Mus auditor: un topo da biblioteca col tocco da laureato, seduto su una pila di libri" width="170">
 </p>
 
-<h1 align="center">EchoScript</h1>
+<h1 align="center"><i>Mus auditor</i></h1>
+
+<p align="center">
+  <sub>il topo che ascolta · <i>auditor</i>, in latino, è chi ascolta, ed era anche lo studente che segue le lezioni</sub>
+</p>
 
 <p align="center">
   <b>Trascrivi. Traduci. Riassumi. Capisci di più.</b><br>
@@ -23,7 +27,7 @@
 <p align="center">
   <a href="#uno-sguardo-allapp">Uno sguardo</a> ·
   <a href="#a-cosa-serve">A cosa serve</a> ·
-  <a href="#perché-echoscript">Perché</a> ·
+  <a href="#perché-mus-auditor">Perché</a> ·
   <a href="#download">Download</a> ·
   <a href="#locale-o-cloud">Locale o Cloud</a> ·
   <a href="#riassunti-per-materia">Materie</a> ·
@@ -34,7 +38,7 @@
 <br>
 
 > [!NOTE]
-> L'installatore è per **Windows 10 e 11 a 64 bit**. Su macOS e Linux EchoScript si usa
+> L'installatore è per **Windows 10 e 11 a 64 bit**. Su macOS e Linux Mus auditor si usa
 > per ora dal codice, vedi [Avvio rapido](#avvio-rapido).
 
 ## Uno sguardo all'app
@@ -66,7 +70,7 @@
 
 ## A cosa serve
 
-Incolli un link di YouTube o scegli un file dal disco. EchoScript scarica solo l'audio,
+Incolli un link di YouTube o scegli un file dal disco. Mus auditor scarica solo l'audio,
 lo trascrive, se serve lo traduce in italiano, e ne scrive un riassunto. Il riassunto è
 l'unica cosa che finisce fra i risultati: trascrizione e traduzione sono passaggi per
 arrivarci.
@@ -88,11 +92,11 @@ finestra.
 Oltre alla finestra c'è una **riga di comando** (`python cli/main.py`) che fa le stesse
 cose con dei menu nel terminale.
 
-## Perché EchoScript
+## Perché Mus auditor
 
 - **Niente abbonamenti, niente minutaggio.** In locale non c'è nessun limite se non il tempo. In cloud bastano i crediti gratuiti di Groq.
 - **Due stanze, due lavori insieme.** «Locale» e «Cloud» sono due postazioni indipendenti: mentre Groq trascrive sui suoi server, il tuo computer può trascriverne un altro. Un puntino sull'icona dice cosa succede nella stanza che non stai guardando.
-- **Non mostra il tuo indirizzo a YouTube.** Ogni richiesta passa da Tor, e la spia nella barra di stato dice se l'IP è nascosto. Se Tor non parte, EchoScript non scarica: meglio un lavoro fermo che uno a viso scoperto.
+- **Non mostra il tuo indirizzo a YouTube.** Ogni richiesta passa da Tor, e la spia nella barra di stato dice se l'IP è nascosto. Se Tor non parte, Mus auditor non scarica: meglio un lavoro fermo che uno a viso scoperto.
 - **Niente di inventato.** Un grafico si fa solo con i numeri detti nel video o calcolabili dalle sue formule. Una molecola si disegna solo se la struttura torna con la formula, una reazione solo se è bilanciata. Quello che non supera il controllo si scarta.
 - **Un lavoro si segue, e si riprende.** Ogni fase ha la sua percentuale e una stima del tempo che manca. Se qualcosa si interrompe (rete, crediti finiti, finestra chiusa) reincollando lo stesso link compare **«Riprendi»**, che riparte dal punto esatto.
 - **Dice le cose come stanno.** Se i crediti Groq non bastano lo dice prima di partire. Se finiscono a metà dice a che ora tornano, e propone di finire sul computer. Un errore apre una finestra con la causa in italiano e il testo tecnico sotto.
@@ -101,10 +105,10 @@ cose con dei menu nel terminale.
 
 | Sistema | File | Note |
 |---|---|---|
-| **Windows** 10 e 11 | [`EchoScript-Setup.exe`](https://github.com/Imkun-on/EchoScript/releases/latest/download/EchoScript-Setup.exe) | L'installatore. Non servono Python, ffmpeg né permessi di amministratore. |
+| **Windows** 10 e 11 | [`MusAuditor-Setup.exe`](https://github.com/Imkun-on/MusAuditor/releases/latest/download/MusAuditor-Setup.exe) | L'installatore. Non servono Python, ffmpeg né permessi di amministratore. |
 | **macOS** e **Linux** | dal codice | Vedi [Avvio rapido](#avvio-rapido). |
 
-Si installa per il tuo account, dentro `%LOCALAPPDATA%\Programs\EchoScript`. Il nome del
+Si installa per il tuo account, dentro `%LOCALAPPDATA%\Programs\MusAuditor`. Il nome del
 file non contiene il numero di versione, ed è voluto: così il link qui sopra scarica
 sempre l'ultima.
 
@@ -112,19 +116,20 @@ sempre l'ultima.
 - **WebView2**, con cui Windows disegna la finestra, c'è già su Windows 11 e su Windows 10 aggiornato. Se manca, l'installazione lo scarica da Microsoft.
 - **I riassunti** finiscono in `results/`, dentro la cartella del programma. La scorciatoia **«Trascrizioni salvate»** nel menu Start ci porta direttamente.
 - **Aggiornare**: lancia il nuovo installatore. Riassunti, preferenze e chiave restano dove sono.
-- **Disinstallare**: Impostazioni → App → App installate → EchoScript. Alla fine chiede se cancellare anche i riassunti.
+- **Se avevi EchoScript**: è lo stesso programma, col nome nuovo. L'installatore lo riconosce e lo aggiorna nella sua cartella di sempre, e le variabili `ECHOSCRIPT_*` del tuo `.env` continuano a valere.
+- **Disinstallare**: Impostazioni → App → App installate → Mus auditor. Alla fine chiede se cancellare anche i riassunti.
 
 ### Se Windows chiede se il file è sicuro
 
-EchoScript non è firmato: una firma costa qualche centinaio di euro l'anno. Per questo
+Mus auditor non è firmato: una firma costa qualche centinaio di euro l'anno. Per questo
 Windows può mostrare «Windows ha protetto il PC»: scegli **Ulteriori informazioni** →
 **Esegui comunque**. Succede una volta sola.
 
 Se preferisci controllare prima, confronta l'impronta del file con quella nelle note
-della [release](https://github.com/Imkun-on/EchoScript/releases):
+della [release](https://github.com/Imkun-on/MusAuditor/releases):
 
 ```powershell
-Get-FileHash .\EchoScript-Setup.exe -Algorithm SHA256
+Get-FileHash .\MusAuditor-Setup.exe -Algorithm SHA256
 ```
 
 ## Locale o Cloud
@@ -146,7 +151,7 @@ Il motore vale per tutto il lavoro: trascrizione, riassunto e traduzione.
 
 > 🔒 **Offline totale.** In «Locale» l'intera catena gira sul tuo computer. Servono
 > [Ollama](https://ollama.com) installato e avviato e un modello scaricato, per esempio
-> `ollama pull qwen2.5:7b`. Prima di partire EchoScript controlla che ci siano, e se manca
+> `ollama pull qwen2.5:7b`. Prima di partire Mus auditor controlla che ci siano, e se manca
 > qualcosa dice il comando da lanciare.
 
 ### La chiave Groq
@@ -197,7 +202,7 @@ modello del riassunto.
 
 ## Riassunti per materia
 
-Il riassunto non è uguale per tutti i video. Per ogni sezione EchoScript guarda di che
+Il riassunto non è uguale per tutti i video. Per ogni sezione Mus auditor guarda di che
 cosa si parla e aggiunge le regole e i disegni di quella materia. Non c'è niente da
 scegliere, e una lezione può essere di più materie insieme.
 
@@ -229,7 +234,7 @@ results/
         └── <Nome>_riassunto.docx    lo stesso testo in Word, da modificare
 ```
 
-La trascrizione e la traduzione non diventano documenti: EchoScript le tiene da parte in
+La trascrizione e la traduzione non diventano documenti: Mus auditor le tiene da parte in
 `results/.checkpoints/` (pochi KB per video), perché è da lì che **«Riprendi»** riparte, ed
 è da lì che **«Solo riassunto»** lo rifà con un'altra misura senza ritrascrivere e senza
 rispendere crediti.
@@ -245,11 +250,11 @@ Serve [Python 3.10](https://www.python.org/downloads/) o successivo, [Git](https
 e **ffmpeg** nel sistema.
 
 ```sh
-git clone https://github.com/Imkun-on/EchoScript
-cd EchoScript
+git clone https://github.com/Imkun-on/MusAuditor
+cd MusAuditor
 pip install -r requirements.txt    # le dipendenze, una volta sola
 winget install Gyan.FFmpeg         # su macOS: brew install ffmpeg · su Linux: sudo apt install ffmpeg
-python EchoScript.py               # apre la finestra
+python MusAuditor.py               # apre la finestra
 python cli/main.py                 # oppure il terminale
 ```
 
@@ -271,7 +276,7 @@ Con `-SoloInstallatore` salta PyInstaller e riusa `dist/`. Per pubblicare una ve
 basta un tag (`git tag v1.0.0 && git push origin v1.0.0`): il workflow
 `.github/workflows/pacchetti.yml` costruisce il pacchetto e lo allega alla release.
 
-> ⚠️ **L'eseguibile scrive accanto a sé.** Se apri `dist/EchoScript.exe` per una prova, in
+> ⚠️ **L'eseguibile scrive accanto a sé.** Se apri `dist/MusAuditor.exe` per una prova, in
 > quella cartella restano le *tue* preferenze e i *tuoi* riassunti. Lo script se ne
 > accorge e chiede di cancellarli prima di impacchettare.
 
@@ -284,7 +289,7 @@ python assets/marchio.py           # rifà .ico, .png e il marchio della finestr
 ## Com'è fatto
 
 ```
-EchoScript.py    apre la finestra, e nient'altro
+MusAuditor.py    apre la finestra, e nient'altro
 client/          l'interfaccia: una pagina HTML, CSS e JavaScript, senza framework
   features/      le due postazioni, i modelli, il lavoro di trascrizione
 server/          il lavoro vero, che non sa che esista un'interfaccia
@@ -316,35 +321,35 @@ sul file.
 | Variabile | Default | Cosa cambia |
 |---|---|---|
 | `GROQ_API_KEY` | | la chiave, solo per il motore cloud |
-| `ECHOSCRIPT_GROQ_MODEL` | `whisper-large-v3-turbo` | quale Whisper su Groq |
-| `ECHOSCRIPT_AUDIO_LANG` | *(vuoto)* | lingua dell'audio: vuoto = riconoscila da sola |
-| `ECHOSCRIPT_WORD_TIMESTAMPS` | `1` | i tempi di ogni singola parola |
-| `ECHOSCRIPT_CHUNK_SECONDS` | `600` | durata di ogni blocco audio, solo su Groq |
-| `ECHOSCRIPT_DEVICE` | `auto` | motore locale: `auto` (GPU se c'è), `cpu`, `cuda` |
-| `ECHOSCRIPT_COMPUTE_TYPE` | *(auto)* | precisione locale: vuoto = `float16` su GPU, `int8` su processore |
-| `ECHOSCRIPT_GROQ_SUMMARY_MODEL` | `openai/gpt-oss-120b` | quale modello di testo su Groq |
-| `ECHOSCRIPT_OLLAMA_MODEL` | `qwen2.5:7b` | quale modello locale per il riassunto |
-| `ECHOSCRIPT_OLLAMA_TRANSLATE_MODEL` | *(= sopra)* | modello locale per la traduzione, se diverso |
-| `ECHOSCRIPT_OLLAMA_HOST` | `http://localhost:11434` | dove risponde Ollama |
-| `ECHOSCRIPT_OLLAMA_NUM_CTX` | `8192` | finestra di contesto: se è piccola il modello legge solo l'inizio |
-| `ECHOSCRIPT_SUMMARY_MAX_CHARS` | `12000` | oltre questa soglia una sezione si riassume a blocchi |
-| `ECHOSCRIPT_SUMMARY_CHARTS` | `1` | grafici nel riassunto (valore di partenza dell'interruttore) |
-| `ECHOSCRIPT_SUMMARY_CODE_COMMENTS` | `1` | commenti nei blocchi di codice (idem) |
-| `ECHOSCRIPT_RICH_PDF` | `1` | PDF con formule e grafici disegnati (0 = solo quello semplice) |
+| `MUSAUDITOR_GROQ_MODEL` | `whisper-large-v3-turbo` | quale Whisper su Groq |
+| `MUSAUDITOR_AUDIO_LANG` | *(vuoto)* | lingua dell'audio: vuoto = riconoscila da sola |
+| `MUSAUDITOR_WORD_TIMESTAMPS` | `1` | i tempi di ogni singola parola |
+| `MUSAUDITOR_CHUNK_SECONDS` | `600` | durata di ogni blocco audio, solo su Groq |
+| `MUSAUDITOR_DEVICE` | `auto` | motore locale: `auto` (GPU se c'è), `cpu`, `cuda` |
+| `MUSAUDITOR_COMPUTE_TYPE` | *(auto)* | precisione locale: vuoto = `float16` su GPU, `int8` su processore |
+| `MUSAUDITOR_GROQ_SUMMARY_MODEL` | `openai/gpt-oss-120b` | quale modello di testo su Groq |
+| `MUSAUDITOR_OLLAMA_MODEL` | `qwen2.5:7b` | quale modello locale per il riassunto |
+| `MUSAUDITOR_OLLAMA_TRANSLATE_MODEL` | *(= sopra)* | modello locale per la traduzione, se diverso |
+| `MUSAUDITOR_OLLAMA_HOST` | `http://localhost:11434` | dove risponde Ollama |
+| `MUSAUDITOR_OLLAMA_NUM_CTX` | `8192` | finestra di contesto: se è piccola il modello legge solo l'inizio |
+| `MUSAUDITOR_SUMMARY_MAX_CHARS` | `12000` | oltre questa soglia una sezione si riassume a blocchi |
+| `MUSAUDITOR_SUMMARY_CHARTS` | `1` | grafici nel riassunto (valore di partenza dell'interruttore) |
+| `MUSAUDITOR_SUMMARY_CODE_COMMENTS` | `1` | commenti nei blocchi di codice (idem) |
+| `MUSAUDITOR_RICH_PDF` | `1` | PDF con formule e grafici disegnati (0 = solo quello semplice) |
 
 Il motore locale usa la scheda NVIDIA se la trova, altrimenti il processore. Per
 l'accelerazione installa PyTorch con CUDA, vedi `requirements.txt`.
 
 ## Privacy
 
-- **YouTube**: informazioni sul video, copertina e audio passano da **Tor**, quindi YouTube vede l'indirizzo di un nodo Tor e non il tuo. Tor si avvia da solo all'apertura (la prima volta viene scaricato da torproject.org in `%LOCALAPPDATA%\EchoScript\tor`). Se non parte, YouTube **non** viene contattato con la connessione diretta. Groq, Ollama e i file dal disco non passano da Tor.
+- **YouTube**: informazioni sul video, copertina e audio passano da **Tor**, quindi YouTube vede l'indirizzo di un nodo Tor e non il tuo. Tor si avvia da solo all'apertura (la prima volta viene scaricato da torproject.org in `%LOCALAPPDATA%\MusAuditor\tor`). Se non parte, YouTube **non** viene contattato con la connessione diretta. Groq, Ollama e i file dal disco non passano da Tor.
 - **Locale**: l'audio **non lascia mai il computer**. Al primo uso scarica solo i pesi del modello.
 - **Cloud**: l'audio viene caricato sui server di Groq. Ottimo per video pubblici, sconsigliato per audio privati.
 - **Traduzione**: con la chiave Groq passa da Google Translate, quindi il testo va ai server di Google. In locale traduce Ollama sul tuo computer.
 
 ## Licenza e crediti
 
-EchoScript è rilasciato sotto **[PolyForm Noncommercial License 1.0.0](LICENSE)**: puoi
+Mus auditor è rilasciato sotto **[PolyForm Noncommercial License 1.0.0](LICENSE)**: puoi
 usarlo, studiarlo, modificarlo e ridistribuirlo per scopi non commerciali. Non puoi
 venderlo, offrirlo come servizio a pagamento o usarlo nell'attività di un'azienda. Se lo
 ridistribuisci devi allegare la licenza e mantenere la riga `Required Notice:`.

@@ -1,16 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
 # =============================================================================
-#  PyInstaller spec per EchoScript: interfaccia web dentro WebView2.
+#  PyInstaller spec per Mus auditor: interfaccia web dentro WebView2.
 # =============================================================================
-#  Costruzione:  pyinstaller echoscript.spec --noconfirm
-#  Risultato:    dist/EchoScript/EchoScript.exe  (+ la cartella _internal/)
+#  Costruzione:  pyinstaller musauditor.spec --noconfirm
+#  Risultato:    dist/MusAuditor/MusAuditor.exe  (+ la cartella _internal/)
 #
 #  Qui non c'e' nessun motore grafico da impacchettare: WebView2 e' gia'
 #  installato su Windows 10 e 11, quindi l'interfaccia sono sette file di testo
 #  dentro client/, qualche decina di kilobyte al posto di qualche decina
 #  megabyte.
 #
-#  Cosa entra: il punto d'ingresso (EchoScript.py), i moduli del server, la
+#  Cosa entra: il punto d'ingresso (MusAuditor.py), i moduli del server, la
 #  pagina, l'icona, e ffmpeg/ffprobe trovati nel PATH al momento della
 #  costruzione, cosi' l'eseguibile e' autosufficiente.
 #
@@ -44,8 +44,8 @@ datas = [('client', 'client')]
 # assets/ c'e' anche marchio.py, cioe' le istruzioni per disegnarle. Servono a
 # chi tocca il disegno, non al programma che gira.
 ASSETS = os.path.join(ROOT, 'assets')
-ICONA = os.path.join(ASSETS, 'EchoScript.ico')
-for _immagine in (ICONA, os.path.join(ASSETS, 'EchoScript.png')):
+ICONA = os.path.join(ASSETS, 'MusAuditor.ico')
+for _immagine in (ICONA, os.path.join(ASSETS, 'MusAuditor.png')):
     if os.path.isfile(_immagine):
         datas.append((_immagine, 'assets'))
 
@@ -92,7 +92,7 @@ for _pacchetto in ('webview', 'faster_whisper', 'av', 'ctranslate2',
         pass
 
 a = Analysis(
-    ['EchoScript.py'],
+    ['MusAuditor.py'],
     pathex=[ROOT],
     binaries=binaries,
     datas=datas,
@@ -196,7 +196,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='EchoScript',
+    name='MusAuditor',
     manifest=MANIFEST,
     debug=False,
     bootloader_ignore_signals=False,
@@ -217,5 +217,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name='EchoScript',
+    name='MusAuditor',
 )

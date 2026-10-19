@@ -39,7 +39,7 @@ def _resolve_device() -> tuple[str, str]:
     LOCAL_DEVICE 'auto' (the default) selects CUDA when a GPU is available (5-20x
     faster), otherwise CPU. An empty LOCAL_COMPUTE_TYPE auto-picks the fast,
     low-loss default for the device: float16 on GPU, int8 on CPU. Both can be
-    forced via .env (ECHOSCRIPT_DEVICE / ECHOSCRIPT_COMPUTE_TYPE)."""
+    forced via .env (MUSAUDITOR_DEVICE / MUSAUDITOR_COMPUTE_TYPE)."""
     device = LOCAL_DEVICE.strip().lower()
     if device in ("", "auto"):
         device = "cpu"

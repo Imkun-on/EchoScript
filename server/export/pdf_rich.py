@@ -498,7 +498,7 @@ def build_pdf_rich(md_text: str, out_path: str) -> bool:
     html_doc = pagina_html(md_text)
     if html_doc is None:
         return False
-    with tempfile.TemporaryDirectory(prefix="echoscript_pdf_", ignore_cleanup_errors=True) as td:
+    with tempfile.TemporaryDirectory(prefix="musauditor_pdf_", ignore_cleanup_errors=True) as td:
         html_path = os.path.join(td, "doc.html")
         with open(html_path, "w", encoding="utf-8") as f:
             f.write(html_doc)

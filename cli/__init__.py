@@ -1,6 +1,6 @@
 """L'interfaccia a riga di comando.
 
-E' l'altro modo di usare EchoScript: invece della finestra, un terminale con
+E' l'altro modo di usare Mus auditor: invece della finestra, un terminale con
 dei menu. Fa le stesse cose, chiamando gli stessi moduli di server/.
 
 Qui dentro sta solo il RACCONTO del lavoro: i menu, il banner, le domande, le

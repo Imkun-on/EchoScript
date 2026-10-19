@@ -389,7 +389,7 @@ const T_AVVIO = performance.now();
  *
  *   da 0 a 0.80   Python carica il motore. La pagina non ha modo di sapere a
  *                 che punto sia, quindi e' Python a dirglielo chiamando
- *                 avanzamentoAvvio() (vedi _carica_motore in EchoScriptApp.py);
+ *                 avanzamentoAvvio() (vedi _carica_motore in MusAuditor.py);
  *
  *   da 0.80 a 1   la pagina si monta da se': chiede i testi, riempie le
  *                 sezioni, apre la stanza giusta. Qui i passi sono un elenco

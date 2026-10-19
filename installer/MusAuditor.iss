@@ -1,21 +1,21 @@
 ; ============================================================================
-;  EchoScript - script di installazione (Inno Setup 6)
+;  Mus auditor - script di installazione (Inno Setup 6)
 ; ============================================================================
 ;  Serve Inno Setup 6.3 o superiore  (winget install JRSoftware.InnoSetup).
 ;  Su una versione piu' vecchia si ferma su ArchitecturesAllowed=x64compatible,
 ;  che prima del 6.3 si chiamava x64 e non esisteva con questo nome.
 ;
-;  Costruzione:  iscc installer\EchoScript.iss
+;  Costruzione:  iscc installer\MusAuditor.iss
 ;  Ma il modo giusto e' lanciare  .\costruisci.ps1  dalla radice del progetto:
 ;  fa prima PyInstaller e poi questo, che da solo non saprebbe cosa impacchettare.
 ;
-;  Risultato:  installer\output\EchoScript-Setup.exe
+;  Risultato:  installer\output\MusAuditor-Setup.exe
 ;              un file unico da mandare a chiunque.
 ;
 ;  COSA FA QUESTO FILE, E COSA NO
 ;  ------------------------------
-;  Non costruisce niente. PyInstaller ha gia' prodotto dist\EchoScript\ con
-;  dentro EchoScript.exe e la cartella _internal; qui quella cartella viene
+;  Non costruisce niente. PyInstaller ha gia' prodotto dist\MusAuditor\ con
+;  dentro MusAuditor.exe e la cartella _internal; qui quella cartella viene
 ;  compressa dentro un programma di installazione che la copia al posto giusto,
 ;  crea le scorciatoie, registra la voce in "App installate" e sa disinstallarsi.
 ;
@@ -25,7 +25,10 @@
 ;  desktop.
 ; ============================================================================
 
-#define NomeApp          "EchoScript"
+#define NomeApp          "Mus auditor"
+; Lo stesso nome senza lo spazio: per i file e le cartelle, dove uno spazio
+; costringe a mettere le virgolette e rompe il link fisso al download.
+#define NomeBreve        "MusAuditor"
 ; La versione puo' arrivare da fuori  (iscc /DVersione=1.1.0 ...), ed e' cosi'
 ; che la passa costruisci.ps1. Il valore qui sotto e' solo la rete di sicurezza
 ; per chi lancia iscc a mano: senza #ifndef sovrascriverebbe quello ricevuto.
@@ -33,10 +36,10 @@
   #define Versione       "3.0.0"
 #endif
 #define Autore           "Imkun-on"
-#define SitoApp          "https://github.com/Imkun-on/EchoScript"
-#define EseguibileApp    "EchoScript.exe"
+#define SitoApp          "https://github.com/Imkun-on/MusAuditor"
+#define EseguibileApp    "MusAuditor.exe"
 ; La cartella prodotta da PyInstaller, relativa a QUESTO file.
-#define Sorgente         "..\dist\EchoScript"
+#define Sorgente         "..\dist\MusAuditor"
 
 [Setup]
 ; L'identita' del programma agli occhi di Windows. Non va MAI cambiata fra una
@@ -61,7 +64,7 @@ VersionInfoVersion={#Versione}
 ; Windows ("Vuoi consentire a questa app di apportare modifiche?"): si installa
 ; per l'utente che ha fatto doppio clic, e basta.
 ;
-; Il secondo: EchoScript scrive accanto a se'. Le trascrizioni finiscono in
+; Il secondo: Mus auditor scrive accanto a se'. Le trascrizioni finiscono in
 ; results\, le preferenze in settings.json, i parziali in results\.checkpoints\.
 ; "Programmi" e' di sola lettura per un utente normale - installarlo li'
 ; significherebbe un programma che parte e poi non riesce a salvare niente.
@@ -71,7 +74,7 @@ VersionInfoVersion={#Versione}
 ;
 ; {autopf} con PrivilegesRequired=lowest vale %LOCALAPPDATA%\Programs.
 PrivilegesRequired=lowest
-DefaultDirName={autopf}\{#NomeApp}
+DefaultDirName={autopf}\{#NomeBreve}
 DefaultGroupName={#NomeApp}
 DisableProgramGroupPage=yes
 ; auto = la pagina "dove lo installo" compare la prima volta e sparisce agli
@@ -83,7 +86,7 @@ OutputDir=output
 ; Il nome NON contiene la versione, ed e' voluto.
 ;
 ; GitHub offre un indirizzo fisso che scarica un allegato dell'ultima release:
-;     .../releases/latest/download/EchoScript-Setup.exe
+;     .../releases/latest/download/MusAuditor-Setup.exe
 ; Ci si clicca e parte il download, senza passare da nessuna pagina. Ma quel
 ; giro funziona solo se il nome del file resta lo stesso fra una versione e
 ; l'altra: mettendoci dentro il numero, l'indirizzo cambierebbe a ogni release
@@ -91,8 +94,8 @@ OutputDir=output
 ;
 ; La versione non si perde: VersionInfoVersion qui sopra la scrive dentro il
 ; file, e si legge dalle proprieta' in Windows.
-OutputBaseFilename={#NomeApp}-Setup
-SetupIconFile=..\assets\EchoScript.ico
+OutputBaseFilename={#NomeBreve}-Setup
+SetupIconFile=..\assets\MusAuditor.ico
 LicenseFile=..\LICENSE
 ; lzma2/max: il pacchetto e' grosso (ffmpeg da solo sono 400 MB) e il tempo di
 ; compressione si paga una volta sola, in costruzione. Chi scarica ringrazia.
@@ -146,8 +149,16 @@ Name: "desktopicon"; Description: "{cm:CreaIconaDesktop}"; GroupDescription: "{c
 ;
 ; Non tocca niente di chi usa il programma: dentro _internal c'e' soltanto la
 ; libreria impacchettata. Le trascrizioni, le preferenze e il file .env stanno
-; un livello sopra, accanto a EchoScript.exe, e restano dove sono.
+; un livello sopra, accanto a MusAuditor.exe, e restano dove sono.
 Type: filesandordirs; Name: "{app}\_internal"
+
+; Fino alla 3.2 il programma si chiamava EchoScript. Chi aggiorna resta nella
+; stessa cartella (lo stesso AppId la ritrova), ma l'eseguibile e le
+; scorciatoie hanno un nome nuovo: senza queste righe resterebbero quelli
+; vecchi, e le scorciatoie punterebbero a un programma che non parte piu'.
+Type: files; Name: "{app}\EchoScript.exe"
+Type: files; Name: "{group}\EchoScript.lnk"
+Type: files; Name: "{autodesktop}\EchoScript.lnk"
 
 [Dirs]
 ; Creata subito, vuota, cosi' la scorciatoia "Trascrizioni salvate" del menu
@@ -155,10 +166,10 @@ Type: filesandordirs; Name: "{app}\_internal"
 Name: "{app}\results"
 
 [Files]
-; Tutta dist\EchoScript\, cosi' com'e'.
+; Tutta dist\MusAuditor\, cosi' com'e'.
 ;
 ; Gli Excludes sono la seconda rete di sicurezza (la prima e' in costruisci.ps1):
-; se qualcuno ha aperto dist\EchoScript.exe per una prova, in quella cartella
+; se qualcuno ha aperto dist\MusAuditor.exe per una prova, in quella cartella
 ; sono rimaste le SUE preferenze e le SUE trascrizioni, e da qui finirebbero
 ; addosso a chiunque installi il programma. La barra iniziale ancora le al
 ; livello piu' alto della cartella sorgente.
@@ -172,9 +183,9 @@ Source: "{#Sorgente}\*"; DestDir: "{app}"; \
 ; AppUserModelID: l'identita' con cui il programma si presenta a Windows. Deve
 ; coincidere con APP_ID in server/utils/notifica.py, altrimenti le notifiche di
 ; fine lavoro non compaiono: Windows non saprebbe a chi attribuirle.
-Name: "{group}\{#NomeApp}";         Filename: "{app}\{#EseguibileApp}"; IconFilename: "{app}\_internal\assets\EchoScript.ico"; AppUserModelID: "EchoScript.App"
+Name: "{group}\{#NomeApp}";         Filename: "{app}\{#EseguibileApp}"; IconFilename: "{app}\_internal\assets\MusAuditor.ico"; AppUserModelID: "MusAuditor.App"
 Name: "{group}\{cm:ApriRisultati}"; Filename: "{app}\results"
-Name: "{autodesktop}\{#NomeApp}";   Filename: "{app}\{#EseguibileApp}"; IconFilename: "{app}\_internal\assets\EchoScript.ico"; Tasks: desktopicon
+Name: "{autodesktop}\{#NomeApp}";   Filename: "{app}\{#EseguibileApp}"; IconFilename: "{app}\_internal\assets\MusAuditor.ico"; Tasks: desktopicon
 
 [Run]
 ; WebView2 per primo: se manca, la finestra del programma non si aprirebbe.
@@ -271,6 +282,9 @@ begin
       (vedi server/utils/tor.py). Non contiene niente di chi usa il programma,
       quindi se ne va senza chiedere. La cartella che lo contiene si toglie
       solo se e' rimasta vuota. }
+    DelTree(ExpandConstant('{localappdata}\MusAuditor\tor'), True, True, True);
+    RemoveDir(ExpandConstant('{localappdata}\MusAuditor'));
+    { Quella di quando si chiamava EchoScript, se tor.py non l'ha gia' spostata. }
     DelTree(ExpandConstant('{localappdata}\EchoScript\tor'), True, True, True);
     RemoveDir(ExpandConstant('{localappdata}\EchoScript'));
 

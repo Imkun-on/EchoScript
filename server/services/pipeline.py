@@ -187,7 +187,7 @@ def _set_engine_lang(options: dict) -> None:
     if m:
         settings.OLLAMA_MODEL = m
         # La traduzione riusa il modello del riassunto, salvo .env esplicito.
-        if not os.environ.get("ECHOSCRIPT_OLLAMA_TRANSLATE_MODEL", "").strip():
+        if not os.environ.get("MUSAUDITOR_OLLAMA_TRANSLATE_MODEL", "").strip():
             settings.OLLAMA_TRANSLATE_MODEL = m
     # Modello Groq (cloud) scelto in GUI: lo stesso ruolo, ma sui server.
     # Vale solo quando il backend è Groq: con backend locale il cloud non
@@ -335,7 +335,7 @@ def fetch_groq_limits(api_key: str | None = None) -> dict:
     {checked_at: 'HH:MM', items: [...], raw: {header: value}}. Raises EngineError
     on a missing/invalid key or a network failure (message ready to show)."""
     client = make_groq_client(api_key)  # validates the key, clear errors
-    with tempfile.TemporaryDirectory(prefix="echoscript_lim_", ignore_cleanup_errors=True) as workdir:
+    with tempfile.TemporaryDirectory(prefix="musauditor_lim_", ignore_cleanup_errors=True) as workdir:
         try:
             probe = _silent_probe_audio(workdir)
         except Exception as e:
@@ -627,7 +627,7 @@ def transcribe_only(source: str, options: dict, on_progress=_noop, resume: bool 
 def _transcribe_body(source, options, on_progress, meta, client, backend, model,
                      source_kind, audio_lang, engine_label, cp, local_cp):
     """Il corpo di transcribe_only: scarica/legge, trascrive e restituisce."""
-    with tempfile.TemporaryDirectory(prefix="echoscript_", ignore_cleanup_errors=True) as workdir:
+    with tempfile.TemporaryDirectory(prefix="musauditor_", ignore_cleanup_errors=True) as workdir:
         if source_kind == "local":
             audio_path = source  # fed directly to ffmpeg / whisper
         else:
@@ -737,7 +737,7 @@ def continue_local_from_groq(source: str, options: dict, on_progress=_noop):
     }
     engine_label = f"Groq + Locale / faster-whisper {model}"
 
-    with tempfile.TemporaryDirectory(prefix="echoscript_", ignore_cleanup_errors=True) as workdir:
+    with tempfile.TemporaryDirectory(prefix="musauditor_", ignore_cleanup_errors=True) as workdir:
         if source_kind == "local":
             audio_path = source
         else:

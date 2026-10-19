@@ -2,7 +2,7 @@
 
 Perche' esiste un modulo apposta per due funzioni
     Perche' la finestra e' una sola e serve a due padroni che non si conoscono.
-    La crea il punto d'ingresso (``EchoScript.py``); a parlarci dentro sono i
+    La crea il punto d'ingresso (``MusAuditor.py``); a parlarci dentro sono i
     metodi che rispondono alla pagina (``api.py``) e i thread che lavorano in
     sottofondo. Se la tenesse uno dei due, l'altro dovrebbe importarlo, e
     siccome si importano gia' a vicenda si chiuderebbe un cerchio.

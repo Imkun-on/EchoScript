@@ -338,9 +338,9 @@ TESTI: dict[str, str] = {
                         'si può riprendere.',
 
     # Le notifiche di Windows a fine lavoro, quando si stava guardando altro.
-    'notify.done.title': 'EchoScript: lavoro completato',
-    'notify.batch.title': 'EchoScript: coda completata',
-    'notify.error.title': 'EchoScript: il lavoro si è fermato',
+    'notify.done.title': 'Mus auditor: lavoro completato',
+    'notify.batch.title': 'Mus auditor: coda completata',
+    'notify.error.title': 'Mus auditor: il lavoro si è fermato',
 
     'sumlocal.title':   'Riassunto interrotto',
     'sumlocal.msg':     'I crediti Groq sono terminati durante il riassunto, che è '

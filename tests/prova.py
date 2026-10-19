@@ -799,7 +799,7 @@ def main() -> None:
         sys.exit(0 if tutto_bene else 1)
 
     # Il PDF, con lo stesso codice dei riassunti.
-    uscita = os.path.join(tempfile.gettempdir(), "prova_disegni_echoscript.pdf")
+    uscita = os.path.join(tempfile.gettempdir(), "prova_disegni_musauditor.pdf")
     print("\nCreo il PDF…")
     if pdf_rich.build_pdf_rich("\n".join(righe), uscita):
         print(f"PDF creato: {uscita}")

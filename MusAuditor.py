@@ -1,4 +1,4 @@
-"""EchoScript: il punto da cui parte tutto.
+"""Mus auditor: il punto da cui parte tutto.
 
 Cosa fa questo file
     Poco, ed e' voluto. Apre la finestra con dentro la pagina e avvia il giro
@@ -142,11 +142,11 @@ def main() -> None:
     threading.Thread(target=api.carica_motore, daemon=True).start()
 
     # Prima di aprire la finestra: dire a Windows che questo processo e'
-    # EchoScript. Serve alle notifiche di fine lavoro (vedi utils/notifica.py).
+    # Mus auditor. Serve alle notifiche di fine lavoro (vedi utils/notifica.py).
     notifica.dichiara_identita()
 
     finestra = webview.create_window(
-        'EchoScript',
+        'Mus auditor',
         _risorsa('client', 'index.html'),
         js_api=api.Api(),
         # Massimizzata, non a schermo intero, e la differenza si vede subito.
@@ -185,7 +185,7 @@ def main() -> None:
     # L'icona della finestra. Su Windows pywebview, se non gliela si passa, la
     # estrae dall'eseguibile: lanciando i sorgenti finirebbe quella di
     # python.exe, quindi gliela si indica sempre quando c'e'.
-    icona = _risorsa('assets', 'EchoScript.ico')
+    icona = _risorsa('assets', 'MusAuditor.ico')
     webview.start(icon=icona if os.path.isfile(icona) else None)
 
 

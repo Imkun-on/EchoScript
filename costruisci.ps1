@@ -1,6 +1,6 @@
 <#
 =============================================================================
- EchoScript - dal codice al file da mandare a qualcuno, in un comando solo.
+ Mus auditor - dal codice al file da mandare a qualcuno, in un comando solo.
 =============================================================================
  Uso:
      .\costruisci.ps1
@@ -8,11 +8,11 @@
      .\costruisci.ps1 -SoloInstallatore     (salta PyInstaller, riusa dist\)
 
  Risultato:
-     installer\output\EchoScript-Setup.exe
+     installer\output\MusAuditor-Setup.exe
 
  I due passaggi, e perche' sono due
  ----------------------------------
- 1. PyInstaller legge il codice Python e ne fa un programma vero: EchoScript.exe
+ 1. PyInstaller legge il codice Python e ne fa un programma vero: MusAuditor.exe
     piu' la cartella _internal con dentro l'interprete e tutte le librerie. Da
     qui in poi Python sul computer di chi lo usa non serve piu'.
 
@@ -30,10 +30,10 @@ param(
     # Finisce nella voce di "App installate" e nelle proprieta' dell'eseguibile.
     # Va alzata a ogni versione pubblicata.
     #
-    # NON finisce nel nome del file: quello resta sempre EchoScript-Setup.exe,
+    # NON finisce nel nome del file: quello resta sempre MusAuditor-Setup.exe,
     # perche' l'indirizzo di scaricamento diretto pubblicato nel README funziona
     # solo se il nome non cambia fra una versione e l'altra. La spiegazione per
-    # esteso sta in installer\EchoScript.iss, accanto a OutputBaseFilename.
+    # esteso sta in installer\MusAuditor.iss, accanto a OutputBaseFilename.
     [string] $Versione = '3.0.0',
 
     # Per quando si sta lavorando sullo script di installazione e la cartella
@@ -48,9 +48,9 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $Radice     = $PSScriptRoot
-$Dist       = Join-Path $Radice 'dist\EchoScript'
-$Spec       = Join-Path $Radice 'echoscript.spec'
-$Iss        = Join-Path $Radice 'installer\EchoScript.iss'
+$Dist       = Join-Path $Radice 'dist\MusAuditor'
+$Spec       = Join-Path $Radice 'musauditor.spec'
+$Iss        = Join-Path $Radice 'installer\MusAuditor.iss'
 $Uscita     = Join-Path $Radice 'installer\output'
 
 function Titolo($testo) { Write-Host "`n=== $testo ===" -ForegroundColor Cyan }
@@ -102,7 +102,7 @@ Nota "Inno Setup: $Iscc"
 # ---------------------------------------------------------------------------
 if ($SoloInstallatore) {
     Titolo 'PyInstaller (saltato: -SoloInstallatore)'
-    if (-not (Test-Path (Join-Path $Dist 'EchoScript.exe'))) {
+    if (-not (Test-Path (Join-Path $Dist 'MusAuditor.exe'))) {
         throw "Non c'e' niente da riusare in $Dist. Rilancia senza -SoloInstallatore."
     }
 } else {
@@ -123,14 +123,14 @@ if ($SoloInstallatore) {
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller ha fallito: vedi il registro qui sopra.' }
 }
 
-if (-not (Test-Path (Join-Path $Dist 'EchoScript.exe'))) {
-    throw "PyInstaller non ha prodotto $Dist\EchoScript.exe"
+if (-not (Test-Path (Join-Path $Dist 'MusAuditor.exe'))) {
+    throw "PyInstaller non ha prodotto $Dist\MusAuditor.exe"
 }
 
 # ---------------------------------------------------------------------------
 # 2. Ripulire dist\ da cio' che non deve essere spedito
 # ---------------------------------------------------------------------------
-# EchoScript scrive accanto a se'. Se qualcuno ha aperto dist\EchoScript.exe
+# Mus auditor scrive accanto a se'. Se qualcuno ha aperto dist\MusAuditor.exe
 # per una prova - e prima o poi capita sempre - in quella cartella sono rimaste
 # le SUE preferenze e le SUE trascrizioni. Inno Setup impacchetta la cartella
 # intera: senza questa pulizia finirebbero addosso a ogni persona che installa
@@ -170,7 +170,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Inno Setup ha fallito: vedi il registro qui so
 # ---------------------------------------------------------------------------
 # 4. Il risultato
 # ---------------------------------------------------------------------------
-$Prodotto = Join-Path $Uscita 'EchoScript-Setup.exe'
+$Prodotto = Join-Path $Uscita 'MusAuditor-Setup.exe'
 if (-not (Test-Path $Prodotto)) { throw "Atteso $Prodotto, non trovato." }
 
 $Mb = [math]::Round((Get-Item $Prodotto).Length / 1MB, 1)
@@ -182,5 +182,5 @@ Write-Host "    $Mb MB" -ForegroundColor Green
 Write-Host "    SHA256  $Impronta" -ForegroundColor DarkGray
 Write-Host ''
 Nota 'E'' il file da allegare alla release. Chi lo riceve fa doppio clic,'
-Nota 'tre volte Avanti, e si ritrova l''icona di EchoScript sul desktop.'
+Nota 'tre volte Avanti, e si ritrova l''icona di Mus auditor sul desktop.'
 Write-Host ''

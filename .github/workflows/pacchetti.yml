@@ -1,5 +1,5 @@
 # =============================================================================
-#  Costruisce i pacchetti di EchoScript su computer che non sono il tuo.
+#  Costruisce i pacchetti di Mus auditor su computer che non sono il tuo.
 # =============================================================================
 #  Il problema che risolve
 #  -----------------------
@@ -158,8 +158,8 @@ jobs:
       - name: Conserva il pacchetto
         uses: actions/upload-artifact@v4
         with:
-          name: EchoScript-Setup-${{ steps.versione.outputs.valore }}
-          path: installer/output/EchoScript-Setup.exe
+          name: MusAuditor-Setup-${{ steps.versione.outputs.valore }}
+          path: installer/output/MusAuditor-Setup.exe
           retention-days: 30
           compression-level: 0   # e' gia' compresso da Inno Setup, rifarlo non toglie niente
 
@@ -178,8 +178,8 @@ jobs:
         run: |
           $v = '${{ steps.versione.outputs.valore }}'
           # Il nome del file non contiene la versione: vedi la spiegazione in
-          # installer\EchoScript.iss, accanto a OutputBaseFilename.
-          $file = 'installer\output\EchoScript-Setup.exe'
+          # installer\MusAuditor.iss, accanto a OutputBaseFilename.
+          $file = 'installer\output\MusAuditor-Setup.exe'
           $impronta = (Get-FileHash $file -Algorithm SHA256).Hash
           $peso = '{0:N1}' -f ((Get-Item $file).Length / 1MB)
           # Le note si costruiscono riga per riga invece che con un blocco di
@@ -189,9 +189,9 @@ jobs:
           # regole non possono valere insieme. Un elenco di righe non ha bordi
           # e si rientra quanto serve.
           $righe = @(
-            "## EchoScript $v",
+            "## Mus auditor $v",
             "",
-            "Scarica **EchoScript-Setup.exe** qui sotto e fai doppio clic.",
+            "Scarica **MusAuditor-Setup.exe** qui sotto e fai doppio clic.",
             "Non serve essere amministratore: si installa per il tuo account e",
             "mette l'icona sul desktop.",
             "",
@@ -219,5 +219,5 @@ jobs:
               Write-Host "La release v$v c'e' gia': aggiorno l'allegato."
               gh release upload "v$v" $file --clobber
           } else {
-              gh release create "v$v" $file --title "EchoScript $v" --notes-file note.md
+              gh release create "v$v" $file --title "Mus auditor $v" --notes-file note.md
           }
